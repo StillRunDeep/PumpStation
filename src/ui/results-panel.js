@@ -148,6 +148,9 @@ function renderCatalogMatch(r) {
   const icon = isTolerant ? '⚠' : '✔'
   const title = isTolerant ? '选型结果（扬程偏差在 ISO 9906 2B ±3% 范围内）' : '选型结果'
 
+  const dm = p.dimensions_mm
+  const h_total = (dm.h1 || 0) + (dm.h2 || 0)
+
   return `
     <div class="result-summary ${cls}" style="margin-top:8px">
       <div style="font-weight:700;margin-bottom:8px">${icon} ${title}</div>
@@ -157,6 +160,7 @@ function renderCatalogMatch(r) {
       <div style="font-weight:600;font-size:11px;color:#666;margin:8px 0 4px">选型实际参数</div>
       ${kvRow('制造商 / 系列', p.manufacturer + ' · ' + p.series)}
       ${kvRow('型号', p.model)}
+      ${kvRow('安装尺寸 a×b×h', dm.a + '×' + dm.b + '×' + h_total + ' mm')}
       ${kvRow('曲线扬程 H', fmt(m.H_m, 2) + ' m')}
       ${kvRow('实际效率 η', fmt(m.eta_pct, 1) + ' %')}
       ${kvRow('实际轴功率 P', fmt(m.P_kW, 1) + ' kW')}

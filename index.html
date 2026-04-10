@@ -17,12 +17,12 @@
   <section class="input-panel">
     <h2>设计参数输入</h2>
 
-    <!-- 基础参数：五个核心设计参数直接展示 -->
+    <!-- 基础参数 -->
     <div class="form-grid">
       <div class="form-group">
         <label>水泵最高总排水量 Q_total（m³/s）</label>
         <input type="number" id="inp-Q-total" min="0.1" step="0.1" value="3.0">
-        <span class="hint">总排水量（多泵合计），直除N得单泵流量；单泵0.5-3.0m³/s（手册附录）</span>
+        <span class="hint">总排水量（多泵合计），直除N得单泵流量</span>
       </div>
       <div class="form-group">
         <label>设计水缸容量 V_design（m³）</label>
@@ -32,10 +32,8 @@
       <div class="form-group">
         <label>设计水缸深度 D（m）</label>
         <input type="number" id="inp-D" step="0.1" value="16.0">
-        <span class="hint">Z_top = Z_bottom + D；案例16m（手册典型10-20m）</span>
+        <span class="hint">Z_top = Z_bottom + D</span>
       </div>
-    </div>
-    <div class="form-grid">
       <div class="form-group">
         <label>池底标高 Z_bottom（mPD）</label>
         <input type="number" id="inp-z-bottom" step="0.1" value="-13.0">
@@ -45,6 +43,16 @@
         <label>主出水管标高 Z_discharge（mPD）</label>
         <input type="number" id="inp-z-discharge" step="0.1" value="3.0">
         <span class="hint">主出水管高度，通常与Z_top相近</span>
+      </div>
+      <div class="form-group">
+        <label>工作泵台数 N（台）</label>
+        <input type="number" id="inp-N" min="1" max="6" step="1" value="2">
+        <span class="hint">不含备用泵；手册≥1台，惯例2～6台</span>
+      </div>
+      <div class="form-group">
+        <label>备用泵台数 N_spare（台）</label>
+        <input type="number" id="inp-N-spare" min="0" max="3" step="1" value="0">
+        <span class="hint">无备用时工作泵应 ≥ 2 台</span>
       </div>
     </div>
 
@@ -68,16 +76,6 @@
       <!-- Tab 1: 水池参数 -->
       <div class="tab-panel active" id="tab-pool" role="tabpanel">
         <div class="form-grid adv-grid">
-          <div class="form-group">
-            <label>工作泵台数 N（台）</label>
-            <input type="number" id="inp-N" min="1" max="6" step="1" value="2">
-            <span class="hint">不含备用泵；手册≥1台，惯例2～6台（案例2台）</span>
-          </div>
-          <div class="form-group">
-            <label>备用泵台数 N_spare（台）</label>
-            <input type="number" id="inp-N-spare" min="0" max="3" step="1" value="0">
-            <span class="hint">无备用泵；无备用时工作泵应 ≥ 2 台，互为备用</span>
-          </div>
           <div class="form-group">
             <label>每小时允许启动次数 Z（次/小时）</label>
             <input type="number" id="inp-Z" min="4" max="12" step="1" value="8">

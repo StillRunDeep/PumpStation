@@ -63,7 +63,6 @@ export function initTopologyEditor(containerId, onConfirmCallback) {
 
   wrap.innerHTML = `
     <div class="topo-toolbar" id="topo-toolbar">
-      <button class="topo-btn" data-action="add-pump">＋ 水泵</button>
       <button class="topo-btn" data-action="add-cv">＋ 止回阀</button>
       <button class="topo-btn" data-action="add-gv">＋ 电动闸阀</button>
       <button class="topo-btn" data-action="add-fm">＋ 电磁流量计</button>
@@ -116,7 +115,6 @@ function _bindToolbar() {
     const btn = e.target.closest('[data-action]')
     if (!btn) return
     const action = btn.dataset.action
-    if (action === 'add-pump')     { _topology = addDevice(_topology, 'pump', 'wet_well'); _render() }
     if (action === 'add-cv')       { _topology = addDevice(_topology, 'check_valve', 'pump_room'); _render() }
     if (action === 'add-gv')       { _topology = addDevice(_topology, 'gate_valve', 'pump_room'); _render() }
     if (action === 'add-fm')       { _topology = addDevice(_topology, 'flowmeter', 'pump_room'); _render() }

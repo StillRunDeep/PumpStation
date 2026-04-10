@@ -231,6 +231,23 @@ export function runPumpSpec({
     : []
   const catalogIsTolerant = catalogMatches.length === 0 && catalogMatchesTolerant.length > 0
 
+  // ── 泵安装尺寸（a×b×h）───────────────────────────────────
+  const displayMatches = catalogMatches.length > 0 ? catalogMatches : catalogMatchesTolerant
+  if (displayMatches.length > 0) {
+    rows.push(stepRow('═══════════ 泵安装尺寸 ═══════════', '', '', ''))
+    for (const match of displayMatches) {
+      const { pump } = match
+      const { dimensions_mm } = pump
+      const h_total = (dimensions_mm.h1 || 0) + (dimensions_mm.h2 || 0)
+      rows.push(stepRow(
+        `${pump.series} ${pump.model.split(' ').pop()}`,
+        `a×b×h`,
+        `${dimensions_mm.a}×${dimensions_mm.b}×${h_total}`,
+        'mm'
+      ))
+    }
+  }
+
   // ── 输出结果 ──────────────────────────────────────────────
 
   return {
