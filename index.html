@@ -30,9 +30,14 @@
         <span class="hint">调蓄池有效容积</span>
       </div>
       <div class="form-group">
-        <label>设计水缸深度 D（m）</label>
-        <input type="number" id="inp-D" step="0.1" value="16.0">
-        <span class="hint">Z_top = Z_bottom + D</span>
+        <label>池深 D（m）</label>
+        <input type="number" id="inp-D" step="0.1" value="16.0" placeholder="留空则由面积反推">
+        <span class="hint">Z_top = Z_bottom + D；留空时，D 由 V_design ÷ A_base 计算</span>
+      </div>
+      <div class="form-group">
+        <label>池底面积 A_base（m²）</label>
+        <input type="number" id="inp-A-base" step="10" placeholder="留空则由深度反推">
+        <span class="hint">调蓄池底部面积；留空时，A 由 V_design ÷ D 计算</span>
       </div>
       <div class="form-group">
         <label>池底标高 Z_bottom（mPD）</label>
@@ -110,6 +115,11 @@
             <label>电机功率覆盖值（kW）</label>
             <input type="number" id="inp-motor" min="1" step="1" placeholder="默认：由 AG1-2 计算">
             <span class="hint">留空则使用 AG1-2 计算值；填入则强制覆盖（影响泵间距）</span>
+          </div>
+          <div class="form-group">
+            <label>停泵水位 Z_stop 覆盖（mPD）</label>
+            <input type="number" id="inp-Z-stop-override" step="0.1" placeholder="留空 = 由 AG1-1 计算（Z_bottom）">
+            <span class="hint">仅用于单独测试 AG1-2 水泵选型；覆盖时 AG1-1 的 Z_stop 被忽略</span>
           </div>
           <div class="form-group">
             <label>出水管总长 L（m）</label>
@@ -206,6 +216,11 @@
             <label>出水管设计流速 v_out（m/s）</label>
             <input type="number" id="inp-v-out" min="1.0" max="2.5" step="0.1" value="1.5">
             <span class="hint">经济流速1.5-3.0m/s（工程惯例值参考）</span>
+          </div>
+          <div class="form-group">
+            <label>总扬程 H_total 覆盖（m）</label>
+            <input type="number" id="inp-H-total-override" min="1" step="0.1" placeholder="留空 = 由 AG1-2 计算">
+            <span class="hint">仅用于单独测试 AG1-3 管道尺寸；覆盖时 AG1-2 的 H_total 被忽略</span>
           </div>
         </div>
       </div>

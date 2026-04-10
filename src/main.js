@@ -100,7 +100,8 @@ async function runCalculation() {
   const ag1Params = {
     V_design: ag00.V_design,
     Z_bottom: ag00.Z_bottom,
-    D:        ag00.D,
+    D:        (() => { const v = parseFloat(document.getElementById('inp-D').value); return isNaN(v) ? null : v; })(),
+    A_base:   (() => { const v = parseFloat(document.getElementById('inp-A-base').value); return isNaN(v) ? null : v; })(),
     N:        ag00.N,
     Z:        ag00.Z,
     Q_pump:   ag00.Q_pump,  // 单泵设计流量（m³/s）
@@ -111,9 +112,10 @@ async function runCalculation() {
   document.getElementById('card-ag11').innerHTML = renderPoolDepth(ag1Result)
 
   // ── AG1-2: 水泵计算及选型 ───────────────────────────────────────────
+  const Z_stop_override = (() => { const v = parseFloat(document.getElementById('inp-Z-stop-override').value); return isNaN(v) ? null : v; })()
   const ag2Params = {
     Q_single:    ag00.Q_single,
-    Z_stop:      ag1Result.Z_stop,
+    Z_stop:      Z_stop_override !== null ? Z_stop_override : ag1Result.Z_stop,
     Z_discharge: ag00.Z_discharge,
     L:           parseFloat(document.getElementById('inp-pipe-len').value) || 50,
     n:           parseFloat(document.getElementById('inp-n').value) || 0.013,
@@ -131,12 +133,13 @@ async function runCalculation() {
     const totalFlow = ag00.mode === 'direct'
       ? (ag00.Q_total * 3600)
       : (ag00.Q || ag00.Q_total * 3600)
+    const H_total_override = (() => { const v = parseFloat(document.getElementById('inp-H-total-override').value); return isNaN(v) ? null : v; })()
 
     const ag13Params = {
       Q_pump:    ag2Result.Q_pump,        // 单泵设计流量（m³/s）
       Q:         totalFlow,                // 泵站总流量（m³/h）
       N:         ag00.N,                  // 工作泵台数
-      H_total:   ag2Result.H_total,       // 总扬程（m）
+      H_total:   H_total_override !== null ? H_total_override : ag2Result.H_total,       // 总扬程（m）
       Z_stop:    ag1Result.Z_stop,        // 停泵水位（mPD）
       H_s:       ag2Result.H_s,           // 淹没深度（m），来自AG1-2
       v_in:      parseFloat(document.getElementById('inp-v-in').value) || 1.0,

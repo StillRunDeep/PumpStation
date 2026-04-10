@@ -265,17 +265,17 @@ export function runUserParams({
   // ── 输出结果 ──────────────────────────────────────────────
 
   rows.push(stepRow('═══════════ 几何参数 ═══════════', '', '', ''))
-  rows.push(stepRow('池底标高 Z_bottom', '', Z_bottom, 'mPD', ''))
+  rows.push(stepRow('池底标高 Z_bottom', '用户输入', Z_bottom, 'mPD', ''))
   if (Z_sump !== undefined && Z_sump !== null && !isNaN(Z_sump))
-    rows.push(stepRow('集水坑底标高 Z_sump', `手册第14.6.3节`, Z_sump, 'mPD', '应小于Z_bottom'))
-  rows.push(stepRow('设计水缸深度 D', '', D, 'm', ''))
+    rows.push(stepRow('集水坑底标高 Z_sump', '来自高级设置', Z_sump, 'mPD', '应小于Z_bottom'))
+  rows.push(stepRow('设计水缸深度 D', '用户输入', D, 'm', ''))
   rows.push(stepRow('池顶标高 Z_top', `Z_bottom + D = ${Z_bottom} + ${D}`, Z_top, 'mPD', '计算值'))
-  rows.push(stepRow('排放口标高 Z_discharge', '', Z_discharge, 'mPD', ''))
+  rows.push(stepRow('排放口标高 Z_discharge', '用户输入', Z_discharge, 'mPD', ''))
 
   rows.push(stepRow('═══════════ 水泵配置 ═══════════', '', '', ''))
-  rows.push(stepRow('工作泵台数 N', `手册第14.6.2节`, N, '台', `范围：${USER_PARAMS_LIMITS.N.min}-${USER_PARAMS_LIMITS.N.max}`))
-  rows.push(stepRow('备用泵台数 N_spare', `手册第14.6.2节`, N_spare, '台', `范围：${USER_PARAMS_LIMITS.N_spare.min}-${USER_PARAMS_LIMITS.N_spare.max}`))
-  rows.push(stepRow('每小时允许启动次数 Z', `手册第14.6.1节`, Z, '次/小时', `范围：${USER_PARAMS_LIMITS.Z.min}-${USER_PARAMS_LIMITS.Z.max}`))
+  rows.push(stepRow('工作泵台数 N', '高级设置，手册规定 1~6 台', N, '台'))
+  rows.push(stepRow('备用泵台数 N_spare', '高级设置，惯例 0~3 台', N_spare, '台'))
+  rows.push(stepRow('每小时允许启动次数 Z', '高级设置，手册规定 4~12 次/小时', Z, '次/小时'))
 
   if (mode === 'direct') {
     rows.push(stepRow('═══════════ 流量参数（直接输入） ═══════════', '', '', ''))

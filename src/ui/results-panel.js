@@ -63,6 +63,69 @@ export function renderAG00(r) {
   `
 }
 
+// 渲染几何模式计算行（带公式显示）
+function renderGeoModeRow(r) {
+  // 从 rows 中找到几何模式那一条
+  const geoRow = r.rows?.find(row => row.includes('几何模式'))
+  if (!geoRow) return ''
+
+  // stepRow 格式：<tr><td>几何模式</td><td class="formula">已知 D，推算 A_base</td><td class="value">D = 16.00 m，A_base = V_design / D = 75000 / 16.00 =&nbsp;<small>m²</small></td></tr>
+  // 提取 formula 和 value 部分
+  const formulaMatch = geoRow.match(/<td class="formula">([^<]*)<\/td>/)
+  const valueMatch = geoRow.match(/<td class="value">([^<]*)<\/td>/)
+  const formula = formulaMatch ? formulaMatch[1] : ''
+  const valueHtml = valueMatch ? valueMatch[1] : ''
+
+  // 解析 valueHtml 中的数值和单位（格式：数值&nbsp;<small>单位</small>）
+  const valMatch = valueHtml.match(/^(.*?)(?:&nbsp;<small>(.*?)<\/small>)?$/)
+  const valPart = valMatch ? valMatch[1].trim() : ''
+  const valUnit = valMatch ? (valMatch[2] || '') : ''
+
+  // 判断是已知 D 模式还是已知 A_base 模式
+  const modeD = formula.includes('已知 D')
+
+  // 从 valueHtml 中提取 "数值 = 结果" 部分
+  // D模式 valueHtml: "D = 16.00 m，A_base = V_design / D = 75000 / 16.00 =&nbsp;<small>m²</small>"
+  // A_base模式 valueHtml: "A_base = 4687.5 m²，D = V_design / A_base = 75000 / 4687.5 =&nbsp;<small>m</small>"
+  let resultNum, resultUnit, calcFormula
+  if (modeD) {
+    // 已知 D → 计算 A_base
+    // 提取最后的 "= 数字" 部分作为结果
+    const lastEqMatch = valPart.match(/=\s*([\d.]+)\s*$/)
+    resultNum = lastEqMatch ? lastEqMatch[1] : ''
+    resultUnit = valUnit
+    // 提取完整的计算式
+    const parts = valPart.split(',')
+    calcFormula = parts.length > 1 ? parts[1].trim().replace(/\s*=\s*[\d.]+\s*$/, '') : valPart
+  } else {
+    // 已知 A_base → 计算 D
+    const lastEqMatch = valPart.match(/=\s*([\d.]+)\s*$/)
+    resultNum = lastEqMatch ? lastEqMatch[1] : ''
+    resultUnit = valUnit
+    // 提取完整的计算式
+    const parts = valPart.split(',')
+    calcFormula = parts.length > 1 ? parts[1].trim().replace(/\s*=\s*[\d.]+\s*$/, '') : valPart
+  }
+
+  if (modeD) {
+    // 已知 D → 显示池底面积
+    return `<div style="margin:4px 0">
+      <div style="font-weight:600;font-size:12px;color:#333">几何模式</div>
+      <div style="font-size:11px;color:#555;margin-left:8px">池底面积</div>
+      <div style="font-size:11px;font-family:monospace;color:#666;margin-left:16px">${calcFormula}</div>
+      <div style="font-size:13px;font-weight:600;color:#222;margin-left:16px">${resultNum}&nbsp;<small>${resultUnit}</small></div>
+    </div>`
+  } else {
+    // 已知 A_base → 显示总池深
+    return `<div style="margin:4px 0">
+      <div style="font-weight:600;font-size:12px;color:#333">几何模式</div>
+      <div style="font-size:11px;color:#555;margin-left:8px">总池深</div>
+      <div style="font-size:11px;font-family:monospace;color:#666;margin-left:16px">${calcFormula}</div>
+      <div style="font-size:13px;font-weight:600;color:#222;margin-left:16px">${resultNum}&nbsp;<small>${resultUnit}</small></div>
+    </div>`
+  }
+}
+
 // AG1-1：污水池计算 → 渲染 V_required, Z_stop, startLevels 等
 export function renderPoolDepth(r) {
   const hasErrors = r.errors && r.errors.length > 0
@@ -79,37 +142,33 @@ export function renderPoolDepth(r) {
     r.warnings.forEach(w => { msgs += `<li><span class="icon wrn">⚠</span> <span class="wrn">${w}</span></li>` })
   }
 
-  const lvlRows = (r.startLevels || []).map((lv) =>
-    `<tr><td>水泵 ${lv.pump}</td><td>${fmt(lv.level, 2)} mPD</td></tr>`
-  ).join('')
-
-  const staggerTable = `
-    <p style="font-size:12px;font-weight:600;color:#555;margin:10px 0 4px">梯级启泵水位（R-CL-01）</p>
-    <table class="steps-table">
-      <thead><tr><th>水泵</th><th>启泵水位</th></tr></thead>
-      <tbody>
-        ${lvlRows}
-        <tr><td>统一停泵水位</td><td>${fmt(r.Z_stop, 2)} mPD</td></tr>
-        <tr><td>高水位报警</td><td>${fmt(r.Z_alarm_high, 2)} mPD</td></tr>
-      </tbody>
-    </table>
-  `
-
   return `
     <div style="margin-bottom:12px">
       <span style="font-weight:700;color:var(--color-${status})">${icon} ${label}</span>
     </div>
     ${msgs ? `<ul class="msg-list">${msgs}</ul>` : ''}
-    ${r.valid !== false ? `<details style="margin-bottom:14px"><summary style="cursor:pointer;color:#555;font-size:12px;margin-bottom:6px">计算过程（点击展开）</summary>${stepsTable(r.rows)}</details>` : ''}
+    ${r.valid !== false ? `<details style="margin-bottom:14px"><summary style="cursor:pointer;color:#555;font-size:12px;margin-bottom:6px">计算过程（点击展开）</summary>${stepsTable(r.rows.filter(row => {
+      const skip = ['容积校验', '水位关系', '超高校验', '多泵启动水位', '═══════════ 水位关系校验 ═══════════']
+      return !skip.some(k => row.name?.includes(k))
+    }))}</details>` : ''}
     ${r.valid !== false ? `
     <div class="result-summary pass">
+      <p style="font-size:11px;font-weight:700;color:#555;margin:6px 0 2px;border-bottom:1px solid #ddd;padding-bottom:2px">═══ 几何参数（Geometry）═══════</p>
+      ${renderGeoModeRow(r)}
+      <p style="font-size:11px;font-weight:700;color:#555;margin:6px 0 2px;border-bottom:1px solid #ddd;padding-bottom:2px">═══ 监控水位（Monitoring Levels）═══</p>
+      ${kvRow('低水位 Low Water Level', fmt(r.Z_alarm_low, 2) + ' mPD')}
+      ${kvRow('高水位 High Water Level', fmt(r.Z_alarm_high, 2) + ' mPD')}
+      ${kvRow('最高水位 Maximum Water Level', fmt(r.Z_max, 2) + ' mPD')}
+      <p style="font-size:11px;font-weight:700;color:#555;margin:6px 0 2px;border-bottom:1px solid #ddd;padding-bottom:2px">═══ 控制水位（Control Levels）═══</p>
+      ${kvRow('1#泵启动 1st Pump Start', fmt(r.Z_start1, 2) + ' mPD')}
+      ${kvRow('2#泵启动 2nd Pump Start', fmt(r.Z_start2, 2) + ' mPD')}
+      ${kvRow('停泵水位 Pump Stop Level', fmt(r.Z_stop, 2) + ' mPD')}
+      <p style="font-size:11px;font-weight:700;color:#555;margin:6px 0 2px;border-bottom:1px solid #ddd;padding-bottom:2px">═══ 容积参数 ════════════════</p>
       ${kvRow('最小调节容积 V_min', fmt(r.V_min, 1) + ' m³')}
       ${kvRow('有效调蓄容积 V_effective', fmt(r.V_effective, 1) + ' m³')}
-      ${kvRow('推算面积 S', fmt(r.S, 1) + ' m²')}
+      ${kvRow('池底面积 A_base', fmt(r.S, 1) + ' m²')}
       ${kvRow('总池深 D', fmt(r.D, 1) + ' m')}
-      ${kvRow('最高水位 Z_max', fmt(r.Z_max, 2) + ' mPD')}
     </div>
-    ${staggerTable}
     ` : ''}
   `
 }
