@@ -126,51 +126,73 @@ function renderGeoModeRow(r) {
   }
 }
 
-// AG1-1：污水池计算 → 渲染 V_required, Z_stop, startLevels 等
-export function renderPoolDepth(r) {
+// ── 已知条件只读摘要表格（各模块通用）────────────────────────────
+
+function knownTable(rows) {
+  return `<table class="known-table">${rows.map(([label, val, unit]) =>
+    `<tr><td class="kt-label">${label}</td><td class="kt-val">${val}${unit ? ' <span class="kt-unit">' + unit + '</span>' : ''}</td></tr>`
+  ).join('')}</table>`
+}
+
+// ── 计算过程（折叠）──────────────────────────────────────────────
+
+function calcDetails(label, rows) {
+  return `<details style="margin-bottom:14px"><summary style="cursor:pointer;color:#555;font-size:12px;margin-bottom:6px">${label}（点击展开）</summary>${stepsTable(rows)}</details>`
+}
+
+// ── 状态栏 ───────────────────────────────────────────────────────
+
+function statusBar(r) {
   const hasErrors = r.errors && r.errors.length > 0
   const hasWarnings = r.warnings && r.warnings.length > 0
   const status = hasErrors ? 'error' : hasWarnings ? 'warn' : 'pass'
   const icon = status === 'pass' ? '✔' : status === 'warn' ? '⚠' : '✘'
   const label = status === 'pass' ? '计算完成' : status === 'warn' ? '完成（有警告）' : '计算失败'
-
   let msgs = ''
-  if (hasErrors) {
-    r.errors.forEach(e => { msgs += `<li><span class="icon err">✘</span> <span class="err">${e}</span></li>` })
-  }
-  if (hasWarnings) {
-    r.warnings.forEach(w => { msgs += `<li><span class="icon wrn">⚠</span> <span class="wrn">${w}</span></li>` })
-  }
+  if (hasErrors) r.errors.forEach(e => { msgs += `<li><span class="icon err">✘</span> <span class="err">${e}</span></li>` })
+  if (hasWarnings) r.warnings.forEach(w => { msgs += `<li><span class="icon wrn">⚠</span> <span class="wrn">${w}</span></li>` })
+  return { status, html: `<div style="margin-bottom:8px"><span style="font-weight:700;color:var(--color-${status})">${icon} ${label}</span></div>${msgs ? `<ul class="msg-list">${msgs}</ul>` : ''}` }
+}
 
-  return `
-    <div style="margin-bottom:12px">
-      <span style="font-weight:700;color:var(--color-${status})">${icon} ${label}</span>
+// ── AG1-1：污水池计算 ─────────────────────────────────────────────
+export function renderPoolDepth(r) {
+  if (!r) return '<p style="color:#999;padding:8px">尚未计算。</p>'
+  const { status, html: statusHtml } = statusBar(r)
+
+  if (r.valid === false) return statusHtml + '<p style="color:#c0392b;padding:4px 0;font-size:13px">计算失败，请检查输入参数。</p>'
+
+  // 计算过程（过滤掉汇总类行）
+  const calcRows = r.rows.filter(row => {
+    const n = row.name || ''
+    return !['═══════════', '容积校验', '水位关系', '超高校验', '多泵启动水位', '监控水位', '控制水位', '几何参数', '水位关系校验'].some(k => n.includes(k))
+  })
+  const cSection = `<div class="calc-section">${calcDetails('计算过程', calcRows)}</div>`
+
+  // 输出结果：三个绿卡片
+  const waterCard = `<div class="result-summary pass">
+    ${kvRow('低水位报警 Z_alarm_low', fmt(r.Z_alarm_low, 2) + ' mPD')}
+    ${kvRow('高水位报警 Z_alarm_high', fmt(r.Z_alarm_high, 2) + ' mPD')}
+    ${kvRow('最高水位 Z_max', fmt(r.Z_max, 2) + ' mPD')}
+  </div>`
+  const pumpCard = `<div class="result-summary pass">
+    ${kvRow('1#泵启动水位 Z_start1', fmt(r.Z_start1, 2) + ' mPD')}
+    ${kvRow('2#泵启动水位 Z_start2', fmt(r.Z_start2, 2) + ' mPD')}
+    ${kvRow('停泵水位 Z_stop', fmt(r.Z_stop, 2) + ' mPD')}
+  </div>`
+  const volCard = `<div class="result-summary pass">
+    ${kvRow('最小调节容积 V_min', fmt(r.V_min, 1) + ' m³')}
+    ${kvRow('有效调蓄容积 V_effective', fmt(r.V_effective, 1) + ' m³')}
+    ${kvRow('容积校验', r.V_ok ? '✓ 满足' : '✘ 不满足', '')}
+  </div>`
+  const oSection = `<div class="result-section"><div class="section-title">输出结果</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      ${waterCard}
+      ${pumpCard}
+      ${volCard}
     </div>
-    ${msgs ? `<ul class="msg-list">${msgs}</ul>` : ''}
-    ${r.valid !== false ? `<details style="margin-bottom:14px"><summary style="cursor:pointer;color:#555;font-size:12px;margin-bottom:6px">计算过程（点击展开）</summary>${stepsTable(r.rows.filter(row => {
-      const skip = ['容积校验', '水位关系', '超高校验', '多泵启动水位', '═══════════ 水位关系校验 ═══════════']
-      return !skip.some(k => row.name?.includes(k))
-    }))}</details>` : ''}
-    ${r.valid !== false ? `
-    <div class="result-summary pass">
-      <p style="font-size:11px;font-weight:700;color:#555;margin:6px 0 2px;border-bottom:1px solid #ddd;padding-bottom:2px">═══ 几何参数（Geometry）═══════</p>
-      ${renderGeoModeRow(r)}
-      <p style="font-size:11px;font-weight:700;color:#555;margin:6px 0 2px;border-bottom:1px solid #ddd;padding-bottom:2px">═══ 监控水位（Monitoring Levels）═══</p>
-      ${kvRow('低水位 Low Water Level', fmt(r.Z_alarm_low, 2) + ' mPD')}
-      ${kvRow('高水位 High Water Level', fmt(r.Z_alarm_high, 2) + ' mPD')}
-      ${kvRow('最高水位 Maximum Water Level', fmt(r.Z_max, 2) + ' mPD')}
-      <p style="font-size:11px;font-weight:700;color:#555;margin:6px 0 2px;border-bottom:1px solid #ddd;padding-bottom:2px">═══ 控制水位（Control Levels）═══</p>
-      ${kvRow('1#泵启动 1st Pump Start', fmt(r.Z_start1, 2) + ' mPD')}
-      ${kvRow('2#泵启动 2nd Pump Start', fmt(r.Z_start2, 2) + ' mPD')}
-      ${kvRow('停泵水位 Pump Stop Level', fmt(r.Z_stop, 2) + ' mPD')}
-      <p style="font-size:11px;font-weight:700;color:#555;margin:6px 0 2px;border-bottom:1px solid #ddd;padding-bottom:2px">═══ 容积参数 ════════════════</p>
-      ${kvRow('最小调节容积 V_min', fmt(r.V_min, 1) + ' m³')}
-      ${kvRow('有效调蓄容积 V_effective', fmt(r.V_effective, 1) + ' m³')}
-      ${kvRow('池底面积 A_base', fmt(r.S, 1) + ' m²')}
-      ${kvRow('总池深 D', fmt(r.D, 1) + ' m')}
-    </div>
-    ` : ''}
-  `
+  </div>`
+
+  return statusHtml + cSection + oSection
 }
 
 // AG2-1：泵房维护间尺寸计算 → 渲染 d_spacing, e_wall, L, W
@@ -231,73 +253,62 @@ function renderCatalogMatch(r) {
     </div>`
 }
 
-// AG12：水泵计算及选型 → 渲染 Q_pump, H_total, P_shaft, NPSH 等
+// ── AG1-2：水泵计算及选型 ─────────────────────────────────────────
 export function renderPumpSpec(r) {
-  const hasErrors = r.errors && r.errors.length > 0
-  const hasWarnings = r.warnings && r.warnings.length > 0
-  const status = hasErrors ? 'error' : hasWarnings ? 'warn' : 'pass'
-  const icon = status === 'pass' ? '✔' : status === 'warn' ? '⚠' : '✘'
-  const label = status === 'pass' ? '计算完成' : status === 'warn' ? '完成（有警告）' : '计算失败'
+  if (!r) return '<p style="color:#999;padding:8px">尚未计算。</p>'
+  const { status, html: statusHtml } = statusBar(r)
 
-  let msgs = ''
-  if (hasErrors) {
-    r.errors.forEach(e => { msgs += `<li><span class="icon err">✘</span> <span class="err">${e}</span></li>` })
-  }
-  if (hasWarnings) {
-    r.warnings.forEach(w => { msgs += `<li><span class="icon wrn">⚠</span> <span class="wrn">${w}</span></li>` })
-  }
+  if (r.valid === false) return statusHtml + '<p style="color:#c0392b;padding:4px 0;font-size:13px">计算失败，请检查输入参数。</p>'
 
+  const dp = r.designParams || {}
+
+  // 已知条件（已移至 card-inputs 输入区域）
+
+  // 计算过程
+  const cSection = `<div class="calc-section">${calcDetails('计算过程', r.rows)}</div>`
+
+  // NPSH 校验行
   const effClass = r.NPSH_ok ? 'pass' : 'fail'
   const effMsg = r.NPSH_ok
-    ? `NPSH_a=${fmt(r.NPSH_a)} ≥ NPSH_r+0.5=${fmt(r.NPSH_r+0.5)}，满足 R-NPSH-01`
-    : `NPSH_a=${fmt(r.NPSH_a)} < NPSH_r+0.5=${fmt(r.NPSH_r+0.5)}，不满足 R-NPSH-01`
+    ? `NPSH_a=${fmt(r.NPSH_a)} ≥ NPSH_r+0.5=${fmt(r.NPSH_r+0.5)}，满足`
+    : `NPSH_a=${fmt(r.NPSH_a)} < NPSH_r+0.5=${fmt(r.NPSH_r+0.5)}，不满足`
 
-  return `
-    <div style="margin-bottom:12px">
-      <span style="font-weight:700;color:var(--color-${status})">${icon} ${label}</span>
-    </div>
-    ${msgs ? `<ul class="msg-list">${msgs}</ul>` : ''}
-    ${r.valid !== false ? `<details style="margin-bottom:14px"><summary style="cursor:pointer;color:#555;font-size:12px;margin-bottom:6px">计算过程（点击展开）</summary>${stepsTable(r.rows)}</details>` : ''}
-    ${r.valid !== false ? `
+  // 输出结果
+  const oSection = `<div class="result-section"><div class="section-title">输出结果</div>
     <div class="result-summary pass">
-      ${kvRow('单泵设计流量 Q_pump', fmt(r.Q_pump, 4) + ' m³/s')}
       ${kvRow('系统总扬程 H_total', fmt(r.H_total, 2) + ' m')}
+      ${kvRow('静扬程 H_static', fmt(r.H_static, 2) + ' m')}
+      ${kvRow('总水头损失 H_loss', fmt(r.H_loss, 3) + ' m')}
       ${kvRow('轴功率 P_shaft', fmt(r.P_shaft, 2) + ' kW')}
       ${kvRow('电机功率 P_motor', fmt(r.P_motor, 2) + ' kW')}
-      ${kvRow('进水管 DN_inlet', 'DN ' + r.DN_inlet)}
-      ${kvRow('出水管 DN_outlet', 'DN ' + r.DN_outlet)}
+      ${kvRow('进水管公称直径 DN_inlet', 'DN ' + r.DN_inlet)}
+      ${kvRow('出水管公称直径 DN_outlet', 'DN ' + r.DN_outlet)}
     </div>
-    <div class="result-summary ${effClass}" style="margin-top:8px;font-size:12px">
-      <strong>NPSH校验（R-NPSH-01）：</strong>${effMsg}
+    <div class="result-summary ${effClass}" style="margin-top:6px;font-size:12px">
+      <strong>NPSH校验：</strong>${effMsg}
     </div>
     ${renderCatalogMatch(r)}
-    ` : ''}
-  `
+  </div>`
+
+  return statusHtml + cSection + oSection
 }
 
-// AG1-3：管道尺寸计算
+// ── AG1-3：管道尺寸计算 ───────────────────────────────────────────
 export function renderPipeSizing(r) {
-  const hasErrors = r.errors && r.errors.length > 0
-  const hasWarnings = r.warnings && r.warnings.length > 0
-  const status = hasErrors ? 'error' : hasWarnings ? 'warn' : 'pass'
-  const icon = status === 'pass' ? '✔' : status === 'warn' ? '⚠' : '✘'
-  const label = status === 'pass' ? '计算完成' : status === 'warn' ? '完成（有警告）' : '计算失败'
+  if (!r) return '<p style="color:#999;padding:8px">尚未计算。</p>'
+  const { status, html: statusHtml } = statusBar(r)
 
-  let msgs = ''
-  if (hasErrors) {
-    r.errors.forEach(e => { msgs += `<li><span class="icon err">✘</span> <span class="err">${e}</span></li>` })
-  }
-  if (hasWarnings) {
-    r.warnings.forEach(w => { msgs += `<li><span class="icon wrn">⚠</span> <span class="wrn">${w}</span></li>` })
-  }
+  if (r.valid === false) return statusHtml + '<p style="color:#c0392b;padding:4px 0;font-size:13px">计算失败，请检查输入参数。</p>'
 
-  return `
-    <div style="margin-bottom:12px">
-      <span style="font-weight:700;color:var(--color-${status})">${icon} ${label}</span>
-    </div>
-    ${msgs ? `<ul class="msg-list">${msgs}</ul>` : ''}
-    ${r.valid !== false ? `<details style="margin-bottom:14px"><summary style="cursor:pointer;color:#555;font-size:12px;margin-bottom:6px">计算过程（点击展开）</summary>${stepsTable(r.rows)}</details>` : ''}
-    ${r.valid !== false ? `
+  const dp = r.designParams || {}
+
+  // 已知条件（已移至 card-inputs 输入区域）
+
+  // 计算过程
+  const cSection = `<div class="calc-section">${calcDetails('计算过程', r.rows)}</div>`
+
+  // 输出结果
+  const oSection = `<div class="result-section"><div class="section-title">输出结果</div>
     <div class="result-summary pass">
       ${kvRow('泵进水管公称直径 DN_pumpIn', 'DN ' + r.DN_pumpIn)}
       ${kvRow('泵出水管公称直径 DN_pumpOut', 'DN ' + r.DN_pumpOut)}
@@ -306,9 +317,10 @@ export function renderPipeSizing(r) {
       ${kvRow('局部损失 H_local', fmt(r.H_local, 3) + ' m')}
       ${kvRow('总水头损失 H_loss', fmt(r.H_loss, 3) + ' m')}
     </div>
-    <div class="result-summary ${r.NPSH_ok ? 'pass' : 'fail'}" style="margin-top:8px;font-size:12px">
+    <div class="result-summary ${r.NPSH_ok ? 'pass' : 'fail'}" style="margin-top:6px;font-size:12px">
       <strong>NPSH校验：</strong>${r.NPSH_ok ? '✓ 满足' : '✘ 不满足'}
     </div>
-    ` : ''}
-  `
+  </div>`
+
+  return statusHtml + cSection + oSection
 }

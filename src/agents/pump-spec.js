@@ -266,6 +266,7 @@ export function runPumpSpec({
     NPSH_r, NPSH_a, NPSH_ok, H_s,
     // 设计参数（带依据标注）
     designParams: {
+      Z_discharge: { value: Z_discharge, unit: 'mPD',   ref: '排放口标高' },
       L:           { value: L,           unit: 'm',     ref: '工程惯例' },
       n:           { value: n,           unit: 's/m^(1/3)', ref: '手册第8.3节' },
       η_hyd:       { value: η_hyd,       unit: '',      ref: '手册第14.6节≥0.82' },

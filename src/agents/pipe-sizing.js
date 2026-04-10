@@ -228,6 +228,11 @@ export function runPipeSizing({
     NPSH_ok,
     // 设计参数（带依据标注）
     designParams: {
+      Q_pump:    { value: Q_pump,    unit: 'm³/s',      ref: '单泵设计流量' },
+      Q:         { value: Q,         unit: 'm³/h',      ref: '泵站总流量' },
+      N:         { value: N,         unit: '台',        ref: '工作泵台数' },
+      H_total:   { value: H_total,   unit: 'm',        ref: '总扬程' },
+      Z_stop:    { value: Z_stop,    unit: 'mPD',       ref: '停泵水位' },
       v_in:      { value: v_in,      unit: 'm/s',      ref: '手册第8.3节' },
       v_out:     { value: v_out,     unit: 'm/s',      ref: '经济流速' },
       n:         { value: n,         unit: 's/m^(1/3)', ref: '手册第8.3节' },
