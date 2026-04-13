@@ -340,6 +340,9 @@ export function runUserParams({
     H: mode === 'rainfall' ? H : null,
     L: mode === 'rainfall' ? L : null,
     t_c: mode === 'rainfall' ? t_c : null,
+    IDF_a: mode === 'rainfall' ? IDF_CONSTANTS[zone][T].a : null,
+    IDF_b: mode === 'rainfall' ? IDF_CONSTANTS[zone][T].b : null,
+    IDF_c: mode === 'rainfall' ? IDF_CONSTANTS[zone][T].c : null,
     // 径流系数参考
     C_reference: C_REFERENCE_TABLE,
     // 输出给下游

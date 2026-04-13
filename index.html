@@ -153,12 +153,12 @@
           </div>
           <div class="form-group">
             <label>暴雨历时 t_d（min）</label>
-            <input type="number" id="inp-td" min="10" max="240" step="10" value="120">
+            <input type="number" id="inp-td" min="10" max="240" step="10" value="10">
             <span class="hint">≤240min用IDF公式；>240min用DDF表（手册第4.3.4节）</span>
           </div>
           <div class="form-group">
             <label>集水区面积 A（km²）</label>
-            <input type="number" id="inp-A" min="0.01" step="0.1" value="1.0">
+            <input type="number" id="inp-A" min="0.01" step="0.1" value="4.19">
             <span class="hint">汇水面积，用于径流估算；须 >0（手册第7.5.2节）</span>
           </div>
           <div class="form-group">
@@ -509,7 +509,6 @@
                 <td class="itd-input"><input type="number" id="rainfall-flow-path" step="10" placeholder="500"></td>
               </tr>
             </table>
-            <p class="card-inputs-note">固定计算 T=10/50/200 年三个重现期（手册第14.6.2节）。T=10 年峰值流量将作为单泵设计流量写入 AG1-1。</p>
           </details>
         </div>
         <div class="card-body" id="card-rainfall"><p class="msg-pending">尚未计算，请点击「重新计算」或顶部「开始计算全流程」。</p></div>

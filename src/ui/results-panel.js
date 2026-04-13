@@ -51,32 +51,47 @@ export function renderAG01(r) {
 
 // 暴雨分析渲染（仅暴雨结果，无拓扑）
 export function renderRainfallCard({ duty10Year, capacity50, floodCheck200 }) {
+  // 提取各重现期的关键值用于对比表
+  const r10 = duty10Year
+  const r50 = capacity50
+  const r200 = floodCheck200
+
+  // ── 计算过程（三重现期并列）──────────────────────────────
+  const stepsRows = `
+    <tr><td colspan="4" style="background:#f5f5f5;font-weight:700;color:#555;padding:4px 8px">───────── 暴雨强度（IDF公式） ─────────</td></tr>
+    <tr><td>IDF常数 a</td><td>${r10.IDF_a || '—'}</td><td>${r50.IDF_a || '—'}</td><td>${r200.IDF_a || '—'}</td></tr>
+    <tr><td>IDF常数 b</td><td>${r10.IDF_b || '—'}</td><td>${r50.IDF_b || '—'}</td><td>${r200.IDF_b || '—'}</td></tr>
+    <tr><td>IDF常数 c</td><td>${r10.IDF_c || '—'}</td><td>${r50.IDF_c || '—'}</td><td>${r200.IDF_c || '—'}</td></tr>
+    <tr><td>降雨强度 i（mm/h）</td><td>${fmt(r10.i)}</td><td>${fmt(r50.i)}</td><td>${fmt(r200.i)}</td></tr>
+
+    <tr><td colspan="4" style="background:#f5f5f5;font-weight:700;color:#555;padding:4px 8px">───────── 径流估算（推理法） ─────────</td></tr>
+    <tr><td>面积折减系数 ARF</td><td>${fmt(r10.ARF)}</td><td>${fmt(r50.ARF)}</td><td>${fmt(r200.ARF)}</td></tr>
+    <tr><td>峰值流量 Q_p（m³/s）</td><td>${fmt(r10.Q_p)}</td><td>${fmt(r50.Q_p)}</td><td>${fmt(r200.Q_p)}</td></tr>
+    <tr><td>总设计流量 Q（m³/h）</td><td>${fmt(r10.Q)}</td><td>${fmt(r50.Q)}</td><td>${fmt(r200.Q)}</td></tr>
+    <tr><td>单泵设计流量 Q_pump（m³/s）</td><td>${fmt(r10.Q_pump)}</td><td>${fmt(r50.Q_pump)}</td><td>${fmt(r200.Q_pump)}</td></tr>
+
+    <tr><td colspan="4" style="background:#f5f5f5;font-weight:700;color:#555;padding:4px 8px">───────── 集流时间（Bransby-Williams） ─────────</td></tr>
+    <tr><td>集流时间 t_c（min）</td><td>${fmt(r10.t_c)}</td><td>${fmt(r50.t_c)}</td><td>${fmt(r200.t_c)}</td></tr>
+  `
+
   return `
-    <div class="result-section">
-      <div class="section-title">暴雨径流分析（推理法）</div>
-      <table class="step-table">
+    <details style="margin-bottom:14px"><summary style="cursor:pointer;color:#555;font-size:12px;margin-bottom:6px">计算过程（点击展开）</summary>
+      <table class="step-table" style="font-size:12px;margin-top:0">
         <thead>
-          <tr><th>参数</th><th>T=10年（值班）</th><th>T=50年（容量校核）</th><th>T=200年（洪水检验）</th></tr>
+          <tr><th style="width:40%">参数</th><th style="text-align:center">T=10年（值班）</th><th style="text-align:center">T=50年（容量校核）</th><th style="text-align:center">T=200年（洪水检验）</th></tr>
         </thead>
         <tbody>
-          <tr><td>降雨强度 i（mm/h）</td>
-              <td>${fmt(duty10Year.i)}</td><td>${fmt(capacity50.i)}</td><td>${fmt(floodCheck200.i)}</td></tr>
-          <tr><td>峰值流量 Q_p（m³/s）</td>
-              <td>${fmt(duty10Year.Q_pump)}</td>
-              <td>${fmt(capacity50.Q_pump)}</td>
-              <td>${fmt(floodCheck200.Q_pump)}</td></tr>
-          <tr><td>峰值流量 Q（m³/h）</td>
-              <td>${fmt(duty10Year.Q)}</td><td>${fmt(capacity50.Q)}</td><td>${fmt(floodCheck200.Q)}</td></tr>
+          ${stepsRows}
         </tbody>
       </table>
-    </div>
+    </details>
     <div class="result-section" style="margin-top:12px">
       <div class="section-title">输出结果</div>
       <div class="result-summary pass">
-        ${kvRow('T=10年 总设计流量 Q', fmt(duty10Year.Q) + ' m³/h')}
-        ${kvRow('T=10年 单泵设计流量 Q_pump', fmt(duty10Year.Q_pump) + ' m³/s', '')}
-        ${kvRow('T=50年 总设计流量 Q', fmt(capacity50.Q) + ' m³/h')}
-        ${kvRow('T=200年 总设计流量 Q', fmt(floodCheck200.Q) + ' m³/h')}
+        ${kvRow('T=10年 总设计流量 Q', fmt(r10.Q) + ' m³/h')}
+        ${kvRow('T=10年 单泵设计流量 Q_pump', fmt(r10.Q_pump) + ' m³/s', '')}
+        ${kvRow('T=50年 总设计流量 Q', fmt(r50.Q) + ' m³/h')}
+        ${kvRow('T=200年 总设计流量 Q', fmt(r200.Q) + ' m³/h')}
       </div>
     </div>
 `
