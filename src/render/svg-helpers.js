@@ -3,7 +3,8 @@ import { ROOM_DEFS } from '../layout/room-defs.js';
 // SVG string-building helpers (coordinate-system agnostic)
 
 export function _r(x, y, w, h, fill, stroke, sw = 1, extra = '') {
-  return `<rect x="${(+x).toFixed(1)}" y="${(+y).toFixed(1)}" width="${(+w).toFixed(1)}" height="${(+h).toFixed(1)}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}" ${extra}/>`
+  const safeH = Math.max(0, h)
+  return `<rect x="${(+x).toFixed(1)}" y="${(+y).toFixed(1)}" width="${(+w).toFixed(1)}" height="${safeH.toFixed(1)}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}" ${extra}/>`
 }
 
 export function _l(x1, y1, x2, y2, stroke, sw = 1, dash = '') {

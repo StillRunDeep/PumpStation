@@ -575,7 +575,7 @@ const cancelBtn = document.getElementById('modal-build-params-cancel')
 const modalOverlay = document.querySelector('#modal-build-params .modal-overlay')
 const modalWrap = document.querySelector('#modal-build-params .modal-content')
 
-btnParams.addEventListener('click', () => {
+btnParams?.addEventListener('click', () => {
   const defaultParams = getDefaultUserParams()
   const panel = renderBuildingParamsPanel(defaultParams)
   if (panel) {
@@ -591,12 +591,12 @@ btnParams.addEventListener('click', () => {
 })
 
 // 关闭逻辑 - 关闭按钮和遮罩层
-closeBtn.addEventListener('click', () => modal.hidden = true)
-cancelBtn.addEventListener('click', () => modal.hidden = true)
-modalOverlay.addEventListener('click', () => modal.hidden = true)
+closeBtn?.addEventListener('click', () => modal.hidden = true)
+cancelBtn?.addEventListener('click', () => modal.hidden = true)
+modalOverlay?.addEventListener('click', () => modal.hidden = true)
 
 // 确认逻辑
-okBtn.addEventListener('click', () => {
+okBtn?.addEventListener('click', () => {
   const container = document.querySelector('#card-ag41-wrap .card-body')
   // 读取用户确认的参数
   const params = panel.readParams?.() || { buildingW: 18600, buildingD: 24000, roomTargetAreas: {} }
