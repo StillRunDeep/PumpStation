@@ -138,6 +138,7 @@ export function renderLayoutSVGDual(variant, vw, vh) {
   const ps    = Math.min(drawW / buildingW, drawH / buildingD)
 
   const renderHalf = (placements, offsetX, floorLabel, crane) => {
+    console.log(`Rendering floor: ${floorLabel}`, placements); // Debug log
     const ox = offsetX + MARGIN.left + (drawW - buildingW * ps) / 2
     const oy = MARGIN.top + (drawH - buildingD * ps) / 2
     let s = ''

@@ -1,3 +1,5 @@
+import { ROOM_DEFS } from '../layout/room-defs.js';
+
 // SVG string-building helpers (coordinate-system agnostic)
 
 export function _r(x, y, w, h, fill, stroke, sw = 1, extra = '') {
@@ -61,7 +63,7 @@ export function renderDebugGrid(debugData, width, height) {
       hash = id.charCodeAt(j) + ((hash << 5) - hash);
     }
     const hue = hash % 360;
-    colors[id] = `hsl(${hue}, 70%, 85%)`;
+    colors[id] = ROOM_DEFS[id]?.color || `hsl(${hue}, 70%, 85%)`;
     FgColors[id] = `hsl(${hue}, 70%, 35%)`;
   });
 

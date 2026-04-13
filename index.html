@@ -55,7 +55,7 @@
     </details>
 
     <!-- 高级参数（标签页式） -->
-    <details>
+    <details id="advanced-params-details">
       <summary>高级参数</summary>
 
       <!-- 标签页导航 -->
@@ -223,71 +223,71 @@
     <div class="results-grid">
 
       <!-- AG0-0 -->
-      <div class="agent-card card-ag00">
-        <div class="card-header">
+      <details class="agent-card card-ag00" open>
+        <summary class="card-header">
           <span>AG0-0</span><span class="agent-label">用户对话 · 参数验证</span>
-        </div>
+        </summary>
         <div class="card-body" id="card-ag00"></div>
-      </div>
+      </details>
 
       <!-- AG0-1 -->
-      <div class="agent-card card-ag01">
-        <div class="card-header">
+      <details class="agent-card card-ag01" open>
+        <summary class="card-header">
           <span>AG0-1</span><span class="agent-label">拓扑解析 · 连接关系验证</span>
-        </div>
+        </summary>
         <div class="card-body" id="card-ag01"></div>
-      </div>
+      </details>
 
       <!-- AG1-1 -->
-      <div class="agent-card card-pool-depth">
-        <div class="card-header">
+      <details class="agent-card card-pool-depth" open>
+        <summary class="card-header">
           <span>AG1-1</span><span class="agent-label">污水池计算</span>
-        </div>
+        </summary>
         <div class="card-body" id="card-ag11"></div>
-      </div>
+      </details>
 
       <!-- AG1-2 -->
-      <div class="agent-card card-pump-spec">
-        <div class="card-header">
+      <details class="agent-card card-pump-spec" open>
+        <summary class="card-header">
           <span>AG1-2</span><span class="agent-label">水泵计算及选型</span>
-        </div>
+        </summary>
         <div class="card-body" id="card-ag12"></div>
-      </div>
+      </details>
 
       <!-- AG1-3 -->
-      <div class="agent-card card-pipe-sizing">
-        <div class="card-header">
+      <details class="agent-card card-pipe-sizing" open>
+        <summary class="card-header">
           <span>AG1-3</span><span class="agent-label">管道尺寸计算</span>
-        </div>
+        </summary>
         <div class="card-body" id="card-ag13"></div>
-      </div>
+      </details>
 
       <!-- AG2-1 -->
-      <div class="agent-card card-maintenance-room">
-        <div class="card-header">
+      <details class="agent-card card-maintenance-room" open>
+        <summary class="card-header">
           <span>AG2-1</span><span class="agent-label">泵房维护间尺寸计算</span>
-        </div>
+        </summary>
         <div class="card-body" id="card-ag21"></div>
-      </div>
+      </details>
 
       <!-- AG3-1: pump-room drawing -->
-      <div class="agent-card card-ag31 card-ag31-wrap">
-        <div class="card-header">
+      <details class="agent-card card-ag31 card-ag31-wrap" open>
+        <summary class="card-header">
           <span>AG3-1</span><span class="agent-label">设备流线二维示意</span>
           <div style="margin-left:auto;display:flex;gap:5px;align-items:center">
             <button class="svg-zoom-btn" id="btn-ag31-zin"  title="放大">＋</button>
             <button class="svg-zoom-btn" id="btn-ag31-rst"  title="复位">⊙</button>
             <button class="svg-zoom-btn" id="btn-ag31-zout" title="缩小">－</button>
           </div>
-        </div>
+        </summary>
         <div class="card-body" style="padding:0;overflow:hidden">
           <svg id="svg-ag31" viewBox="0 0 1080 580" preserveAspectRatio="xMidYMid meet"></svg>
         </div>
-      </div>
+      </details>
 
       <!-- AG4-1: building layout generation -->
-      <div class="agent-card card-ag41 card-ag41-wrap" id="card-ag41-wrap" hidden>
-        <div class="card-header">
+      <details class="agent-card card-ag41 card-ag41-wrap" id="card-ag41-wrap" hidden>
+        <summary class="card-header">
           <span>AG4-1</span>
           <span class="agent-label">建筑平面布局生成</span>
                     <span id="ag41-notify" class="header-notify"></span>
@@ -296,31 +296,42 @@
             <button id="btn-ag41-more" hidden>生成方案</button>
             <button id="btn-ag41-reset" hidden>重置方案</button>
           </div>
-        </div>
+        </summary>
         <div class="card-body">
-          <div id="layout-comparison"></div>
-          <div id="layout-variants"></div>
+          <details id="ag41-comparison-details" open>
+            <summary class="ag41-section-header">方案对比</summary>
+            <div id="layout-comparison"></div>
+          </details>
+
+          <details id="ag41-variants-details" open>
+            <summary class="ag41-section-header">方案列表</summary>
+            <div id="layout-variants"></div>
+          </details>
+
           <!-- Detail view (shown after selecting a variant) -->
-          <div id="layout-detail-wrap" hidden>
-            <div class="layout-detail-header">
-              <span id="layout-detail-title">选中方案详图（地面层 ＋ 一层）</span>
-              <div style="margin-left:auto;display:flex;gap:5px">
-                <button class="svg-zoom-btn" id="btn-ag41-zin"  title="放大">＋</button>
-                <button class="svg-zoom-btn" id="btn-ag41-rst"  title="复位">⊙</button>
-                <button class="svg-zoom-btn" id="btn-ag41-zout" title="缩小">－</button>
+          <details id="ag41-detail-details" open>
+            <summary class="ag41-section-header">方案详图</summary>
+            <div id="layout-detail-wrap" hidden>
+              <div class="layout-detail-header">
+                <span id="layout-detail-title">选中方案详图（地面层 ＋ 一层）</span>
+                <div style="margin-left:auto;display:flex;gap:5px">
+                  <button class="svg-zoom-btn" id="btn-ag41-zin"  title="放大">＋</button>
+                  <button class="svg-zoom-btn" id="btn-ag41-rst"  title="复位">⊙</button>
+                  <button class="svg-zoom-btn" id="btn-ag41-zout" title="缩小">－</button>
+                </div>
+              </div>
+              <div class="layout-detail-main-wrap" style="display: flex;">
+                <svg id="svg-ag41" viewBox="0 0 1080 560"
+                     style="display:block;width:60%;height:560px;cursor:grab;background:#f4f6f8">
+                </svg>
+                <div id="debug-grid-container" style="width:40%; height:560px; border-left: 1px solid #ccc; padding-left: 10px; box-sizing: border-box;">
+                  <h4 style="margin-top:0; margin-bottom: 10px; font-size: 12px; color: #555;">调试视图：网格和种子</h4>
+                </div>
               </div>
             </div>
-            <div class="layout-detail-main-wrap" style="display: flex;">
-              <svg id="svg-ag41" viewBox="0 0 1080 560"
-                   style="display:block;width:60%;height:560px;cursor:grab;background:#f4f6f8">
-              </svg>
-              <div id="debug-grid-container" style="width:40%; height:560px; border-left: 1px solid #ccc; padding-left: 10px; box-sizing: border-box;">
-                <h4 style="margin-top:0; margin-bottom: 10px; font-size: 12px; color: #555;">调试视图：网格和种子</h4>
-              </div>
-            </div>
-          </div>
+          </details>
         </div>
-      </div>
+      </details>
 
     </div>
   </section>

@@ -225,12 +225,17 @@ function selectVariant(idx) {
   // Update debug view
   const debugContainer = document.getElementById('debug-grid-container')
   if (debugContainer) {
-    if (v._debug) {
+    if (v._debug && v._debug.ground && v._debug.level1) {
+      debugContainer.innerHTML =
+        '<h4 style="margin-top:0; margin-bottom: 10px; font-size: 12px; color: #555;">调试视图：地面层</h4>' +
+        renderDebugGrid(v._debug.ground, 380, 265) +
+        '<h4 style="margin-top:10px; margin-bottom: 10px; font-size: 12px; color: #555;">调试视图：一层</h4>' +
+        renderDebugGrid(v._debug.level1, 380, 265);
+    } else {
+      // Fallback for older data structure
       debugContainer.innerHTML =
         '<h4 style="margin-top:0; margin-bottom: 10px; font-size: 12px; color: #555;">调试视图：网格和种子</h4>' +
         renderDebugGrid(v._debug, 380, 540);
-    } else {
-      debugContainer.innerHTML = '';
     }
   }
 
