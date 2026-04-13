@@ -1,11 +1,23 @@
-export const DN_SERIES = [100, 125, 150, 200, 250, 300, 350, 400, 450, 500, 600, 700, 800, 900, 1000, 1200, 1250, 1500]
+export const DN_SERIES = [
+  100, 150, 200, 250, 300, 400, 450, 500,
+  600, 700, 800, 900, 1000, 1200, 1400,
+  1500, 1600, 1800, 2000, 2200, 2400, 2600, 2800, 3000
+]
 
-export function selectDN(d_mm) {
+export function selectDN(d_mm, warnings = null) {
   if (!Number.isFinite(d_mm) || d_mm <= 0) return DN_SERIES[0]
   for (const dn of DN_SERIES) {
     if (dn >= d_mm) return dn
   }
-  return DN_SERIES[DN_SERIES.length - 1]
+  // 超出系列上限
+  const maxDN = DN_SERIES[DN_SERIES.length - 1]
+  if (warnings) {
+    warnings.push(
+      `计算管径 ${Math.round(d_mm)} mm 超出 DN 系列上限 DN${maxDN}，` +
+      `已取 DN${maxDN}（管径偏小，实际流速将超过设计值，请确认）`
+    )
+  }
+  return maxDN
 }
 
 /**

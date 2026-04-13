@@ -1,4 +1,5 @@
 import { fmt, stepsTable, kvRow } from '../utils.js'
+import { PIPE_SCHEMES } from '../agents/pipe-sizing.js'
 
 // 拓扑验证结果（从 renderAG01 提取为独立函数）
 function renderTopologyResult(r) {
@@ -108,12 +109,30 @@ export function renderAG00(r) {
   if (r.errors.length === 0 && r.warnings.length === 0)
     msgs = '<li><span class="icon ok">✔</span> <span class="ok">所有参数合法，可继续计算</span></li>'
 
+  // 过滤掉已知条件（输入参数回显）和最终结果，保留中间计算步骤
+  const inputLabels = [
+    '池底标高', '集水坑底标高', '设计水缸深度', '池顶标高', '排放口标高',
+    '工作泵台数', '备用泵台数', '每小时允许启动次数',
+    '水泵最高总排水量', '设计水缸容量', '单泵设计流量（m³/s）',
+    '暴雨分区', '设计重现期', '暴雨历时', '集水区面积', '径流系数',
+    '气候变化', '平均坡降', '最长流径',
+    '池底面积', '设计水缸深度',
+    '单泵设计流量 Q_pump（m³/s）',
+    '═',
+  ]
+  const calcRows = r.rows.filter(row => {
+    for (const lbl of inputLabels) {
+      if (row.includes(`<td>${lbl}</td>`) || row.includes(`<td>${lbl} `)) return false
+    }
+    return true
+  })
+
   return `
     <div style="margin-bottom:12px">
       <span style="font-weight:700;color:var(--color-${status})">${icon} ${label}</span>
     </div>
     <ul class="msg-list">${msgs}</ul>
-    ${r.valid ? `<details style="margin-bottom:14px"><summary style="cursor:pointer;color:#555;font-size:12px;margin-bottom:6px">计算过程（点击展开）</summary>${stepsTable(r.rows)}</details>` : ''}
+    ${r.valid ? `<details style="margin-bottom:14px"><summary style="cursor:pointer;color:#555;font-size:12px;margin-bottom:6px">计算过程（点击展开）</summary>${stepsTable(calcRows)}</details>` : ''}
   `
 }
 
@@ -215,10 +234,22 @@ export function renderPoolDepth(r) {
 
   if (r.valid === false) return statusHtml + '<p style="color:#c0392b;padding:4px 0;font-size:13px">计算失败，请检查输入参数。</p>'
 
-  // 计算过程（过滤掉汇总类行）
+  // 计算过程（过滤掉：输入值回显、高级设置回显、输出结果、多余标题行）
+  // 中间结果（带公式计算的）全部保留
+  const excludeLabels = [
+    '═', '几何模式',
+    '1#泵启动水位系数', '2#泵启动水位系数',
+    '超高', '安全余量', '低水位报警偏移', '每小时允许启动次数',
+    '设计水缸容量', '设计水缸深度', '池底面积', '池底标高', '池顶标高', '集水坑底标高',
+    '监控水位', '控制水位', '多泵启动水位',
+    '单泵流量', '最小调节容积', '有效调蓄容积', '容积校验',
+    '水位关系', '超高校验',
+  ]
   const calcRows = r.rows.filter(row => {
-    const n = row.name || ''
-    return !['═══════════', '容积校验', '水位关系', '超高校验', '多泵启动水位', '监控水位', '控制水位', '几何参数', '水位关系校验'].some(k => n.includes(k))
+    for (const lbl of excludeLabels) {
+      if (row.includes(`<td>${lbl}</td>`) || row.includes(`<td>${lbl} `)) return false
+    }
+    return true
   })
   const cSection = `<div class="calc-section">${calcDetails('计算过程', calcRows)}</div>`
 
@@ -251,8 +282,16 @@ export function renderPoolDepth(r) {
 
 // AG2-1：泵房维护间尺寸计算 → 渲染 d_spacing, e_wall, L, W
 export function renderMaintenanceRoom(r) {
+  // 过滤掉典型值/设计参数行（w_pump, d_pump），保留中间计算步骤
+  const excludeLabels = ['单泵外形宽度 w_pump', '单泵外形深度 d_pump']
+  const calcRows = r.rows.filter(row => {
+    for (const lbl of excludeLabels) {
+      if (row.includes(`<td>${lbl}</td>`) || row.includes(`<td>${lbl} `)) return false
+    }
+    return true
+  })
   return `
-    <details style="margin-bottom:14px"><summary style="cursor:pointer;color:#555;font-size:12px;margin-bottom:6px">计算过程（点击展开）</summary>${stepsTable(r.rows)}</details>
+    <details style="margin-bottom:14px"><summary style="cursor:pointer;color:#555;font-size:12px;margin-bottom:6px">计算过程（点击展开）</summary>${stepsTable(calcRows)}</details>
     <div class="result-summary pass">
       ${kvRow('泵间净距', fmt(r.d_spacing, 1) + ' m')}
       ${kvRow('端部距墙净距', fmt(r.e_wall, 1) + ' m')}
@@ -268,12 +307,21 @@ function renderCatalogMatch(r) {
   const isTolerant = r.catalogIsTolerant
 
   if (!matches || matches.length === 0) {
+    const diagRows = (r.catalogDiagnosis || []).map(d =>
+      `<tr><td style="font-weight:600">${d.pump.model.split(' ').pop()}</td>
+       <td style="color:#c0392b">${d.detail}</td></tr>`
+    ).join('')
+
     return `
     <div class="result-summary error" style="margin-top:8px">
       <div style="font-weight:700;margin-bottom:6px">✘ 目录中无匹配泵型</div>
       ${kvRow('设计流量 Q', fmt(r.Q_pump_ls, 1) + ' l/s (' + fmt(r.Q_pump_ls * 3.6, 0) + ' m³/h)')}
-      ${kvRow('所需扬程 H', fmt(r.H_total, 2) + ' m')}
-      <div style="font-size:11px;color:#999;margin-top:4px">请联系厂商确认或调整设计参数</div>
+      ${kvRow('所需扬程 H', fmt(r.H_total, 2) + ' m（静扬程 ' + fmt(r.H_static, 2) + ' m + 损失 ' + fmt(r.H_loss, 2) + ' m）')}
+      ${diagRows ? `<table style="margin-top:8px;font-size:11px;border-collapse:collapse;width:100%">
+        <tr><th style="text-align:left">泵型</th><th style="text-align:left">排除原因</th></tr>
+        ${diagRows}
+      </table>` : ''}
+      <div style="font-size:11px;color:#999;margin-top:6px">提示：降低流量或减小静扬程可能找到匹配泵型。</div>
     </div>`
   }
 
@@ -318,8 +366,20 @@ export function renderPumpSpec(r) {
 
   // 已知条件（已移至 card-inputs 输入区域）
 
-  // 计算过程
-  const cSection = `<div class="calc-section">${calcDetails('计算过程', r.rows)}</div>`
+  // 计算过程（过滤掉：设计参数回显、输入参数回显、泵安装尺寸）
+  const excludeLabels = [
+    '═', '设计参数',
+    '水力效率 η_hyd', '电机效率 η_mot', '必需汽蚀余量 NPSH_r', '出水管阻力 H_pipe_loss',
+    '单泵设计流量 Q_pump',
+    '泵安装尺寸', '泵出水弯头',
+  ]
+  const calcRows = r.rows.filter(row => {
+    for (const lbl of excludeLabels) {
+      if (row.includes(`<td>${lbl}</td>`) || row.includes(`<td>${lbl} `)) return false
+    }
+    return true
+  })
+  const cSection = `<div class="calc-section">${calcDetails('计算过程', calcRows)}</div>`
 
   // NPSH 校验行
   const effClass = r.NPSH_ok ? 'pass' : 'fail'
@@ -332,11 +392,10 @@ export function renderPumpSpec(r) {
     <div class="result-summary pass">
       ${kvRow('系统总扬程 H_total', fmt(r.H_total, 2) + ' m')}
       ${kvRow('静扬程 H_static', fmt(r.H_static, 2) + ' m')}
-      ${kvRow('总水头损失 H_loss', fmt(r.H_loss, 3) + ' m')}
+      ${kvRow('出水管阻力 H_pipe_loss', fmt(r.H_pipe_loss, 2) + ' m')}
       ${kvRow('轴功率 P_shaft', fmt(r.P_shaft, 2) + ' kW')}
       ${kvRow('电机功率 P_motor', fmt(r.P_motor, 2) + ' kW')}
-      ${kvRow('进水管公称直径 DN_inlet', 'DN ' + r.DN_inlet)}
-      ${kvRow('出水管公称直径 DN_outlet', 'DN ' + r.DN_outlet)}
+      ${r.DN_pump_outlet != null ? kvRow('泵出水弯头 DN（资料库）', 'DN ' + r.DN_pump_outlet) : ''}
     </div>
     <div class="result-summary ${effClass}" style="margin-top:6px;font-size:12px">
       <strong>NPSH校验：</strong>${effMsg}
@@ -345,6 +404,35 @@ export function renderPumpSpec(r) {
   </div>`
 
   return statusHtml + cSection + oSection
+}
+
+// ── 方案摘要渲染 ─────────────────────────────────────────────────
+function renderSchemeSummary(schemeId) {
+  const scheme = PIPE_SCHEMES.find(s => s.id === schemeId)
+  if (!scheme) return ''
+
+  const riskColor = scheme.surgeRisk === 'high' ? '#c0392b' : scheme.surgeRisk === 'low' ? '#e67e22' : '#27ae60'
+  const riskDot = scheme.surgeRisk === 'high' ? '●' : scheme.surgeRisk === 'low' ? '◐' : '○'
+
+  return `
+    <div class="scheme-summary">
+      <span class="badge ${scheme.surgeRisk}">${scheme.badge}</span>
+      <strong>${scheme.name}</strong>
+      <span class="scheme-vel">v=${scheme.v_pumpOut}/${scheme.v_mainOut} m/s</span>
+      <span style="color:${riskColor};margin-left:auto">${riskDot}</span>
+    </div>
+  `
+}
+
+// ── 方案选项卡渲染 ────────────────────────────────────────────────
+export function renderSchemeOptions(activeId) {
+  return PIPE_SCHEMES.map(s => `
+    <div class="scheme-card ${s.id === activeId ? 'active' : ''}"
+         onclick="handleSchemeChange(${s.id})">
+      <div class="scheme-badge ${s.surgeRisk}">${s.badge}</div>
+      <div class="scheme-name">${s.name}</div>
+    </div>
+  `).join('')
 }
 
 // ── AG1-3：管道尺寸计算 ───────────────────────────────────────────
@@ -356,16 +444,37 @@ export function renderPipeSizing(r) {
 
   const dp = r.designParams || {}
 
+  // 方案摘要
+  const schemeSummaryHtml = r.schemeId ? renderSchemeSummary(r.schemeId) : ''
+
   // 已知条件（已移至 card-inputs 输入区域）
 
-  // 计算过程
-  const cSection = `<div class="calc-section">${calcDetails('计算过程', r.rows)}</div>`
+  // 计算过程（过滤掉已知条件输入、方案标题行、泵安装尺寸、输出结果）
+  const excludeLabels = [
+    '═',
+    '泵出水管设计流速', '总出水干管设计流速',
+    '曼宁粗糙系数', '局部损失系数', '必需汽蚀余量 NPSH_r', '管长 L',
+    '泵出水管公称直径', '泵进水管公称直径',
+    '总出水管公称直径',
+    '沿程损失 H_f', '局部损失 H_local', '总水头损失 H_loss',
+    'NPSH校验',
+    '泵安装尺寸', '泵出水弯头',
+  ]
+  const calcRows = r.rows.filter(row => {
+    for (const lbl of excludeLabels) {
+      if (row.includes(`<td>${lbl}</td>`) || row.includes(`<td>${lbl} `)) return false
+    }
+    return true
+  })
+  const cSection = `<div class="calc-section">${calcDetails('计算过程', calcRows)}</div>`
 
   // 输出结果
   const oSection = `<div class="result-section"><div class="section-title">输出结果</div>
     <div class="result-summary pass">
-      ${kvRow('泵进水管公称直径 DN_pumpIn', 'DN ' + r.DN_pumpIn)}
       ${kvRow('泵出水管公称直径 DN_pumpOut', 'DN ' + r.DN_pumpOut)}
+      ${r.DN_pump_outlet != null
+        ? kvRow('泵出口变径构件', r.reducerDesc ?? '无需变径（管径一致）')
+        : ''}
       ${kvRow('总出水管公称直径 DN_mainOutlet', 'DN ' + r.DN_mainOutlet)}
       ${kvRow('沿程损失 H_f', fmt(r.H_f, 3) + ' m')}
       ${kvRow('局部损失 H_local', fmt(r.H_local, 3) + ' m')}
@@ -376,5 +485,5 @@ export function renderPipeSizing(r) {
     </div>
   </div>`
 
-  return statusHtml + cSection + oSection
+  return statusHtml + schemeSummaryHtml + cSection + oSection
 }

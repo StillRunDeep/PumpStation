@@ -593,31 +593,20 @@
               <tr>
                 <td class="itd-label">Z_discharge（mPD）</td>
                 <td class="itd-input"><input type="number" id="pump-Z-discharge" step="0.1"></td>
-                <td class="itd-label">L（m）</td>
-                <td class="itd-input"><input type="number" id="pump-L" step="1"></td>
+                <td class="itd-label">H_pipe_loss（m）</td>
+                <td class="itd-input"><input type="number" id="pump-H-pipe-loss" step="0.1" value="0" min="0" max="50"></td>
               </tr>
               <tr>
                 <td class="itd-label">η_hyd</td>
-                <td class="itd-input"><input type="number" id="pump-eta-hyd" min="0.5" max="1.0" step="0.01"></td>
+                <td class="itd-input"><input type="number" id="pump-eta-hyd" min="0.5" max="1.0" step="0.01" value="0.75"></td>
                 <td class="itd-label">η_mot</td>
-                <td class="itd-input"><input type="number" id="pump-eta-mot" min="0.5" max="1.0" step="0.01"></td>
+                <td class="itd-input"><input type="number" id="pump-eta-mot" min="0.5" max="1.0" step="0.01" value="0.85"></td>
               </tr>
               <tr>
-                <td class="itd-label">n</td>
-                <td class="itd-input"><input type="number" id="pump-n" min="0.010" max="0.020" step="0.001"></td>
                 <td class="itd-label">NPSH_r（m）</td>
                 <td class="itd-input"><input type="number" id="pump-npsh-r" step="0.1"></td>
-              </tr>
-              <tr>
-                <td class="itd-label">v_in（m/s）</td>
-                <td class="itd-input"><input type="number" id="pump-v-in" step="0.1"></td>
-                <td class="itd-label">v_out（m/s）</td>
-                <td class="itd-input"><input type="number" id="pump-v-out" step="0.1"></td>
-              </tr>
-              <tr>
                 <td class="itd-label">电机覆盖（kW）</td>
                 <td class="itd-input"><input type="number" id="pump-motor" step="1" placeholder="留空则计算得出"></td>
-                <td></td><td></td>
               </tr>
             </table>
           </details>
@@ -657,24 +646,19 @@
                 <td class="itd-input"><input type="number" id="pipe-len" step="1"></td>
               </tr>
               <tr>
-                <td class="itd-label">v_in（m/s）</td>
-                <td class="itd-input"><input type="number" id="pipe-v-in" step="0.1"></td>
-                <td class="itd-label">v_out（m/s）</td>
-                <td class="itd-input"><input type="number" id="pipe-v-out" step="0.1"></td>
-              </tr>
-              <tr>
                 <td class="itd-label">n</td>
                 <td class="itd-input"><input type="number" id="pipe-n" min="0.010" max="0.020" step="0.001"></td>
                 <td class="itd-label">k_local</td>
-                <td class="itd-input"><input type="number" id="pipe-k-local" step="0.01"></td>
+                <td class="itd-input"><input type="number" id="pipe-k-local" step="0.01" value="0.15"></td>
               </tr>
               <tr>
                 <td class="itd-label">NPSH_r（m）</td>
-                <td class="itd-input"><input type="number" id="pipe-npsh-r" step="0.1"></td>
+                <td class="itd-input"><input type="number" id="pipe-npsh-r" step="0.1" value="3.0"></td>
                 <td></td><td></td>
               </tr>
             </table>
           </details>
+          <input type="hidden" id="pipe-pump-outlet-dn">
         </div>
         <div class="card-body" id="card-ag13"><p class="msg-pending">尚未计算，请点击「重新计算」或顶部「开始计算全流程」。</p></div>
       </div>
@@ -720,6 +704,17 @@
           </div>
         </div>
         <div class="card-body" style="padding:0;overflow:hidden">
+          <!-- 方案选择器（位于 SVG 绘图上方） -->
+          <div class="scheme-panel" id="scheme-panel">
+            <div class="scheme-labels">
+              <span>管径偏好</span>
+            </div>
+            <input type="range" id="scheme-slider"
+              min="1" max="3" step="1" value="2"
+              class="scheme-slider"
+              oninput="handleSchemeChange(parseInt(this.value))">
+            <div class="scheme-options" id="scheme-options"></div>
+          </div>
           <svg id="svg-ag31" viewBox="0 0 1080 580" preserveAspectRatio="xMidYMid meet"></svg>
         </div>
       </div>

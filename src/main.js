@@ -5,11 +5,11 @@ import { runTopology } from './agents/topology.js'
 import { runPoolDepth } from './agents/pool-depth.js'
 import { runMaintenanceRoom } from './agents/maintenance-room.js'
 import { runPumpSpec } from './agents/pump-spec.js'
-import { runPipeSizing } from './agents/pipe-sizing.js'
+import { runPipeSizing, PIPE_SCHEMES } from './agents/pipe-sizing.js'
 import { runDrawing } from './agents/drawing.js'
 import { runAG41 } from './agents/ag41-building-layout.js'
 import { runAG42, mergeVariants } from './agents/ag42-layout-eval.js'
-import { renderAG00, renderAG01, renderPoolDepth, renderPipeSizing, renderMaintenanceRoom, renderPumpSpec, renderRainfallCard } from './ui/results-panel.js'
+import { renderAG00, renderAG01, renderPoolDepth, renderPipeSizing, renderMaintenanceRoom, renderPumpSpec, renderRainfallCard, renderSchemeOptions } from './ui/results-panel.js'
 import { renderLayoutPanel, getVariants, showAg41Notify } from './ui/layout-panel.js'
 import { renderBuildingParamsPanel } from './ui/building-params-panel.js'
 import { getDefaultUserParams } from './layout/user-params.js'
@@ -21,6 +21,8 @@ let _lastTopoSpare = 0
 // ── 模块缓存与卡片预填 ────────────────────────────────────────────
 
 const moduleCache = { ag00: null, ag01: null, ag11: null, ag12: null, ag13: null, ag21: null }
+
+let currentSchemeId = 2  // 默认"稳健节能型"
 
 const getVal = id => document.getElementById(id)?.value ?? ''
 const setVal = (id, v) => { const el = document.getElementById(id); if (el && v !== '') el.value = v }
@@ -42,17 +44,13 @@ function prefillCardInputs() {
   setVal('pump-Z-discharge', getVal('inp-z-discharge'))
   setVal('pump-eta-hyd',   getVal('inp-eta-hyd'))
   setVal('pump-eta-mot',   getVal('inp-eta-mot'))
-  setVal('pump-n',         getVal('inp-n'))
   setVal('pump-npsh-r',    getVal('inp-npsh-r'))
-  setVal('pump-v-in',      getVal('inp-v-in'))
-  setVal('pump-v-out',     getVal('inp-v-out'))
-  setVal('pump-L',         getVal('inp-pipe-len'))
 
-  // AG1-3 预填
-  setVal('pipe-v-in',      getVal('inp-v-in'))
-  setVal('pipe-v-out',     getVal('inp-v-out'))
+  // AG1-3 预填（流速由方案滑块控制，不再用 inp-v-out）
+  setVal('pipe-N',         getVal('inp-N'))
   setVal('pipe-n',         getVal('inp-n'))
-  setVal('pipe-len',  getVal('inp-pipe-len'))
+  setVal('pipe-len',       getVal('inp-pipe-len'))
+  setVal('pipe-npsh-r',    getVal('inp-npsh-r'))
 
   // AG2-1 预填
   setVal('room-N',      getVal('inp-N'))
@@ -162,13 +160,10 @@ function recalcAG12() {
   const Q_pump  = parseFloat(document.getElementById('pump-Q-pump').value)
   const motor_o = parseFloat(document.getElementById('pump-motor').value)
   const Z_discharge = parseFloat(document.getElementById('pump-Z-discharge').value)
-  const η_hyd   = parseFloat(document.getElementById('pump-eta-hyd').value) || 0.82
-  const η_mot   = parseFloat(document.getElementById('pump-eta-mot').value) || 0.93
-  const n       = parseFloat(document.getElementById('pump-n').value) || 0.013
-  const NPSH_r  = parseFloat(document.getElementById('pump-npsh-r').value) || 3.0
-  const v_in    = parseFloat(document.getElementById('pump-v-in').value) || 1.0
-  const v_out   = parseFloat(document.getElementById('pump-v-out').value) || 1.5
-  const L       = parseFloat(document.getElementById('pump-L').value) || 50
+  const η_hyd   = parseFloat(document.getElementById('pump-eta-hyd').value) ?? 0.75
+  const η_mot   = parseFloat(document.getElementById('pump-eta-mot').value) ?? 0.85
+  const NPSH_r  = parseFloat(document.getElementById('pump-npsh-r').value) ?? 3.0
+  const H_pipe_loss = parseFloat(document.getElementById('pump-H-pipe-loss').value) ?? 0
 
   if (isNaN(Z_stop) || isNaN(Q_pump)) {
     document.getElementById('card-ag12').innerHTML =
@@ -177,7 +172,7 @@ function recalcAG12() {
   }
   // Q_single = Q_pump (m³/s) × 3600 = m³/h
   const Q_single = Q_pump * 3600
-  const result = runPumpSpec({ Q_single, Z_stop, Z_discharge, L, n, η_hyd, η_mot, NPSH_r, v_in, v_out }, isNaN(motor_o) ? null : motor_o)
+  const result = runPumpSpec({ Q_single, Z_stop, Z_discharge, η_hyd, η_mot, NPSH_r, H_pipe_loss }, isNaN(motor_o) ? null : motor_o)
   moduleCache.ag12 = result
   document.getElementById('card-ag12').innerHTML = renderPumpSpec(result)
   // 自动写入下游卡片字段
@@ -186,6 +181,7 @@ function recalcAG12() {
     setVal('pipe-Q-pump',  Q_pump)
     setVal('pipe-Z-stop',  Z_stop)
     setVal('room-motor',   result.P_motor)
+    setVal('pipe-pump-outlet-dn', result.DN_pump_outlet ?? '')
   }
   return result
 }
@@ -196,24 +192,76 @@ function recalcAG13() {
   const Q_total = parseFloat(document.getElementById('pipe-Q-total').value)
   const N       = parseInt(document.getElementById('pipe-N').value, 10)
   const Z_stop  = parseFloat(document.getElementById('pipe-Z-stop').value)
-  const v_in    = parseFloat(document.getElementById('pipe-v-in').value) || 1.0
-  const v_out   = parseFloat(document.getElementById('pipe-v-out').value) || 1.5
   const n       = parseFloat(document.getElementById('pipe-n').value) || 0.013
   const k_local = parseFloat(document.getElementById('pipe-k-local').value) || 0.15
   const NPSH_r  = parseFloat(document.getElementById('pipe-npsh-r').value) || 3.0
   const L       = parseFloat(document.getElementById('pipe-len').value) || 50
+  const DN_pump_outlet_raw = parseFloat(document.getElementById('pipe-pump-outlet-dn').value)
+  const DN_pump_outlet = isNaN(DN_pump_outlet_raw) ? null : DN_pump_outlet_raw
 
   if (isNaN(H_total) || isNaN(Q_pump)) {
     document.getElementById('card-ag13').innerHTML =
       '<p class="msg-error">⚠ 缺少必要参数：请填写 H_total 和 Q_pump，或先运行上游模块。</p>'
     return null
   }
+  // 从方案常量取流速覆盖值
+  const scheme = PIPE_SCHEMES.find(s => s.id === currentSchemeId) ?? PIPE_SCHEMES[1]
+
   // H_s 来自 AG1-2，固定值 2.0m
-  const result = runPipeSizing({ Q_pump, Q: Q_total || Q_pump * 3600, N: N || 2, H_total, Z_stop: Z_stop || 0, H_s: 2.0, v_in, v_out, n, k_local, NPSH_r, L })
+  const result = runPipeSizing({
+    Q_pump, Q: Q_total || Q_pump * 3600, N: N || 2,
+    H_total, Z_stop: Z_stop || 0, H_s: 2.0,
+    v_pumpOut: scheme.v_pumpOut,
+    v_mainOut: scheme.v_mainOut,
+    n, k_local, NPSH_r, L,
+    schemeId: currentSchemeId,
+  })
   moduleCache.ag13 = result
   document.getElementById('card-ag13').innerHTML = renderPipeSizing(result)
   return result
 }
+
+function handleSchemeChange(id) {
+  currentSchemeId = id
+  document.getElementById('scheme-slider').value = id
+  recalcAG13()
+  // AG2-1 和 AG3-1 的重绘（不重跑泵选型）
+  recalcAG21()
+  const ag00Result = moduleCache.ag00
+  const ag1Result  = moduleCache.ag11
+  const ag2Result  = moduleCache.ag12
+  if (ag00Result?.valid && ag2Result?.valid && ag1Result) {
+    const ag21 = runMaintenanceRoom(ag00Result.N, ag2Result.P_motor, ag00Result.N_spare)
+    ag21.DN_label = ag2Result.DN_outlet
+    document.getElementById('card-ag21').innerHTML = renderMaintenanceRoom(ag21)
+    const ag31Params = {
+      h_active:    ag1Result.Z_max - ag1Result.Z_stop,
+      Z_stop:      ag1Result.Z_stop,
+      Z_start1:    ag1Result.Z_start1,
+      Z_alarm_high: ag1Result.Z_alarm_high,
+    }
+    const ag13 = moduleCache.ag13
+    const baseTopo = ag00Result.topo?.topology
+    const enrichedTopo = (baseTopo && ag2Result != null) ? {
+      ...baseTopo,
+      devices: baseTopo.devices.map(d => {
+        if (d.type !== 'pump') return d
+        const outletReducer = ag13?.reducerType !== undefined
+          ? (ag13.reducerType === null
+              ? null
+              : { type: ag13.reducerType, fromDN: ag2Result.DN_pump_outlet, toDN: ag13.DN_pumpOut })
+          : undefined
+        return { ...d, outletReducer }
+      })
+    } : baseTopo
+    runDrawing(ag00Result.N, ag21, ag31Params, ag1Result.S, enrichedTopo)
+  }
+  // 同步更新方案卡 UI
+  document.getElementById('scheme-options').innerHTML = renderSchemeOptions(currentSchemeId)
+}
+
+// 暴露到全局作用域，供 HTML 内联事件处理器调用
+window.handleSchemeChange = handleSchemeChange
 
 function recalcAG21() {
   const N         = parseInt(document.getElementById('room-N').value, 10)
@@ -376,7 +424,7 @@ async function runCalculation() {
   // ── AG2-1: 泵房维护间尺寸计算 ─────────────────────────────────────────
   const effectiveMotor = isNaN(motorOverride) ? ag2Result.P_motor : motorOverride
   const ag21 = runMaintenanceRoom(ag00.N, effectiveMotor, N_spare)
-  ag21.DN_label = ag2Result.DN_outlet
+  ag21.DN_label = (moduleCache.ag13 && moduleCache.ag13.DN_pumpOut) || ag2Result.DN_outlet
   document.getElementById('card-ag21').innerHTML = renderMaintenanceRoom(ag21)
 
   // ── AG3-1: SVG绘图 ───────────────────────────────────────────────
@@ -388,7 +436,26 @@ async function runCalculation() {
     Z_start1:   ag1Result.Z_start1,
     Z_alarm_high: ag1Result.Z_alarm_high,
   }
-  runDrawing(ag00.N, ag21, ag31Params, ag1Result.S, ag00Result.topo.topology)
+  // ── AG3-1: SVG绘图（拓扑数据富化）─────────────────────────────
+  // 用 AG1-3 的变径结果富化拓扑中的 pump 节点
+  const ag12 = moduleCache.ag12
+  const ag13 = moduleCache.ag13
+  const baseTopo = ag00Result.topo.topology
+
+  const enrichedTopo = (baseTopo && ag12 != null) ? {
+    ...baseTopo,
+    devices: baseTopo.devices.map(d => {
+      if (d.type !== 'pump') return d
+      const outletReducer = ag13?.reducerType !== undefined
+        ? (ag13.reducerType === null
+            ? null
+            : { type: ag13.reducerType, fromDN: ag12.DN_pump_outlet, toDN: ag13.DN_pumpOut })
+        : undefined
+      return { ...d, outletReducer }
+    })
+  } : baseTopo
+
+  runDrawing(ag00.N, ag21, ag31Params, ag1Result.S, enrichedTopo)
 
   // Update repair_zone hint from AG2-1 before reading AG4-1 params
   updateRepairZoneHint(ag21)
@@ -408,6 +475,9 @@ const _initN = parseInt(document.getElementById('inp-N').value, 10) || 2
 initTopologyEditor('topology-editor-wrap', () => {})
 setTopologyFromN(_initN)
 _lastTopoN = _initN
+
+// 初始化方案选项卡
+document.getElementById('scheme-options').innerHTML = renderSchemeOptions(currentSchemeId)
 
 function _updateTopo() {
   const N       = parseInt(document.getElementById('inp-N').value, 10)
