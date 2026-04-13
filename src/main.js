@@ -331,3 +331,33 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.getElementById(panelId).hidden = false
   })
 })
+
+// ── 折叠状态持久化 ─────────────────────────────────────────────
+function persistCollapseState() {
+  const collapsibleSections = document.querySelectorAll(
+    '.agent-card, #topology-details, #advanced-params-details, #ag41-comparison-details, #ag41-variants-details, #ag41-detail-details'
+  );
+  const collapseState = JSON.parse(localStorage.getItem('collapseState')) || {};
+
+  collapsibleSections.forEach(section => {
+    // Use a more robust way to get a unique ID for each section
+    const sectionId = section.id || section.classList[1]; // e.g., 'topology-details' or 'card-ag00'
+    if (!sectionId) return;
+
+    // Apply stored state on load
+    if (collapseState[sectionId] === false) { // false means collapsed
+      section.removeAttribute('open');
+    } else if (collapseState[sectionId] === true) { // true means open
+      section.setAttribute('open', '');
+    }
+
+    // Listen for changes and update storage
+    section.addEventListener('toggle', () => {
+      collapseState[sectionId] = section.hasAttribute('open');
+      localStorage.setItem('collapseState', JSON.stringify(collapseState));
+    });
+  });
+}
+
+// Initialize persistence on page load
+document.addEventListener('DOMContentLoaded', persistCollapseState);

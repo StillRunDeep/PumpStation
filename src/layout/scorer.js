@@ -35,7 +35,8 @@ export function computeSpaceEfficiency(result) {
  * Returns { score, spaceEfficiency, efficiencyScore, breakdown }.
  */
 export function scoreLayout(result) {
-  const { buildingW, buildingD, placements } = result
+  const { buildingW, buildingD, groundPlacements, level1Placements } = result
+  const allPlacements = { ...groundPlacements, ...level1Placements };
   const breakdown = { base: 10000, footprint: 0, adjacency: 0, corridor: 0, trafo: 0, fanRoom: 0, efficiency: 0, violations: 0 }
   let score = breakdown.base
 
@@ -47,7 +48,7 @@ export function scoreLayout(result) {
   // 2. Trafo touching east or west exterior wall → +20 each
   const bW = buildingW
   ;['trafo1', 'trafo2'].forEach(id => {
-    const p = placements[id]
+    const p = allPlacements[id]
     if (!p) return
     if (p.x <= 100 || p.x + p.w >= bW - 100) {
       breakdown.trafo += 20
@@ -56,18 +57,18 @@ export function scoreLayout(result) {
   })
 
   // 3. Both trafos on same side → +20
-  if (placements.trafo1 && placements.trafo2) {
-    if (Math.abs(placements.trafo1.x - placements.trafo2.x) < 200) {
+  if (allPlacements.trafo1 && allPlacements.trafo2) {
+    if (Math.abs(allPlacements.trafo1.x - allPlacements.trafo2.x) < 200) {
       breakdown.trafo += 20
       score += 20
     }
   }
 
   // 4. Fan room near dock2 → up to +30
-  if (placements.fan_room && placements.dock2) {
+  if (allPlacements.fan_room && allPlacements.dock2) {
     const dist = Math.hypot(
-      centerX(placements.fan_room) - centerX(placements.dock2),
-      centerY(placements.fan_room) - centerY(placements.dock2)
+      centerX(allPlacements.fan_room) - centerX(allPlacements.dock2),
+      centerY(allPlacements.fan_room) - centerY(allPlacements.dock2)
     )
     const bonus = Math.round(Math.max(0, 30 - dist / 500))
     breakdown.fanRoom = bonus

@@ -169,21 +169,49 @@ details .adv-grid { margin-top: 12px; }
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  max-height: 90vh; /* Limit max height to avoid overly long cards */
 }
 .card-header {
-  padding: 13px 18px;
-  color: white;
-  font-size: 14px;
-  font-weight: 700;
   display: flex;
   align-items: center;
   gap: 10px;
-  position: sticky;
+  padding: 13px 18px 13px 38px; /* Increase left padding */
+  color: white;
+  font-size: 14px;
+  font-weight: 700;
+  position: relative; /* Change to relative for positioning context */
   top: 0;
   z-index: 10;
+  cursor: pointer;
+  list-style: none; /* Remove default marker */
 }
-.card-header .agent-label { font-size: 12px; opacity: .8; }
+
+.card-header::-webkit-details-marker {
+  display: none; /* For Chrome/Safari */
+}
+
+.card-header::before {
+  content: '▶';
+  position: absolute;
+  left: 18px;
+  top: 50%;
+  transform: translateY(-50%) rotate(0deg);
+  font-size: 0.8em;
+  transition: transform 0.2s;
+}
+
+details[open] > .card-header::before {
+  transform: translateY(-50%) rotate(90deg);
+}
+
+.agent-card[open] {
+  border-bottom: 1px solid #dee2e6;
+}
+
+.card-header .agent-label {
+  font-size: 12px;
+  opacity: .8;
+}
+
 .card-header .badge {
   font-size: 11px;
   padding: 2px 9px;
@@ -258,7 +286,42 @@ svg.zoom-active {
 #topology-editor-wrap { padding-top: 10px; }
 #topology-editor-wrap svg { height: 250px; }
 
-.card-body { padding: 16px 18px; overflow-y: auto; }
+.card-body { padding: 16px 18px; }
+
+.ag41-section-header {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1a5276;
+  padding: 10px 18px;
+  background-color: #eaf2fb;
+  border-top: 1px solid #d6eaf8;
+  border-bottom: 1px solid #d6eaf8;
+  cursor: pointer;
+  list-style: none;
+  position: relative;
+  padding-left: 38px;
+}
+
+.ag41-section-header::-webkit-details-marker {
+  display: none;
+}
+
+.ag41-section-header::before {
+  content: '▶';
+  position: absolute;
+  left: 18px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.8em;
+  transition: transform 0.2s;
+}
+
+#ag41-comparison-details[open] > .ag41-section-header::before,
+#ag41-variants-details[open] > .ag41-section-header::before,
+#ag41-detail-details[open] > .ag41-section-header::before {
+  transform: translateY(-50%) rotate(90deg);
+}
+
 
 .steps-table {
   width: 100%;
@@ -425,7 +488,10 @@ svg.zoom-active {
   border-bottom: 1px solid #dce8e0;
   vertical-align: middle;
 }
-.ag41-area-table tr:last-child td { border-bottom: none; }
+.ag41-area-table tbody {
+  border-top: 2px solid #a8d8c8;
+  border-bottom: 2px solid #a8d8c8;
+}
 .ag41-area-table tr:nth-child(even) td { background: #f7fcfa; }
 .ag41-floor-cell {
   font-weight: 700;

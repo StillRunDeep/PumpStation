@@ -97,39 +97,67 @@ function findBestRectangleExpansion(grid, roomId) {
 
   const potentialExpansions = [];
 
-  const directions = [ { dir: 'N', dx: 0, dy: -1 }, { dir: 'S', dx: 0, dy: 1 }, { dir: 'W', dx: -1, dy: 0 }, { dir: 'E', dx: 1, dy: 0 } ];
+  // Try to expand in each of the 4 directions
+  const directions = [
+    { dir: 'W', dx: -1, dy: 0 },
+    { dir: 'E', dx: 1, dy: 0 },
+    { dir: 'N', dx: 0, dy: -1 },
+    { dir: 'S', dx: 0, dy: 1 }
+  ];
 
-  for (const { dx, dy } of directions) {
+  for (const { dir, dx, dy } of directions) {
     let canExpand = true;
     let expansionLine = [];
-    if (dx !== 0) {
+    if (dx !== 0) { // Horizontal expansion (W or E)
+      const newX = (dx > 0) ? bbox.maxX + 1 : bbox.minX - 1;
       for (let y = bbox.minY; y <= bbox.maxY; y++) {
-        const newX = (dx > 0) ? bbox.maxX + 1 : bbox.minX - 1;
         if (grid.getCell(newX, y) !== 0) {
           canExpand = false;
           break;
         }
-        expansionLine.push({x: newX, y});
+        expansionLine.push({ x: newX, y });
       }
-    } else {
+    } else { // Vertical expansion (N or S)
+      const newY = (dy > 0) ? bbox.maxY + 1 : bbox.minY - 1;
       for (let x = bbox.minX; x <= bbox.maxX; x++) {
-        const newY = (dy > 0) ? bbox.maxY + 1 : bbox.minY - 1;
         if (grid.getCell(x, newY) !== 0) {
           canExpand = false;
           break;
         }
-        expansionLine.push({x, y: newY});
+        expansionLine.push({ x, y: newY });
       }
     }
 
     if (canExpand && expansionLine.length > 0) {
-      potentialExpansions.push({ cells: expansionLine, size: expansionLine.length });
+      potentialExpansions.push({
+        cells: expansionLine,
+        size: expansionLine.length,
+        dir: dir
+      });
     }
   }
 
   if (potentialExpansions.length === 0) return null;
 
-  potentialExpansions.sort((a, b) => b.size - a.size);
+  // Prioritize expansions that result in a more square-like room
+  const currentW = bbox.maxX - bbox.minX + 1;
+  const currentD = bbox.maxY - bbox.minY + 1;
+
+  potentialExpansions.forEach(exp => {
+    const newW = exp.dir === 'W' || exp.dir === 'E' ? currentW + 1 : currentW;
+    const newD = exp.dir === 'N' || exp.dir === 'S' ? currentD + 1 : currentD;
+    const aspectRatio = Math.max(newW / newD, newD / newW);
+    // Lower score is better (closer to 1.0)
+    exp.aspectScore = aspectRatio;
+  });
+
+  // Sort by aspect ratio score (ascending), then by size (descending)
+  potentialExpansions.sort((a, b) => {
+    if (a.aspectScore < b.aspectScore) return -1;
+    if (a.aspectScore > b.aspectScore) return 1;
+    return b.size - a.size;
+  });
+
   return potentialExpansions[0].cells;
 }
 
@@ -310,11 +338,9 @@ function fillGaps(grid, rooms) {
 function finalizeLayout(grid) {
   const layout = { ground: {}, level1: {} };
   const roomIds = Object.keys(grid.roomData);
-  console.log("Finalizing layout. Rooms to process:", roomIds.length);
 
   for (const roomId of roomIds) {
     const bbox = grid.getBoundingBox(roomId);
-    console.log(`Processing room: ${roomId}`, bbox);
     if (bbox) {
       const roomLayout = {
         x: bbox.minX * GRID_SIZE,
@@ -324,18 +350,12 @@ function finalizeLayout(grid) {
       };
 
       const roomDef = ROOM_DEFS[roomId];
-      if (!roomDef) {
-        console.warn(`Room definition not found for ${roomId}`);
-        continue;
+      if (roomDef) {
+        const floor = roomDef.floor === 'ground' ? 'ground' : 'level1';
+        layout[floor][roomId] = roomLayout;
       }
-
-      const floor = roomDef.floor === 'ground' ? 'ground' : 'level1';
-      console.log(`  -> Assigning ${roomId} to floor: ${floor}`);
-      layout[floor][roomId] = roomLayout;
     }
   }
-
-  console.log("Finalized layout object:", layout);
   return layout;
 }
 
@@ -355,20 +375,37 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId 
 
   const gridW = Math.floor(bW / GRID_SIZE);
   const gridH = Math.floor(bD / GRID_SIZE);
-  const layoutGrid = new Grid(gridW, gridH);
 
-  const rooms = Object.values(ROOM_DEFS).map(r => {
+  // 1. Separate rooms by floor
+  const allRooms = Object.values(ROOM_DEFS).map(r => {
     const targetAreaMm2 = (roomAreas[r.id] * 1e6) || (r.w * r.d);
     return {
       id: r.id,
       label: r.label,
+      floor: r.floor,
       targetGridCount: Math.round(targetAreaMm2 / (GRID_SIZE * GRID_SIZE)),
-  }}).filter(r => r.targetGridCount >= 1);
+    };
+  }).filter(r => r.targetGridCount >= 1);
 
-  const placedSeeds = placeRoomSeeds(layoutGrid, rooms, rng);
-  expandRooms(layoutGrid, rooms, rng);
-  fillGaps(layoutGrid, rooms);
-  const finalLayout = finalizeLayout(layoutGrid);
+  const groundRooms = allRooms.filter(r => r.floor === 'ground');
+  const level1Rooms = allRooms.filter(r => r.floor === 'level1');
+
+  // 2. Create and process grids for each floor
+  const groundGrid = new Grid(gridW, gridH);
+  const groundSeeds = placeRoomSeeds(groundGrid, groundRooms, rng);
+  expandRooms(groundGrid, groundRooms, rng);
+  fillGaps(groundGrid, groundRooms);
+
+  const level1Grid = new Grid(gridW, gridH);
+  const level1Seeds = placeRoomSeeds(level1Grid, level1Rooms, rng);
+  expandRooms(level1Grid, level1Rooms, rng);
+  fillGaps(level1Grid, level1Rooms);
+
+  // 3. Finalize layouts from both grids
+  const finalLayout = {
+    ground: finalizeLayout(groundGrid).ground,
+    level1: finalizeLayout(level1Grid).level1,
+  };
 
   return {
     id: `A-${groupId}-${variantIdx}`,
@@ -381,8 +418,8 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId 
     groupId,
     variantIdx,
     _debug: {
-      grid: layoutGrid,
-      seeds: placedSeeds,
+      ground: { grid: groundGrid, seeds: groundSeeds },
+      level1: { grid: level1Grid, seeds: level1Seeds },
     }
   };
 }

@@ -104,7 +104,6 @@ export function evaluateTemplate(template) {
   const result = {
     ...template, // Spread the original template properties
     feasible: violations.length === 0,
-    placements: allPlacements,
     violations,
     adjacency,
     doors, // Add doors to the returned object
