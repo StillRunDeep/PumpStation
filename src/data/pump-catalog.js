@@ -629,3 +629,25 @@ export function findMatchingPumps(Q_ls, H_m, tolerance = 0) {
   results.sort((a, b) => (b.eta_pct ?? 0) - (a.eta_pct ?? 0))
   return results
 }
+
+/**
+ * Returns diagnostic info for each pump that failed to match,
+ * explaining the reason.
+ */
+export function diagnosePumpMisses(Q_ls, H_m) {
+  return PUMP_CATALOG.map(pump => {
+    const op = pumpAtFlow(pump, Q_ls)
+    if (!op) {
+      return { pump, reason: 'q_out_of_range',
+               detail: `Q=${Q_ls.toFixed(1)} l/s 不在曲线范围 [0, ${pump.operatingRange.Q_max_ls}] l/s` }
+    }
+    if (Q_ls < pump.operatingRange.Q_min_ls) {
+      return { pump, reason: 'q_below_min',
+               detail: `Q=${Q_ls.toFixed(1)} l/s < Q_min=${pump.operatingRange.Q_min_ls} l/s` }
+    }
+    // head insufficient
+    const gap = H_m - op.H_m
+    return { pump, reason: 'head_insufficient',
+             detail: `泵扬程 ${op.H_m.toFixed(2)} m < 所需 ${H_m.toFixed(2)} m（差 ${gap.toFixed(2)} m）` }
+  })
+}

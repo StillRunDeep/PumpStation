@@ -63,7 +63,8 @@ export function validatePoolDepthParams(params) {
 export function runPoolDepth({
   V_design,   // 设计水缸容量（m³）
   Z_bottom,   // 池底标高（mPD）
-  D,          // 设计水缸深度（m）
+  D = null,   // 设计水缸深度（m），与 A_base 二选一
+  A_base = null, // 池底面积（m²），与 D 二选一
   N,          // 工作泵台数
   Z,          // 每小时允许启动次数（次/小时）
   Q_pump,     // 单泵设计流量（m³/s）
@@ -78,8 +79,29 @@ export function runPoolDepth({
   const warnings = []
 
   // ── 参数校验 ──────────────────────────────────────────────
+  // 几何模式校验：D 和 A_base 二选一
+  if (D !== null && A_base !== null) {
+    return {
+      valid: false,
+      errors: ['D 和 A_base 只能提供其中一个，请留空其中一个'],
+      warnings: [],
+      rows: [],
+    }
+  }
+  if (D === null && A_base === null) {
+    return {
+      valid: false,
+      errors: ['D 和 A_base 至少需要提供其中一个'],
+      warnings: [],
+      rows: [],
+    }
+  }
+
+  // D 范围校验（仅在提供 D 时校验）
   const validationErrors = validatePoolDepthParams({
-    V_design, Z_bottom, D, N, Z, Q_pump,
+    V_design, Z_bottom,
+    D: D !== null ? D : undefined,
+    N, Z, Q_pump,
     k1, k2, F_b, F_s, h_alarm_offset
   })
 
@@ -94,8 +116,22 @@ export function runPoolDepth({
 
   // ── 步骤3：几何参数计算 ──────────────────────────────────
 
+  // 几何模式判断：已知D 或 已知A_base
+  let S, computedD
+  if (D !== null && A_base === null) {
+    // 模式A：已知D，推算面积
+    computedD = D
+    S = V_design / D
+    rows.push(stepRow('几何模式', '已知 D，推算 A_base', `D = ${fmt(D)} m，A_base = V_design / D = ${fmt(V_design, 0)} / ${fmt(D)} =`, fmt(S, 1), 'm²'))
+  } else {
+    // 模式B：已知A_base，推算深度
+    S = A_base
+    computedD = V_design / A_base
+    rows.push(stepRow('几何模式', '已知 A_base，推算 D', `A_base = ${fmt(A_base)} m²，D = V_design / A_base = ${fmt(V_design, 0)} / ${fmt(A_base)} =`, fmt(computedD, 2), 'm'))
+  }
+
   // 池顶标高 = 池底 + 深度
-  const Z_top = Z_bottom + D
+  const Z_top = Z_bottom + computedD
 
   // ── 步骤6：水位控制设计 ──────────────────────────────────
 
@@ -104,17 +140,18 @@ export function runPoolDepth({
   const Z_stop = Z_bottom
 
   // 1#泵启动水位（mPD）
-  const Z_start1 = Z_stop + k1 * D
+  const Z_start1 = Z_stop + k1 * computedD
 
   // 2#泵启动水位（mPD）
-  const Z_start2 = Z_stop + k2 * D
+  const Z_start2 = Z_stop + k2 * computedD
 
   // 最高水位（mPD）
   const Z_max = Z_top - F_b - F_s
 
   // 报警水位（mPD）；低水位报警以池底为基准
   const Z_alarm_low = Z_bottom - h_alarm_offset
-  const Z_alarm_high = Z_max - 0.3
+  // 高水位报警 = 2#泵启动水位，表示双泵均已启动水位仍上涨
+  const Z_alarm_high = Z_start2
 
   // ── 步骤7：调蓄演算与容积校验 ──────────────────────────────
 
@@ -126,8 +163,6 @@ export function runPoolDepth({
 
   // 有效调蓄容积 = 面积 × 有效深度
   // 有效深度 = 最高水位 - 停泵水位
-  // 假设面积为 V_design / D（简化计算）
-  const S = V_design / D  // 推算面积
   const V_effective = S * (Z_max - Z_stop)
 
   // 容积校验
@@ -135,33 +170,36 @@ export function runPoolDepth({
 
   // ── 设计参数标注 ──────────────────────────────────────────
   rows.push(stepRow('═══════════ 设计参数 ═══════════', '', '', ''))
-  rows.push(stepRow('1#泵启动水位系数 k1', '案例调整值(原手册0.40-0.50)', k1, ''))
-  rows.push(stepRow('2#泵启动水位系数 k2', '案例调整值(原手册0.75-0.85)', k2, ''))
-  rows.push(stepRow('超高 F_b', '设计参考值', F_b, 'm'))
-  rows.push(stepRow('安全余量 F_s', '高于启泵水位的安全超高', F_s, 'm'))
-  rows.push(stepRow('低水位报警偏移 h_alarm_offset', '工程惯例默认值', h_alarm_offset, 'm'))
-  rows.push(stepRow('每小时允许启动次数 Z', '泵参数限制', Z, '次/小时', '手册第14.6.1节'))
+  rows.push(stepRow('1#泵启动水位系数 k1', '高级设置，手册规定 0.40~0.50', k1, ''))
+  rows.push(stepRow('2#泵启动水位系数 k2', '高级设置，手册规定 0.75~0.85', k2, ''))
+  rows.push(stepRow('超高 F_b', '高级设置，手册规定 0.5~2.0 m', F_b, 'm'))
+  rows.push(stepRow('安全余量 F_s', '高级设置，惯例 0.1~2.0 m', F_s, 'm'))
+  rows.push(stepRow('低水位报警偏移 h_alarm_offset', '高级设置，惯例 0.3~0.5 m', h_alarm_offset, 'm'))
+  rows.push(stepRow('每小时允许启动次数 Z', '高级设置，手册规定 4~12 次/小时', Z, '次/小时'))
 
   rows.push(stepRow('═══════════ 步骤3：几何参数 ═══════════', '', '', ''))
   rows.push(stepRow('设计水缸容量 V_design', '用户输入', fmt(V_design, 0), 'm³'))
-  rows.push(stepRow('设计水缸深度 D', '用户输入', fmt(D, 1), 'm'))
+  rows.push(stepRow('设计水缸深度 D', '几何模式计算', fmt(computedD, 2), 'm'))
+  rows.push(stepRow('池底面积 A_base', '几何模式计算', fmt(S, 1), 'm²'))
   rows.push(stepRow('池底标高 Z_bottom', '用户输入', fmt(Z_bottom, 2), 'mPD'))
   rows.push(stepRow('池顶标高 Z_top', `Z_bottom + D = ${fmt(Z_bottom)} + ${fmt(D)}`, fmt(Z_top, 2), 'mPD', '计算值'))
   rows.push(stepRow('推算面积 S', `V_design / D = ${fmt(V_design, 0)} / ${fmt(D)}`, fmt(S, 1), 'm²'))
 
   rows.push(stepRow('═══════════ 步骤6：水位控制 ═══════════', '', '', ''))
-  rows.push(stepRow('停泵水位 Z_stop', `Z_stop = Z_bottom`, fmt(Z_stop, 2), 'mPD'))
-  rows.push(stepRow('1#泵启动水位 Z_start1', `Z_stop + k1×D = ${fmt(Z_stop)} + ${k1}×${fmt(D)} =`, fmt(Z_start1, 2), 'mPD'))
-  rows.push(stepRow('2#泵启动水位 Z_start2', `Z_stop + k2×D = ${fmt(Z_stop)} + ${k2}×${fmt(D)} =`, fmt(Z_start2, 2), 'mPD'))
-  rows.push(stepRow('最高水位 Z_max', `Z_top - F_b - F_s = ${fmt(Z_top)} - ${F_b} - ${F_s} =`, fmt(Z_max, 2), 'mPD'))
-  rows.push(stepRow('低水位报警 Z_alarm_low', `Z_bottom - h_alarm_offset = ${fmt(Z_bottom)} - ${h_alarm_offset} =`, fmt(Z_alarm_low, 2), 'mPD'))
-  rows.push(stepRow('高水位报警 Z_alarm_high', `Z_max - 0.3 =`, fmt(Z_alarm_high, 2), 'mPD'))
+  rows.push(stepRow('═══ 监控水位（Monitoring Levels）═══', '', '', ''))
+  rows.push(stepRow('低水位 Low Water Level', `Z_bottom - h_alarm_offset = ${fmt(Z_bottom)} - ${h_alarm_offset} =`, fmt(Z_alarm_low, 2), 'mPD'))
+  rows.push(stepRow('高水位 High Water Level', `Z_start2 = ${fmt(Z_start2)}（双泵均启水位）`, fmt(Z_alarm_high, 2), 'mPD'))
+  rows.push(stepRow('最高水位 Maximum WL', `Z_top - F_b - F_s = ${fmt(Z_top)} - ${F_b} - ${F_s} =`, fmt(Z_max, 2), 'mPD'))
+  rows.push(stepRow('═══ 控制水位（Control Levels）═══', '', '', ''))
+  rows.push(stepRow('1#泵启动 1st Pump Start', `Z_stop + k1×D = ${fmt(Z_stop)} + ${k1}×${fmt(computedD)} =`, fmt(Z_start1, 2), 'mPD'))
+  rows.push(stepRow('2#泵启动 2nd Pump Start', `Z_stop + k2×D = ${fmt(Z_stop)} + ${k2}×${fmt(computedD)} =`, fmt(Z_start2, 2), 'mPD'))
+  rows.push(stepRow('停泵水位 Pump Stop Level', `Z_stop = Z_bottom`, fmt(Z_stop, 2), 'mPD'))
 
   rows.push(stepRow('═══════════ 步骤7：容积校验 ═══════════', '', '', ''))
   rows.push(stepRow('单泵流量 Q_pump', '来自AG0-0', fmt(Q_pump, 3), 'm³/s'))
   rows.push(stepRow('最小调节容积 V_min', `Q_pump/(4×Z)×3600 = ${fmt(Q_pump)}/(4×${Z})×3600 =`, fmt(V_min, 1), 'm³', '工程惯例公式'))
   rows.push(stepRow('有效调蓄容积 V_effective', `S × (Z_max - Z_stop) = ${fmt(S)} × (${fmt(Z_max)} - ${fmt(Z_stop)}) =`, fmt(V_effective, 1), 'm³'))
-  rows.push(stepRow('容积校验', V_ok ? '✓ 满足' : '✗ 不满足', `V_effective ≥ V_min：${fmt(V_effective)} ≥ ${fmt(V_min)}`, ''))
+  rows.push(stepRow('容积校验', `V_effective ≥ V_min：${fmt(V_effective)} ≥ ${fmt(V_min)}`, V_ok ? '✓ 满足' : '✗ 不满足', ''))
 
   // ── 水位关系校验 ──────────────────────────────────────────
   rows.push(stepRow('═══════════ 水位关系校验 ═══════════', '', '', ''))
@@ -176,16 +214,16 @@ export function runPoolDepth({
     warnings.push(...waterLevelErrors)
     waterLevelErrors.forEach(e => rows.push(stepRow('水位警告', '', e, '')))
   } else {
-    rows.push(stepRow('水位关系', '校验通过', 'Z_stop < Z_start1 < Z_start2 < Z_max < Z_top', ''))
+    rows.push(stepRow('水位关系', 'Z_stop < Z_start1 < Z_start2 < Z_max < Z_top', '校验通过', ''))
   }
 
   // 超高校验
   const F_actual = Z_top - Z_max
   if (F_actual < F_b) {
     warnings.push(`超高不足：实际超高 ${fmt(F_actual)}m < 要求 ${F_b}m`)
-    rows.push(stepRow('超高校验', '⚠ 不满足', `Z_top - Z_max = ${fmt(F_actual)} < ${F_b}`, 'm'))
+    rows.push(stepRow('超高校验', `Z_top - Z_max = ${fmt(F_actual)} < ${F_b}`, '⚠ 不满足', 'm'))
   } else {
-    rows.push(stepRow('超高校验', '✓ 满足', `Z_top - Z_max = ${fmt(F_actual)} ≥ ${F_b}`, 'm'))
+    rows.push(stepRow('超高校验', `Z_top - Z_max = ${fmt(F_actual)} ≥ ${F_b}`, '✓ 满足', 'm'))
   }
 
   // ── 多泵梯级启动水位 ──────────────────────────────────────
@@ -211,7 +249,7 @@ export function runPoolDepth({
     warnings,
     // 计算结果
     V_min, V_effective, V_ok, S,
-    D, Z_top,
+    D: computedD, Z_top,
     Z_stop, Z_start1, Z_start2, Z_max,
     Z_alarm_low, Z_alarm_high,
     Z,
