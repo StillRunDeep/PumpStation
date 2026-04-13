@@ -53,8 +53,9 @@ function renderComparisonTable(variants) {
         <tr><td style="padding:1px 6px">约束违反</td><td style="text-align:right;color:#c0392b">${bdSign(bd.violations ?? 0)}</td></tr>
       </table></details>`
 
-    // Insert a group-separator row when the groupId changes
+    // Insert a group-separator row when the groupId changes (REMOVED as requested)
     let groupRow = ''
+    /*
     if (v.groupId !== lastGroupId) {
       lastGroupId = v.groupId
       const gl = groupLabel(v)
@@ -67,6 +68,7 @@ function renderComparisonTable(variants) {
           </td>
         </tr>`
     }
+    */
 
     return groupRow + `
       <tr style="cursor:pointer;background:${i % 2 === 0 ? '#f8fafc' : '#fff'}" onclick="window._ag41SelectVariant(${i})">
@@ -119,11 +121,6 @@ function renderVariantCards(variants) {
       : ''
     sections.push(`
       <div class="variant-group">
-        <div class="variant-group-header" style="background:${gl.color}">
-          <span>${gl.title}</span>
-          <span class="vg-dims">${dims}</span>
-          ${gl.subtitle ? `<span class="vg-count">${gl.subtitle}</span>` : ''}
-        </div>
         <div class="variant-group-cards">
           ${currentCards.join('')}
         </div>
