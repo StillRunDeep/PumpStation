@@ -105,3 +105,49 @@ export function _dv(x, y1, y2, label, clr) {
     `<text transform="translate(${lx.toFixed(1)},${mid.toFixed(1)}) rotate(-90)" font-size="11" fill="${clr}" text-anchor="middle" font-family="Microsoft YaHei,sans-serif">${label}</text>`,
   ].join('')
 }
+
+export function decomposeRoomIntoRects(cells) {
+    if (!cells || cells.length === 0) return [];
+
+    const cellSet = new Set(cells.map(c => `${c.x},${c.y}`));
+    const rects = [];
+
+    while (cellSet.size > 0) {
+        const startCell = [...cellSet].reduce((a, b) => {
+            const [ax, ay] = a.split(',').map(Number);
+            const [bx, by] = b.split(',').map(Number);
+            return (ay < by || (ay === by && ax < bx)) ? a : b;
+        });
+
+        const [startX, startY] = startCell.split(',').map(Number);
+
+        let width = 1;
+        while (cellSet.has(`${startX + width},${startY}`)) {
+            width++;
+        }
+
+        let height = 1;
+        let canExtend = true;
+        while (canExtend) {
+            for (let i = 0; i < width; i++) {
+                if (!cellSet.has(`${startX + i},${startY + height}`)) {
+                    canExtend = false;
+                    break;
+                }
+            }
+            if (canExtend) {
+                height++;
+            }
+        }
+
+        rects.push({ x: startX, y: startY, w: width, h: height });
+
+        for (let i = 0; i < width; i++) {
+            for (let j = 0; j < height; j++) {
+                cellSet.delete(`${startX + i},${startY + j}`);
+            }
+        }
+    }
+
+    return rects;
+}

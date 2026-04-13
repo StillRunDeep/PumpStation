@@ -1,5 +1,5 @@
 import { ROOM_DEFS } from '../layout/room-defs.js'
-import { _r, _l, _t, _dh, _dv } from './svg-helpers.js'
+import { _r, _l, _t, _dh, _dv, decomposeRoomIntoRects } from './svg-helpers.js'
 
 const FONT = 'Microsoft YaHei,sans-serif'
 
@@ -58,24 +58,42 @@ export function renderLayoutSVG(variant, vw, vh, opts = {}) {
     const def = ROOM_DEFS[id]
     if (!def) continue
 
-    const rx = ox + p.x * ps
-    const ry = oy + p.y * ps
-    const rw = p.w * ps
-    const rd = p.d * ps
+    if (p.cells && p.gridSize) {
+        const rects = decomposeRoomIntoRects(p.cells);
+        let pathData = '';
+        for (const r of rects) {
+            const rx = ox + r.x * p.gridSize * ps;
+            const ry = oy + r.y * p.gridSize * ps;
+            const rw = r.w * p.gridSize * ps;
+            const rh = r.h * p.gridSize * ps;
+            pathData += `M ${rx} ${ry} h ${rw} v ${rh} h ${-rw} Z `;
+        }
 
-    if (def.isOpening) {
-      // Hatch: cross-hatch fill
-      s += _r(rx, ry, rw, rd, '#cde6f7', def.strokeColor || '#2471a3', 1.5, 'stroke-dasharray="4,2"')
-      s += _l(rx, ry, rx + rw, ry + rd, '#aed6f1', 1)
-      s += _l(rx + rw, ry, rx, ry + rd, '#aed6f1', 1)
+        if (def.isOpening) {
+            s += `<path d="${pathData}" fill="#cde6f7" stroke="${def.strokeColor || '#2471a3'}" stroke-width="1.5" stroke-dasharray="4,2"/>`;
+            const rx = ox + p.x * ps, ry = oy + p.y * ps, rw = p.w * ps, rd = p.d * ps;
+            s += _l(rx, ry, rx + rw, ry + rd, '#aed6f1', 1);
+            s += _l(rx + rw, ry, rx, ry + rd, '#aed6f1', 1);
+        } else {
+            s += `<path d="${pathData}" fill="${def.color}" stroke="${def.strokeColor || '#555'}" stroke-width="1.5"/>`;
+        }
     } else {
-      s += _r(rx, ry, rw, rd, def.color, def.strokeColor || '#555', 1.5)
+        // Fallback to bounding box
+        const rx = ox + p.x * ps, ry = oy + p.y * ps, rw = p.w * ps, rd = p.d * ps;
+        if (def.isOpening) {
+          s += _r(rx, ry, rw, rd, '#cde6f7', def.strokeColor || '#2471a3', 1.5, 'stroke-dasharray="4,2"');
+          s += _l(rx, ry, rx + rw, ry + rd, '#aed6f1', 1);
+          s += _l(rx + rw, ry, rx, ry + rd, '#aed6f1', 1);
+        } else {
+          s += _r(rx, ry, rw, rd, def.color, def.strokeColor || '#555', 1.5);
+        }
     }
 
-    // Labels (only if room is wide enough)
+    // Labels (use original bbox for positioning)
+    const rw = p.w * ps, rd = p.d * ps;
     if (rw > 30 && rd > 20) {
-      const cx = rx + rw / 2
-      const cy = ry + rd / 2
+      const cx = ox + (p.x + p.w / 2) * ps
+      const cy = oy + (p.y + p.d / 2) * ps
       const maxChars = Math.floor(rw / 7)
       const shortLabel = def.label.length > maxChars ? def.label.slice(0, maxChars - 1) + '…' : def.label
       const labelSz = Math.max(8, Math.min(11, rw / (def.label.length * 0.65)))
@@ -152,21 +170,46 @@ export function renderLayoutSVGDual(variant, vw, vh) {
     }
 
     for (const [id, p] of Object.entries(placements || {})) {
-      const def = ROOM_DEFS[id]
-      if (!def) continue
-      const rx = ox + p.x * ps, ry = oy + p.y * ps
-      const rw = p.w * ps, rd = p.d * ps
-      if (def.isOpening) {
-        s += _r(rx, ry, rw, rd, '#cde6f7', def.strokeColor || '#2471a3', 1, 'stroke-dasharray="3,2"')
-        s += _l(rx, ry, rx + rw, ry + rd, '#aed6f1', 0.8)
-        s += _l(rx + rw, ry, rx, ry + rd, '#aed6f1', 0.8)
-      } else {
-        s += _r(rx, ry, rw, rd, def.color, def.strokeColor || '#555', 1)
-      }
-      if (rw > 22 && rd > 16) {
-        const labelSz = Math.max(7, Math.min(10, rw / (def.label.length * 0.7)))
-        s += _t(rx + rw / 2, ry + rd / 2 + 3, def.label.slice(0, Math.floor(rw / 7)), labelSz, '#2c3e50')
-      }
+        const def = ROOM_DEFS[id];
+        if (!def) continue;
+
+        if (p.cells && p.gridSize) {
+            const rects = decomposeRoomIntoRects(p.cells);
+            let pathData = '';
+            for (const r of rects) {
+                const rx_cell = ox + r.x * p.gridSize * ps;
+                const ry_cell = oy + r.y * p.gridSize * ps;
+                const rw_cell = r.w * p.gridSize * ps;
+                const rh_cell = r.h * p.gridSize * ps;
+                pathData += `M ${rx_cell} ${ry_cell} h ${rw_cell} v ${rh_cell} h ${-rw_cell} Z `;
+            }
+
+            if (def.isOpening) {
+                s += `<path d="${pathData}" fill="#cde6f7" stroke="${def.strokeColor || '#2471a3'}" stroke-width="1" stroke-dasharray="3,2"/>`;
+                const rx = ox + p.x * ps, ry = oy + p.y * ps, rw = p.w * ps, rd = p.d * ps;
+                s += _l(rx, ry, rx + rw, ry + rd, '#aed6f1', 0.8);
+                s += _l(rx + rw, ry, rx, ry + rd, '#aed6f1', 0.8);
+            } else {
+                s += `<path d="${pathData}" fill="${def.color}" stroke="${def.strokeColor || '#555'}" stroke-width="1"/>`;
+            }
+        } else {
+            // Fallback to bounding box
+            const rx = ox + p.x * ps, ry = oy + p.y * ps, rw = p.w * ps, rd = p.d * ps;
+            if (def.isOpening) {
+                s += _r(rx, ry, rw, rd, '#cde6f7', def.strokeColor || '#2471a3', 1, 'stroke-dasharray="3,2"');
+                s += _l(rx, ry, rx + rw, ry + rd, '#aed6f1', 0.8);
+                s += _l(rx + rw, ry, rx, ry + rd, '#aed6f1', 0.8);
+            } else {
+                s += _r(rx, ry, rw, rd, def.color, def.strokeColor || '#555', 1);
+            }
+        }
+
+        // Labels
+        const rw = p.w * ps, rd = p.d * ps;
+        if (rw > 22 && rd > 16) {
+            const labelSz = Math.max(7, Math.min(10, rw / (def.label.length * 0.7)));
+            s += _t(ox + (p.x + p.w / 2) * ps, oy + (p.y + p.d / 2) * ps + 3, def.label.slice(0, Math.floor(rw / 7)), labelSz, '#2c3e50');
+        }
     }
 
     // Doors for this floor
