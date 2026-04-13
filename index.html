@@ -456,7 +456,71 @@
           </p>
         </div>
       </div>
+
+    </details><!-- end 高级参数 -->
+
+    <button class="btn-calculate" id="btn-calc">开始计算</button>
+  </section>
+
+  <!-- ══ 结果面板 ══ -->
+  <section id="results-panel" hidden>
+    <div class="results-grid">
+
+      <!-- AG0-0: 暴雨计算 -->
+      <div class="agent-card card-rainfall-analysis">
+        <div class="card-header">
+          <span>AG0-0</span><span class="agent-label">暴雨计算</span>
+          <div class="card-header-actions">
+            <button class="btn-recalc" id="btn-rainfall-recalc">重新计算</button>
+            <button class="btn-downstream" id="btn-rainfall-downstream">更新后续</button>
+          </div>
+        </div>
+        <div class="card-inputs">
+          <details open>
+            <summary class="card-inputs-title">已知条件</summary>
+            <table class="inputs-table">
+              <tr>
+                <td class="itd-label">降雨分区 Zone</td>
+                <td class="itd-input" colspan="3">
+                  <select id="rainfall-zone">
+                    <option value="tungkl">香港天文台总部</option>
+                    <option value="tai-mo-shan">大帽山</option>
+                    <option value="west-lantau">西部大屿山</option>
+                    <option value="north">北区</option>
+                  </select>
+                </td>
+              </tr>
+              <tr>
+                <td class="itd-label">t_d（min）</td>
+                <td class="itd-input"><input type="number" id="rainfall-td" step="1" min="10" max="240"></td>
+                <td class="itd-label">A_catch（km²）</td>
+                <td class="itd-input"><input type="number" id="rainfall-area" step="0.001"></td>
+              </tr>
+              <tr>
+                <td class="itd-label">径流系数 C</td>
+                <td class="itd-input"><input type="number" id="rainfall-runoff-c" step="0.01" min="0.05" max="1.0"></td>
+                <td class="itd-label">Δi（%）</td>
+                <td class="itd-input"><input type="number" id="rainfall-climate-adj" step="1" min="0" max="30" placeholder="0"></td>
+              </tr>
+              <tr>
+                <td class="itd-label">H（m/100m）</td>
+                <td class="itd-input"><input type="number" id="rainfall-slope" step="0.1" placeholder="1.0"></td>
+                <td class="itd-label">L（m）</td>
+                <td class="itd-input"><input type="number" id="rainfall-flow-path" step="10" placeholder="500"></td>
+              </tr>
+            </table>
+            <p class="card-inputs-note">固定计算 T=10/50/200 年三个重现期（手册第14.6.2节）。T=10 年峰值流量将作为单泵设计流量写入 AG1-1。</p>
+          </details>
+        </div>
+        <div class="card-body" id="card-rainfall"><p class="msg-pending">尚未计算，请点击「重新计算」或顶部「开始计算全流程」。</p></div>
       </div>
+
+      <!-- AG0-1: 拓扑解析 -->
+      <div class="agent-card card-ag01">
+        <div class="card-header">
+          <span>AG0-1</span><span class="agent-label">拓扑解析 · 连接关系验证</span>
+        </div>
+        <div class="card-body" id="card-ag01"><p class="msg-pending">等待暴雨计算完成后显示拓扑验证结果。</p></div>
       </div>
 
       <!-- AG1-1 -->

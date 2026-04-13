@@ -9,7 +9,7 @@ import { runPipeSizing } from './agents/pipe-sizing.js'
 import { runDrawing } from './agents/drawing.js'
 import { runAG41 } from './agents/ag41-building-layout.js'
 import { runAG42, mergeVariants } from './agents/ag42-layout-eval.js'
-import { renderAG00, renderAG01, renderPoolDepth, renderPipeSizing, renderMaintenanceRoom, renderPumpSpec } from './ui/results-panel.js'
+import { renderAG00, renderAG01, renderPoolDepth, renderPipeSizing, renderMaintenanceRoom, renderPumpSpec, renderRainfallCard } from './ui/results-panel.js'
 import { renderLayoutPanel, getVariants, showAg41Notify } from './ui/layout-panel.js'
 import { renderBuildingParamsPanel } from './ui/building-params-panel.js'
 import { getDefaultUserParams } from './layout/user-params.js'
@@ -57,9 +57,78 @@ function prefillCardInputs() {
   // AG2-1 预填
   setVal('room-N',      getVal('inp-N'))
   setVal('room-N-spare', getVal('inp-N-spare'))
+
+  // 暴雨分析卡片预填（从高级设置 Tab2 复制）
+  setVal('rainfall-zone',        getVal('inp-zone'))
+  setVal('rainfall-td',          getVal('inp-td'))
+  setVal('rainfall-area',        getVal('inp-A'))
+  setVal('rainfall-runoff-c',    getVal('inp-C'))
+  setVal('rainfall-climate-adj', getVal('inp-delta-i'))
+  setVal('rainfall-slope',       getVal('inp-H'))
+  setVal('rainfall-flow-path',   getVal('inp-L'))
 }
 
 // ── 独立模块重算函数 ──────────────────────────────────────────────
+
+function recalcRainfall() {
+  const zone       = document.getElementById('rainfall-zone')?.value || ''
+  const t_d        = parseFloat(document.getElementById('rainfall-td').value)
+  const catchArea  = parseFloat(document.getElementById('rainfall-area').value)
+  const runoffC    = parseFloat(document.getElementById('rainfall-runoff-c').value)
+  const climateAdj = parseFloat(document.getElementById('rainfall-climate-adj').value) || 0
+  const slope      = parseFloat(document.getElementById('rainfall-slope').value) || 1.0
+  const flowPath   = parseFloat(document.getElementById('rainfall-flow-path').value) || 500
+
+  // 公共结构参数（从基础参数表单读取，用于 runUserParams 校验）
+  const N          = parseInt(getVal('inp-N'), 10) || 2
+  const N_spare    = parseInt(getVal('inp-N-spare'), 10) || 0
+  const Z          = parseInt(getVal('inp-Z'), 10) || 8
+  const Z_bottom   = parseFloat(getVal('inp-z-bottom'))
+  const D          = parseFloat(getVal('inp-D'))
+  const Z_discharge= parseFloat(getVal('inp-z-discharge'))
+  const Z_sump     = parseFloat(getVal('inp-Z-sump'))
+
+  const baseParams = {
+    N, N_spare, Z, Z_bottom, D, Z_discharge, Z_sump,
+    zone, t_d, A: catchArea, C: runoffC,
+    delta_i: climateAdj, H: slope, L: flowPath
+  }
+
+  // 计算 T=10 / 50 / 200 三个标准重现期
+  const duty10Year   = runUserParams({ ...baseParams, T: 10 })
+  const capacity50   = runUserParams({ ...baseParams, T: 50 })
+  const floodCheck200= runUserParams({ ...baseParams, T: 200 })
+
+  // 拓扑解析（保持现有功能不变）
+  const topoResult = runTopology(getCurrentTopology())
+
+  const rainfallResult = {
+    duty10Year, capacity50, floodCheck200,
+    topo: topoResult,
+    valid: duty10Year.valid && topoResult.valid
+  }
+  moduleCache.ag01 = rainfallResult
+
+  document.getElementById('card-rainfall').innerHTML =
+    renderRainfallCard({ duty10Year, capacity50, floodCheck200 })
+
+  // 将 T=10 年值班泵流量写入水池计算卡片的已知条件
+  if (duty10Year.valid && duty10Year.Q_pump != null) {
+    setVal('pool-Q-pump', duty10Year.Q_pump)
+  }
+
+  return rainfallResult
+}
+
+function runFromRainfall() {
+  recalcRainfall()
+  const ag01Topo = runTopology(getCurrentTopology())
+  document.getElementById('card-ag01').innerHTML = renderAG01(ag01Topo)
+  recalcAG11()
+  recalcAG12()
+  recalcAG13()
+  recalcAG21()
+}
 
 function recalcAG11() {
   const Q_pump   = parseFloat(document.getElementById('pool-Q-pump').value)
@@ -164,10 +233,10 @@ function recalcAG21() {
 
 // ── 下游链式函数 ──────────────────────────────────────────────────
 
-function runFromAG11() { recalcAG11(); recalcAG12(); recalcAG13(); recalcAG21(); recalcAG31(); }
-function runFromAG12() { recalcAG12(); recalcAG13(); recalcAG21(); recalcAG31(); }
-function runFromAG13() { recalcAG13(); recalcAG21(); recalcAG31(); }
-function runFromAG21() { recalcAG21(); recalcAG31(); }
+function runFromAG11() { recalcAG11(); recalcAG12(); recalcAG13(); recalcAG21(); }
+function runFromAG12() { recalcAG12(); recalcAG13(); recalcAG21(); }
+function runFromAG13() { recalcAG13(); recalcAG21(); }
+function runFromAG21() { recalcAG21(); }
 
 // ── AG4-1 parameter helpers ───────────────────────────────────────────
 
@@ -222,8 +291,8 @@ async function runCalculation() {
     L:          parseFloat(document.getElementById('inp-L').value) || 500,
   }
 
+  // AG0-0: 参数验证（保留，用于获取 mode、N 等下游参数）
   const ag00 = runUserParams(ag00Params)
-  document.getElementById('card-ag00').innerHTML = renderAG00(ag00)
 
   const panel = document.getElementById('results-panel')
   panel.hidden = false
@@ -236,9 +305,12 @@ async function runCalculation() {
     _lastTopoSpare = N_spare
   }
 
-  // AG0-1: 拓扑解析
-  const ag01 = runTopology(getCurrentTopology())
-  document.getElementById('card-ag01').innerHTML = renderAG01(ag01)
+  // AG0-0: 暴雨计算（已知条件在卡片内，输出到 card-rainfall）
+  const ag00Result = recalcRainfall()
+
+  // AG0-1: 拓扑解析（单独调用，输出到 card-ag01）
+  const ag01Topo = runTopology(getCurrentTopology())
+  document.getElementById('card-ag01').innerHTML = renderAG01(ag01Topo)
 
   if (!ag00.valid) {
     ;['card-ag11', 'card-ag12', 'card-ag13', 'card-ag21'].forEach(id => {
@@ -251,8 +323,10 @@ async function runCalculation() {
   }
 
   // ── 同步 AG0-0 结果到卡片字段 ────────────────────────────────
-  // 将 Q_pump 写入 AG1-1 的已知条件，以便独立重算时使用
-  setVal('pool-Q-pump', ag00.Q_pump)
+  // 将 Q_pump 写入 AG1-1 的已知条件（暴雨模式由 recalcRainfall 写入，此处仅直接模式）
+  if (ag00.mode === 'direct') {
+    setVal('pool-Q-pump', ag00.Q_pump)
+  }
   // 同时填入 AG1-3 的总流量
   const totalFlow = ag00.mode === 'direct'
     ? (ag00.Q_total * 3600)
@@ -314,7 +388,7 @@ async function runCalculation() {
     Z_start1:   ag1Result.Z_start1,
     Z_alarm_high: ag1Result.Z_alarm_high,
   }
-  runDrawing(ag00.N, ag21, ag31Params, ag1Result.S, ag01.topology)
+  runDrawing(ag00.N, ag21, ag31Params, ag1Result.S, ag00Result.topo.topology)
 
   // Update repair_zone hint from AG2-1 before reading AG4-1 params
   updateRepairZoneHint(ag21)
@@ -520,3 +594,5 @@ function persistCollapseState() {
 
 // Initialize persistence on page load
 document.addEventListener('DOMContentLoaded', persistCollapseState);
+document.getElementById('btn-rainfall-recalc').addEventListener('click', recalcRainfall)
+document.getElementById('btn-rainfall-downstream').addEventListener('click', runFromRainfall)

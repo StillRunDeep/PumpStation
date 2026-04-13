@@ -181,7 +181,7 @@ export function runUserParams({
   // ── 模式特定参数校验与计算 ─────────────────────────────────
 
   let Q_p = null, i = null, ARF = null, Q = null
-  let Q_pump = null, Q_single = null
+  let Q_pump = null, Q_single = null, t_c = null
 
   if (mode === 'direct') {
     // 直接输入模式
@@ -231,7 +231,7 @@ export function runUserParams({
       Q_single = Q / N                  // 单泵流量（m³/h）
 
       // 步骤2b：集流时间计算（布兰兹贝-威廉公式）
-      const t_c = 0.14465 * L / (Math.pow(H, 0.2) * Math.pow(A * 1000000, 0.1))  // 集流时间（分钟）
+      t_c = 0.14465 * L / (Math.pow(H, 0.2) * Math.pow(A * 1000000, 0.1))  // 集流时间（分钟）
     }
   }
 

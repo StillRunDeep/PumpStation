@@ -1,6 +1,7 @@
 import { fmt, stepsTable, kvRow } from '../utils.js'
 
-export function renderAG01(r) {
+// 拓扑验证结果（从 renderAG01 提取为独立函数）
+function renderTopologyResult(r) {
   if (!r) return '<p style="color:#999;padding:8px">未找到拓扑数据。</p>'
 
   const status = r.valid ? (r.warnings.length > 0 ? 'warn' : 'pass') : 'error'
@@ -41,6 +42,44 @@ export function renderAG01(r) {
       ${roomRows}
     </div>
   `
+}
+
+// 向后兼容：renderAG01 调用 renderTopologyResult
+export function renderAG01(r) {
+  return renderTopologyResult(r)
+}
+
+// 暴雨分析渲染（仅暴雨结果，无拓扑）
+export function renderRainfallCard({ duty10Year, capacity50, floodCheck200 }) {
+  return `
+    <div class="result-section">
+      <div class="section-title">暴雨径流分析（推理法）</div>
+      <table class="step-table">
+        <thead>
+          <tr><th>参数</th><th>T=10年（值班）</th><th>T=50年（容量校核）</th><th>T=200年（洪水检验）</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>降雨强度 i（mm/h）</td>
+              <td>${fmt(duty10Year.i)}</td><td>${fmt(capacity50.i)}</td><td>${fmt(floodCheck200.i)}</td></tr>
+          <tr><td>峰值流量 Q_p（m³/s）</td>
+              <td>${fmt(duty10Year.Q_pump)}</td>
+              <td>${fmt(capacity50.Q_pump)}</td>
+              <td>${fmt(floodCheck200.Q_pump)}</td></tr>
+          <tr><td>峰值流量 Q（m³/h）</td>
+              <td>${fmt(duty10Year.Q)}</td><td>${fmt(capacity50.Q)}</td><td>${fmt(floodCheck200.Q)}</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="result-section" style="margin-top:12px">
+      <div class="section-title">输出结果</div>
+      <div class="result-summary pass">
+        ${kvRow('T=10年 总设计流量 Q', fmt(duty10Year.Q) + ' m³/h')}
+        ${kvRow('T=10年 单泵设计流量 Q_pump', fmt(duty10Year.Q_pump) + ' m³/s', '')}
+        ${kvRow('T=50年 总设计流量 Q', fmt(capacity50.Q) + ' m³/h')}
+        ${kvRow('T=200年 总设计流量 Q', fmt(floodCheck200.Q) + ' m³/h')}
+      </div>
+    </div>
+`
 }
 
 export function renderAG00(r) {

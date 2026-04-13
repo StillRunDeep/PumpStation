@@ -227,6 +227,7 @@ details[open] > .card-header::before {
 }
 
 .card-ag01 .card-header { background: #7d3c98; }
+.card-rainfall-analysis .card-header { background: #7d3c98; }
 .card-ag00 .card-header { background: var(--color-ag00); }
 .card-pool-depth .card-header { background: var(--color-ag11); }
 .card-pump-spec .card-header { background: var(--color-ag12); }
