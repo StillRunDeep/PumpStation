@@ -225,124 +225,11 @@
         </div>
       </div>
 
-      
     </details><!-- end 高级参数 -->
 
     <button class="btn-calculate" id="btn-calc">开始计算</button>
   </section>
 
-
-  <!-- ── 建筑参数模态框 ── -->
-  <section id="modal-build-params" class="modal" role="dialog" hidden>
-    <div class="modal-overlay"></div>
-    <div class="modal-content" style="width: 700px; max-width: 95vw;">
-      <div class="modal-header">
-        <h3>建筑平面参数设置</h3>
-        <button class="modal-close" aria-label="关闭">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div id="modal-params-wrap">
-        <div class="tab-panel" id="tab-layout">
-        <div class="ag41-params-body">
-          <div class="ag41-section-title">建筑总尺寸
-            <span class="ag41-hint">整体长宽由用户指定，以下为初始参考值</span>
-          </div>
-          <div class="form-grid">
-            <div class="form-group">
-              <label>建筑宽度 BW（mm）</label>
-              <input type="number" id="inp-bw" min="10000" max="40000" step="100" value="18600">
-              <span class="hint">东西向外包净尺寸，初始值 18600 mm</span>
-            </div>
-            <div class="form-group">
-              <label>建筑进深 BD（mm）</label>
-              <input type="number" id="inp-bd" min="10000" max="50000" step="100" value="24000">
-              <span class="hint">南北向外包净尺寸，初始值 24000 mm</span>
-            </div>
-          </div>
-
-          <div class="ag41-section-title" style="margin-top:14px">各功能空间目标面积
-            <span class="ag41-hint">允许用户自行修改；留空则使用默认比例算法</span>
-          </div>
-
-          <table class="ag41-area-table">
-            <thead>
-              <tr>
-                <th>楼层</th>
-                <th>功能空间</th>
-                <th>目标面积（m²）</th>
-                <th>说明 / 初始参考值</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td rowspan="5" class="ag41-floor-cell">地面层</td>
-                <td>中电变压器房（×2）</td>
-                <td><input type="number" id="ra-trafo" class="ra-input" min="20" step="1" placeholder="≈ 69"></td>
-                <td class="ag41-note">每间约 68.8 m²；由变压器型号确定，变更须验证</td>
-              </tr>
-              <tr>
-                <td>服务用房（总水表＋水表＋消防）</td>
-                <td><input type="number" id="ra-svc" class="ra-input" min="10" step="1" placeholder="≈ 26"></td>
-                <td class="ag41-note">三间合计约 25.8 m²；由规范最小尺寸确定</td>
-              </tr>
-              <tr>
-                <td>水泵维修区域 <span class="ag41-tag inherited">继承自 AG1-2</span></td>
-                <td><input type="number" id="ra-repair" class="ra-input" min="10" step="1" placeholder="≈ 34"></td>
-                <td class="ag41-note" id="ra-repair-note">
-                  初始值约 34 m²；<strong>建议参考 AG1-2 维护间净长 L × 净宽 W</strong>，计算完成后自动填入
-                </td>
-              </tr>
-              <tr>
-                <td>停车区域 <span class="ag41-tag">独立生长</span></td>
-                <td><input type="number" id="ra-parking" class="ra-input" min="20" step="1" placeholder="≈ 172"></td>
-                <td class="ag41-note">默认约 172 m²（10 m 跨 × 17.2 m）；典型停车位 5.5 m × 2.5 m ≈ 14 m²/辆</td>
-              </tr>
-              <tr>
-                <td>送货口 1（地坑）</td>
-                <td><input type="number" id="ra-dock1" class="ra-input" min="4" step="1" placeholder="≈ 9" disabled></td>
-                <td class="ag41-note">固定 3 m × 3 m = 9 m²；不可调整</td>
-              </tr>
-            </tbody>
-            <tbody>
-              <tr>
-                <td rowspan="5" class="ag41-floor-cell">一层</td>
-                <td>风机房</td>
-                <td><input type="number" id="ra-fan" class="ra-input" min="50" step="1" placeholder="≈ 160"></td>
-                <td class="ag41-note">约 160 m²；由 5t 吊车覆盖范围决定，调整须重新验证</td>
-              </tr>
-              <tr>
-                <td>清洁泵房及水箱房</td>
-                <td><input type="number" id="ra-cp" class="ra-input" min="10" step="1" placeholder="≈ 40"></td>
-                <td class="ag41-note">初始值约 39.7 m²</td>
-              </tr>
-              <tr>
-                <td>雨水回收及灌溉设备房</td>
-                <td><input type="number" id="ra-rw" class="ra-input" min="10" step="1" placeholder="≈ 57"></td>
-                <td class="ag41-note">初始值约 56.7 m²；面积由建筑宽度和配电室宽度剩余确定</td>
-              </tr>
-              <tr>
-                <td>低压配电及 PLC 控制室</td>
-                <td><input type="number" id="ra-lv" class="ra-input" min="50" step="1" placeholder="≈ 140"></td>
-                <td class="ag41-note">初始值约 140 m²；宽度在 7.5–9.0 m 之间随机</td>
-              </tr>
-              <tr>
-                <td>一层主走廊</td>
-                <td><input type="number" id="ra-corr" class="ra-input" min="8" step="1" placeholder="≈ 20" disabled></td>
-                <td class="ag41-note">最小净宽 1.6 m，长度由楼层决定；不可单独指定面积</td>
-              </tr>
-            </tbody>
-          </table>
-
-          <p class="ag41-gen-note">
-            生成方案：<strong>9 个</strong>（用户指定尺寸）
-          </p>
-        </div>
-      </div>
-
-    </details><!-- end 高级参数 -->
-
-    <button class="btn-calculate" id="btn-calc">开始计算</button>
-  </section>
 
   <!-- ══ 结果面板 ══ -->
   <section id="results-panel" hidden>
@@ -638,6 +525,18 @@
           </div>
         </div>
       </div>
+
+      <!-- ── 建筑参数模态框 (moved here) ── -->
+      <dialog id="modal-build-params" class="modal">
+        <div class="modal-header">
+          <h3>建筑平面参数设置</h3>
+          <button class="modal-close" aria-label="关闭">&times;</button>
+        </div>
+        <div class="modal-body" id="modal-params-wrap">
+          <!-- Content will be injected by JS -->
+        </div>
+      </dialog>
+
     </div>
   </section>
 

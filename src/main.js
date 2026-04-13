@@ -566,45 +566,30 @@ document.getElementById('btn-ag41-reset').addEventListener('click', async () => 
 })
 
 // ── 建筑参数面板设置 ──
-const btnParams = document.getElementById('btn-ag41-params')
-const cardAg41Wrap = document.getElementById('card-ag41-wrap')
-const modal = document.getElementById('modal-build-params')
-const closeBtn = document.querySelector('#modal-build-params .modal-close')
-const okBtn = document.getElementById('modal-build-params-ok')
-const cancelBtn = document.getElementById('modal-build-params-cancel')
-const modalOverlay = document.querySelector('#modal-build-params .modal-overlay')
-const modalWrap = document.querySelector('#modal-build-params .modal-content')
+const btnParams = document.getElementById('btn-ag41-params');
+const buildParamsDialog = document.getElementById('modal-build-params');
+const closeBtn = buildParamsDialog.querySelector('.modal-close');
 
 btnParams?.addEventListener('click', () => {
-  const defaultParams = getDefaultUserParams()
-  const panel = renderBuildingParamsPanel(defaultParams)
-  if (panel) {
-    // 清空现有内容
-    document.getElementById('modal-params-wrap').innerHTML = ''
-    // 插入参数面板
-    document.getElementById('modal-params-wrap').insertAdjacentHTML('afterbegin', panel.innerHTML)
-    // 显示 modal
-    modal.hidden = false
-    // 自动滚动到 modal
-    modalWrap.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  }
-})
+    const defaultParams = getDefaultUserParams();
+    const panel = renderBuildingParamsPanel(defaultParams);
+    const modalBody = buildParamsDialog.querySelector('#modal-params-wrap');
+    if (panel && modalBody) {
+        modalBody.innerHTML = panel.innerHTML; // Correctly use the innerHTML property
+    }
+    buildParamsDialog.showModal();
+});
 
-// 关闭逻辑 - 关闭按钮和遮罩层
-closeBtn?.addEventListener('click', () => modal.hidden = true)
-cancelBtn?.addEventListener('click', () => modal.hidden = true)
-modalOverlay?.addEventListener('click', () => modal.hidden = true)
+closeBtn?.addEventListener('click', () => {
+    buildParamsDialog.close();
+});
 
-// 确认逻辑
-okBtn?.addEventListener('click', () => {
-  const container = document.querySelector('#card-ag41-wrap .card-body')
-  // 读取用户确认的参数
-  const params = panel.readParams?.() || { buildingW: 18600, buildingD: 24000, roomTargetAreas: {} }
-  // 可选：将 params 传给 runAG41() 生成新方案
-  showAg41Notify('建筑参数已确认，将用于生成布局方案', true)
-  // 关闭 modal
-  modal.hidden = true
-})
+// Optional: close dialog by clicking on the backdrop
+buildParamsDialog.addEventListener('click', (event) => {
+    if (event.target === buildParamsDialog) {
+        buildParamsDialog.close();
+    }
+});
 
 // ── 高级参数标签页切换 ─────────────────────────────────────────────
 document.querySelectorAll('.tab-btn').forEach(btn => {
