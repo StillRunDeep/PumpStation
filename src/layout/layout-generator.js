@@ -11,6 +11,24 @@ class Grid {
     this.roomData = {}; // Stores cells occupied by each room
   }
 
+  clone() {
+    const newGrid = new Grid(this.width, this.height);
+    // Deep copy the grid array
+    newGrid.grid = this.grid.map(row => [...row]);
+
+    // Perform a robust, manual deep copy of the roomData object
+    const newRoomData = {};
+    for (const roomId in this.roomData) {
+        if (Object.prototype.hasOwnProperty.call(this.roomData, roomId)) {
+            // Create a new array for the cells and a new object for each cell
+            newRoomData[roomId] = this.roomData[roomId].map(cell => ({ ...cell }));
+        }
+    }
+    newGrid.roomData = newRoomData;
+
+    return newGrid;
+  }
+
   setCell(x, y, roomId) {
     if (x >= 0 && x < this.width && y >= 0 && y < this.height) {
       this.grid[y][x] = roomId;
@@ -216,32 +234,51 @@ function findBestFillExpansion(grid, roomId) {
     return null;
 }
 
-function findFallbackExpansion(grid, roomId, rng) {
-    const occupiedCells = grid.roomData[roomId];
-    const validNeighbors = [];
-    const seen = new Set();
-
-
-    for (const cell of occupiedCells) {
-        const neighbors = [{ x: cell.x + 1, y: cell.y }, { x: cell.x - 1, y: cell.y }, { x: cell.x, y: cell.y + 1 }, { x: cell.x, y: cell.y - 1 }];
+function findSmartLineExpansion(grid, roomId) {
+    const emptyNeighbors = new Set();
+    const roomCells = grid.roomData[roomId] || [];
+    for (const cell of roomCells) {
+        const neighbors = [
+            { x: cell.x + 1, y: cell.y }, { x: cell.x - 1, y: cell.y },
+            { x: cell.x, y: cell.y + 1 }, { x: cell.x, y: cell.y - 1 }
+        ];
         for (const n of neighbors) {
-            const key = `${n.x},${n.y}`;
-            if (!seen.has(key) && grid.getCell(n.x, n.y) === 0) {
-                validNeighbors.push(n);
-                seen.add(key);
+            if (grid.getCell(n.x, n.y) === 0) {
+                emptyNeighbors.add(`${n.x},${n.y}`);
             }
         }
     }
+    if (emptyNeighbors.size === 0) return null;
 
-    if (validNeighbors.length > 0) {
-        return [validNeighbors[Math.floor(rng() * validNeighbors.length)]];
+    const segments = findCandidateSegments(grid, emptyNeighbors, roomId);
+    let bestSegment = null;
+    let bestScore = -Infinity;
+
+    for (const seg of segments) {
+        const concaveScore = calculateConcaveScore(grid, seg, roomId);
+        if (concaveScore > 0) {
+            const score = 10000 + concaveScore + seg.cells.length;
+            if (score > bestScore) {
+                bestScore = score;
+                bestSegment = seg;
+            }
+            continue;
+        }
+
+        const simplificationScore = calculateSimplificationScore(grid, seg, roomId);
+        const score = simplificationScore * 100 + seg.cells.length;
+        if (score > bestScore) {
+            bestScore = score;
+            bestSegment = seg;
+        }
     }
-    return null;
+
+    return bestSegment ? bestSegment.cells : null;
 }
 
-
-function expandRooms(grid, rooms, rng) {
+function expandRooms(grid, rooms, rng, onRegularExpansionComplete = null) {
     let iterations = 0;
+    let regularExpansionStalled = false;
     // currentArea is now in grid cell counts
     let growingRooms = rooms.map(r => ({ ...r, currentArea: r.id in grid.roomData ? 1 : 0 }));
 
@@ -261,8 +298,17 @@ function expandRooms(grid, rooms, rng) {
                 expansionCells = findBestFillExpansion(grid, roomToGrow.id);
             }
 
+            if (!expansionCells && !regularExpansionStalled) {
+                // This is the moment regular expansion has finished for all rooms.
+                // Trigger the callback to capture this state.
+                if (onRegularExpansionComplete) {
+                    onRegularExpansionComplete(grid);
+                }
+                regularExpansionStalled = true; // Ensure this only fires once
+            }
+
             if (!expansionCells) {
-                expansionCells = findFallbackExpansion(grid, roomToGrow.id, rng);
+                expansionCells = findSmartLineExpansion(grid, roomToGrow.id);
             }
 
             if (expansionCells && expansionCells.length > 0) {
@@ -294,7 +340,7 @@ function expandRooms(grid, rooms, rng) {
 }
 
 function fillGaps(grid, rooms) {
-    const emptyCells = [];
+    let emptyCells = [];
     for (let y = 0; y < grid.height; y++) {
         for (let x = 0; x < grid.width; x++) {
             if (grid.getCell(x, y) === 0) {
@@ -304,35 +350,212 @@ function fillGaps(grid, rooms) {
     }
 
     if (emptyCells.length === 0) return;
-    console.log(`Filling ${emptyCells.length} gap cells...`);
+    console.log(`智能填充 ${emptyCells.length} 个间隙单元格...`);
 
-    const roomSizes = {};
-    for (const room of rooms) {
-        roomSizes[room.id] = (grid.roomData[room.id] || []).length;
-    }
+    const emptyCellSet = new Set(emptyCells.map(c => `${c.x},${c.y}`));
 
-    for (const cell of emptyCells) {
-        const neighbors = [
-            { x: cell.x + 1, y: cell.y }, { x: cell.x - 1, y: cell.y },
-            { x: cell.x, y: cell.y + 1 }, { x: cell.x, y: cell.y - 1 }
-        ];
+    while (emptyCellSet.size > 0) {
+        let bestSegment = null;
+        let bestScore = -Infinity;
+        let bestRoomId = null;
 
-        let bestNeighborId = null;
-        let maxNeighborSize = -1;
+        // --- 1. 识别所有可填充线段 ---
+        const segments = findCandidateSegments(grid, emptyCellSet);
 
-        for (const n of neighbors) {
-            const neighborId = grid.getCell(n.x, n.y);
-            if (neighborId && roomSizes[neighborId] > maxNeighborSize) {
-                maxNeighborSize = roomSizes[neighborId];
-                bestNeighborId = neighborId;
+        if (segments.length === 0) {
+            console.warn("无法找到更多可填充线段，但仍有空隙。");
+            break;
+        }
+
+        // --- 2. 评估每条线段 ---
+        for (const seg of segments) {
+            const neighbors = getSegmentNeighbors(grid, seg);
+            if (neighbors.size === 0) continue;
+
+            for (const roomId of neighbors) {
+                // --- 2a. 阶段一：优先填充凹角 (方案C) ---
+                const凹角Score = calculateConcaveScore(grid, seg, roomId);
+                if (凹角Score > 0) {
+                    const score = 10000 + 凹角Score + seg.cells.length;
+                     if (score > bestScore) {
+                        bestScore = score;
+                        bestSegment = seg;
+                        bestRoomId = roomId;
+                    }
+                    continue;
+                }
+
+                // --- 2b. 阶段二：边界简化评分 (方案B) ---
+                const simplificationScore = calculateSimplificationScore(grid, seg, roomId);
+                const score = simplificationScore * 100 + seg.cells.length;
+
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestSegment = seg;
+                    bestRoomId = roomId;
+                }
             }
         }
 
-        if (bestNeighborId) {
-            grid.addRoomCell(bestNeighborId, cell.x, cell.y);
-            roomSizes[bestNeighborId]++;
+        // --- 3. 选择最优并填充 ---
+        if (bestSegment) {
+            for (const cell of bestSegment.cells) {
+                grid.addRoomCell(bestRoomId, cell.x, cell.y);
+                emptyCellSet.delete(`${cell.x},${cell.y}`);
+            }
+        } else {
+             console.warn("没有找到合适的填充方案，终止填充。");
+            break;
         }
     }
+}
+
+function findCandidateSegments(grid, emptyCellSet) {
+    const segments = [];
+    const visited = new Set();
+
+    for (const cellStr of emptyCellSet) {
+        if (visited.has(cellStr)) continue;
+
+        const [x_str, y_str] = cellStr.split(',');
+        const x = parseInt(x_str, 10);
+        const y = parseInt(y_str, 10);
+
+        // Horizontal segment
+        let hSegment = [{ x, y }];
+        visited.add(`${x},${y}`);
+        for (let i = x + 1; i < grid.width && emptyCellSet.has(`${i},${y}`); i++) {
+            hSegment.push({ x: i, y });
+            visited.add(`${i},${y}`);
+        }
+         for (let i = x - 1; i >= 0 && emptyCellSet.has(`${i},${y}`); i--) {
+            hSegment.unshift({ x: i, y });
+            visited.add(`${i},${y}`);
+        }
+        segments.push({ cells: hSegment, dir: 'h' });
+
+
+        // Vertical segment (reset visited for vertical pass from original cell)
+        let vSegment = [{ x, y }];
+        // Note: Re-visiting is ok here as we are building a different segment
+        for (let j = y + 1; j < grid.height && emptyCellSet.has(`${x},${j}`); j++) {
+            vSegment.push({ x, y: j });
+        }
+        for (let j = y - 1; j >= 0 && emptyCellSet.has(`${x},${j}`); j--) {
+            vSegment.unshift({ x, y: j });
+        }
+        if (vSegment.length > 1) {
+             segments.push({ cells: vSegment, dir: 'v' });
+        }
+    }
+    return segments;
+}
+
+function getSegmentNeighbors(grid, segment) {
+    const neighbors = new Set();
+    const isHorizontal = segment.dir === 'h';
+    for (const cell of segment.cells) {
+        if (isHorizontal) {
+            const n_up = grid.getCell(cell.x, cell.y - 1);
+            const n_down = grid.getCell(cell.x, cell.y + 1);
+            if (n_up > 0) neighbors.add(n_up);
+            if (n_down > 0) neighbors.add(n_down);
+        } else { // Vertical
+            const n_left = grid.getCell(cell.x - 1, cell.y);
+            const n_right = grid.getCell(cell.x + 1, cell.y);
+            if (n_left > 0) neighbors.add(n_left);
+            if (n_right > 0) neighbors.add(n_right);
+        }
+    }
+    return neighbors;
+}
+
+function isCorner(grid, x, y, roomId) {
+    const isSelf = (dx, dy) => grid.getCell(x + dx, y + dy) === roomId;
+    const isBoundary = (dx, dy) => grid.getCell(x + dx, y + dy) !== roomId;
+
+    // A corner must have exactly 2 adjacent same-room cells, and they must be orthogonal.
+    const neighbors = [isSelf(0, 1), isSelf(0, -1), isSelf(1, 0), isSelf(-1, 0)];
+    if (neighbors.filter(Boolean).length !== 2) return false;
+    return (isSelf(0,1) && isSelf(1,0)) || (isSelf(0,1) && isSelf(-1,0)) ||
+           (isSelf(0,-1) && isSelf(1,0)) || (isSelf(0,-1) && isSelf(-1,0));
+}
+
+function calculateSimplificationScore(grid, segment, roomId) {
+    let score = 0;
+    const isHorizontal = segment.dir === 'h';
+    const first = segment.cells[0];
+    const last = segment.cells[segment.cells.length - 1];
+
+    const get = (x, y) => {
+        // Temporarily treat segment cells as part of the room for calculation
+        if (segment.cells.some(c => c.x === x && c.y === y)) return roomId;
+        return grid.getCell(x,y);
+    }
+
+    const checkPoint = (x, y) => {
+        const isNowCorner = isCorner({getCell: get}, x, y, roomId);
+        const wasCorner = isCorner(grid, x, y, roomId);
+        if (wasCorner && !isNowCorner) score++;
+        if (!wasCorner && isNowCorner) score--;
+    }
+
+    // Check corners around the segment's endpoints
+     if (isHorizontal) {
+        checkPoint(first.x - 1, first.y);
+        checkPoint(first.x, first.y - 1);
+        checkPoint(first.x, first.y + 1);
+        checkPoint(last.x + 1, last.y);
+        checkPoint(last.x, last.y - 1);
+        checkPoint(last.x, last.y + 1);
+    } else {
+        checkPoint(first.x, first.y - 1);
+        checkPoint(first.x - 1, first.y);
+        checkPoint(first.x + 1, first.y);
+        checkPoint(last.x, last.y + 1);
+        checkPoint(last.x - 1, last.y);
+        checkPoint(last.x + 1, last.y);
+    }
+    return score;
+}
+
+function calculateConcaveScore(grid, segment, roomId) {
+    const isHorizontal = segment.dir === 'h';
+    let longSideContact = 0;
+    let shortSideContact = 0;
+
+    for (const cell of segment.cells) {
+        if (isHorizontal) {
+            if (grid.getCell(cell.x, cell.y - 1) === roomId) longSideContact++;
+            if (grid.getCell(cell.x, cell.y + 1) === roomId) longSideContact++;
+        } else {
+            if (grid.getCell(cell.x - 1, cell.y) === roomId) longSideContact++;
+            if (grid.getCell(cell.x + 1, cell.y) === roomId) longSideContact++;
+        }
+    }
+
+    const first = segment.cells[0];
+    const last = segment.cells[segment.cells.length - 1];
+
+    if (isHorizontal) {
+        if (grid.getCell(first.x - 1, first.y) === roomId) shortSideContact++;
+        if (grid.getCell(last.x + 1, last.y) === roomId) shortSideContact++;
+    } else {
+        if (grid.getCell(first.x, first.y - 1) === roomId) shortSideContact++;
+        if (grid.getCell(last.x, last.y + 1) === roomId) shortSideContact++;
+    }
+
+    // A strong concave "U" shape would have contact on both long sides and at least one short side.
+    if (longSideContact >= segment.cells.length * 1.5 && shortSideContact > 0) {
+        return longSideContact + shortSideContact * 2;
+    }
+
+    // A weaker "L" shape might have one long side and one short side.
+    if (longSideContact >= segment.cells.length * 0.8 && shortSideContact > 0) {
+        return (longSideContact/2 + shortSideContact);
+    }
+
+    return 0;
 }
 
 function finalizeLayout(grid) {
@@ -391,14 +614,22 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId 
   const level1Rooms = allRooms.filter(r => r.floor === 'level1');
 
   // 2. Create and process grids for each floor
+  let groundGridBeforeGaps;
   const groundGrid = new Grid(gridW, gridH);
   const groundSeeds = placeRoomSeeds(groundGrid, groundRooms, rng);
-  expandRooms(groundGrid, groundRooms, rng);
+  expandRooms(groundGrid, groundRooms, rng, (gridState) => {
+    groundGridBeforeGaps = gridState.clone();
+  });
+  if (!groundGridBeforeGaps) groundGridBeforeGaps = groundGrid.clone(); // Fallback if regular expansion never stalled
   fillGaps(groundGrid, groundRooms);
 
+  let level1GridBeforeGaps;
   const level1Grid = new Grid(gridW, gridH);
   const level1Seeds = placeRoomSeeds(level1Grid, level1Rooms, rng);
-  expandRooms(level1Grid, level1Rooms, rng);
+  expandRooms(level1Grid, level1Rooms, rng, (gridState) => {
+    level1GridBeforeGaps = gridState.clone();
+  });
+  if (!level1GridBeforeGaps) level1GridBeforeGaps = level1Grid.clone(); // Fallback
   fillGaps(level1Grid, level1Rooms);
 
   // 3. Finalize layouts from both grids
@@ -418,8 +649,8 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId 
     groupId,
     variantIdx,
     _debug: {
-      ground: { grid: groundGrid, seeds: groundSeeds },
-      level1: { grid: level1Grid, seeds: level1Seeds },
+      ground: { grid: groundGrid, seeds: groundSeeds, gridBeforeGaps: groundGridBeforeGaps },
+      level1: { grid: level1Grid, seeds: level1Seeds, gridBeforeGaps: level1GridBeforeGaps },
     }
   };
 }
