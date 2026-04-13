@@ -236,14 +236,14 @@
     <div class="results-grid">
 
       <!-- AG0-0: 暴雨计算 -->
-      <div class="agent-card card-rainfall-analysis">
-        <div class="card-header">
+      <details class="agent-card card-rainfall-analysis" open>
+        <summary class="card-header">
           <span>AG0-0</span><span class="agent-label">暴雨计算</span>
           <div class="card-header-actions">
             <button class="btn-recalc" id="btn-rainfall-recalc">重新计算</button>
             <button class="btn-downstream" id="btn-rainfall-downstream">更新后续</button>
           </div>
-        </div>
+        </summary>
         <div class="card-inputs">
           <details open>
             <summary class="card-inputs-title">已知条件</summary>
@@ -281,25 +281,25 @@
           </details>
         </div>
         <div class="card-body" id="card-rainfall"><p class="msg-pending">尚未计算，请点击「重新计算」或顶部「开始计算全流程」。</p></div>
-      </div>
+      </details>
 
       <!-- AG0-1: 拓扑解析 -->
-      <div class="agent-card card-ag01">
-        <div class="card-header">
+      <details class="agent-card card-ag01" open>
+        <summary class="card-header">
           <span>AG0-1</span><span class="agent-label">拓扑解析 · 连接关系验证</span>
-        </div>
+        </summary>
         <div class="card-body" id="card-ag01"><p class="msg-pending">等待暴雨计算完成后显示拓扑验证结果。</p></div>
-      </div>
+      </details>
 
       <!-- AG1-1 -->
-      <div class="agent-card card-pool-depth">
-        <div class="card-header">
+      <details class="agent-card card-pool-depth" open>
+        <summary class="card-header">
           <span>AG1-1</span><span class="agent-label">污水池计算</span>
           <div class="card-header-actions">
             <button class="btn-recalc" id="btn-pool-recalc">重新计算</button>
             <button class="btn-downstream" id="btn-pool-downstream">更新后续</button>
           </div>
-        </div>
+        </summary>
         <div class="card-inputs">
           <details open>
             <summary class="card-inputs-title">已知条件</summary>
@@ -338,17 +338,17 @@
           </details>
         </div>
         <div class="card-body" id="card-ag11"><p class="msg-pending">尚未计算，请点击「重新计算」或顶部「开始计算全流程」。</p></div>
-      </div>
+      </details>
 
       <!-- AG1-2 -->
-      <div class="agent-card card-pump-spec">
-        <div class="card-header">
+      <details class="agent-card card-pump-spec" open>
+        <summary class="card-header">
           <span>AG1-2</span><span class="agent-label">水泵计算及选型</span>
           <div class="card-header-actions">
             <button class="btn-recalc" id="btn-pump-recalc">重新计算</button>
             <button class="btn-downstream" id="btn-pump-downstream">更新后续</button>
           </div>
-        </div>
+        </summary>
         <div class="card-inputs">
           <details open>
             <summary class="card-inputs-title">已知条件</summary>
@@ -381,17 +381,17 @@
           </details>
         </div>
         <div class="card-body" id="card-ag12"><p class="msg-pending">尚未计算，请点击「重新计算」或顶部「开始计算全流程」。</p></div>
-      </div>
+      </details>
 
       <!-- AG1-3 -->
-      <div class="agent-card card-pipe-sizing">
-        <div class="card-header">
+      <details class="agent-card card-pipe-sizing" open>
+        <summary class="card-header">
           <span>AG1-3</span><span class="agent-label">管道尺寸计算</span>
           <div class="card-header-actions">
             <button class="btn-recalc" id="btn-pipe-recalc">重新计算</button>
             <button class="btn-downstream" id="btn-pipe-downstream">更新后续</button>
           </div>
-        </div>
+        </summary>
         <div class="card-inputs">
           <details open>
             <summary class="card-inputs-title">已知条件</summary>
@@ -430,17 +430,17 @@
           <input type="hidden" id="pipe-pump-outlet-dn">
         </div>
         <div class="card-body" id="card-ag13"><p class="msg-pending">尚未计算，请点击「重新计算」或顶部「开始计算全流程」。</p></div>
-      </div>
+      </details>
 
       <!-- AG2-1 -->
-      <div class="agent-card card-maintenance-room">
-        <div class="card-header">
+      <details class="agent-card card-maintenance-room" open>
+        <summary class="card-header">
           <span>AG2-1</span><span class="agent-label">泵房维护间尺寸计算</span>
           <div class="card-header-actions">
             <button class="btn-recalc" id="btn-room-recalc">重新计算</button>
             <button class="btn-downstream" id="btn-room-downstream">更新后续</button>
           </div>
-        </div>
+        </summary>
         <div class="card-inputs">
           <details open>
             <summary class="card-inputs-title">已知条件</summary>
@@ -460,18 +460,18 @@
           </details>
         </div>
         <div class="card-body" id="card-ag21"><p class="msg-pending">尚未计算，请点击「重新计算」或顶部「开始计算全流程」。</p></div>
-      </div>
+      </details>
 
       <!-- AG3-1: pump-room drawing -->
-      <div class="agent-card card-ag31 card-ag31-wrap">
-        <div class="card-header">
+      <details class="agent-card card-ag31 card-ag31-wrap" open>
+        <summary class="card-header">
           <span>AG3-1</span><span class="agent-label">设备流线二维示意</span>
           <div style="margin-left:auto;display:flex;gap:5px;align-items:center">
             <button class="svg-zoom-btn" id="btn-ag31-zin"  title="放大">＋</button>
             <button class="svg-zoom-btn" id="btn-ag31-rst"  title="复位">⊙</button>
             <button class="svg-zoom-btn" id="btn-ag31-zout" title="缩小">－</button>
           </div>
-        </div>
+        </summary>
         <div class="card-body" style="padding:0;overflow:hidden">
           <!-- 方案选择器（位于 SVG 绘图上方） -->
           <div class="scheme-panel" id="scheme-panel">
@@ -486,11 +486,11 @@
           </div>
           <svg id="svg-ag31" viewBox="0 0 1080 580" preserveAspectRatio="xMidYMid meet"></svg>
         </div>
-      </div>
+      </details>
 
       <!-- AG4-1: building layout generation -->
-      <div class="agent-card card-ag41 card-ag41-wrap" id="card-ag41-wrap" hidden>
-        <div class="card-header">
+      <details class="agent-card card-ag41 card-ag41-wrap" id="card-ag41-wrap" hidden open>
+        <summary class="card-header">
           <span>AG4-1</span>
           <span class="agent-label">建筑平面布局生成</span>
           <span class="badge" id="ag41-badge">最优方案推荐</span>
@@ -500,7 +500,7 @@
             <button id="btn-ag41-more" hidden>生成方案</button>
             <button id="btn-ag41-reset" hidden>重置方案</button>
           </div>
-        </div>
+        </summary>
         <div class="card-body">
           <div id="layout-comparison"></div>
           <div id="layout-variants"></div>
@@ -524,7 +524,7 @@
             </div>
           </div>
         </div>
-      </div>
+      </details>
 
       <!-- ── 建筑参数模态框 (moved here) ── -->
       <dialog id="modal-build-params" class="modal">
