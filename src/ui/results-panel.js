@@ -282,22 +282,62 @@ export function renderPoolDepth(r) {
 
 // AG2-1：泵房维护间尺寸计算 → 渲染 d_spacing, e_wall, L, W
 export function renderMaintenanceRoom(r) {
+  if (!r) return '<p style="color:#999;padding:8px">尚未计算。</p>'
+
   // 过滤掉典型值/设计参数行（w_pump, d_pump），保留中间计算步骤
-  const excludeLabels = ['单泵外形宽度 w_pump', '单泵外形深度 d_pump']
+  const excludeLabels = ['单泵外形宽度 w_pump', '单泵外形深度 d_pump', '支管 DN_branch', '主管 DN_main']
   const calcRows = r.rows.filter(row => {
     for (const lbl of excludeLabels) {
       if (row.includes(`<td>${lbl}</td>`) || row.includes(`<td>${lbl} `)) return false
     }
     return true
   })
+
+  // 管件尺寸来源
+  const dimSource = r.hasCatalogDims
+    ? '<span style="color:#27ae60">● 来自泵目录（catalog）</span>'
+    : '<span style="color:#e67e22">● 通用估算值（0.6×0.8 m）</span>'
+
+  // W 逐项明细表
+  let breakdownHtml = ''
+  if (r.W_breakdown && r.W_breakdown.length > 0) {
+    const rows = r.W_breakdown.map(item =>
+      `<tr><td style="padding:3px 8px;font-size:11px">${item.label}</td>
+       <td style="padding:3px 8px;font-size:11px;text-align:right;color:#1a3a5c;font-family:monospace">${item.val}</td>
+       <td style="padding:3px 8px;font-size:11px;color:#888">${item.unit}</td></tr>`
+    ).join('')
+    breakdownHtml = `
+      <table style="font-size:12px;border-collapse:collapse;margin-top:6px;width:auto">
+        <tr style="background:#f5f5f5"><th style="text-align:left;padding:3px 8px">项目</th><th style="padding:3px 8px;text-align:right">数值</th><th style="padding:3px 8px">单位</th></tr>
+        ${rows}
+        <tr style="background:#eaf2fb;font-weight:600"><td style="padding:3px 8px">W_pipe（管件空间合计）</td><td style="padding:3px 8px;text-align:right;font-family:monospace">${fmt(r.W_pipe ?? 0, 3)}</td><td style="padding:3px 8px">m</td></tr>
+      </table>`
+  }
+
+  // 集水坑管件说明
+  let sumpHtml = ''
+  if (r.sumpFittings?.notes?.length > 0) {
+    sumpHtml = `
+      <div style="margin-top:8px;font-size:11px;color:#555;background:#f9f9f9;padding:6px 8px;border-radius:4px">
+        <strong>集水坑管件：</strong>${r.sumpFittings.notes.join('；')}
+      </div>`
+  }
+
   return `
-    <details style="margin-bottom:14px"><summary style="cursor:pointer;color:#555;font-size:12px;margin-bottom:6px">计算过程（点击展开）</summary>${stepsTable(calcRows)}</details>
+    <div style="margin-bottom:4px;font-size:12px">${dimSource}</div>
+    <details style="margin-bottom:6px"><summary style="cursor:pointer;color:#555;font-size:12px;margin-bottom:4px">计算过程</summary>
+      ${stepsTable(calcRows)}
+      ${sumpHtml}
+    </details>
+    ${breakdownHtml ? `<details style="margin-bottom:14px"><summary style="cursor:pointer;color:#555;font-size:12px;margin-bottom:4px">管件明细</summary>${breakdownHtml}</details>` : ''}
+    <div class="result-section"><div class="section-title">输出结果</div>
     <div class="result-summary pass">
-      ${kvRow('泵间净距', fmt(r.d_spacing, 1) + ' m')}
-      ${kvRow('端部距墙净距', fmt(r.e_wall, 1) + ' m')}
       ${kvRow('维护间净长 L', fmt(r.L, 1) + ' m')}
       ${kvRow('维护间净宽 W', fmt(r.W, 1) + ' m')}
-    </div>
+      ${kvRow('维护间面积', fmt(r.L * r.W, 1) + ' m²')}
+      ${kvRow('泵间净距 d_spacing', fmt(r.d_spacing, 1) + ' m')}
+      ${kvRow('端部距墙净距 e_wall', fmt(r.e_wall, 1) + ' m')}
+    </div></div>
   `
 }
 

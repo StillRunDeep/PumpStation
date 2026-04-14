@@ -4,6 +4,7 @@ import { runUserParams } from './agents/user-params.js'
 import { runTopology } from './agents/topology.js'
 import { runPoolDepth } from './agents/pool-depth.js'
 import { runMaintenanceRoom } from './agents/maintenance-room.js'
+import { SPACE_RULES_DEFAULT } from './data/fitting-dims.js'
 import { runPumpSpec } from './agents/pump-spec.js'
 import { runPipeSizing, PIPE_SCHEMES } from './agents/pipe-sizing.js'
 import { runDrawing } from './agents/drawing.js'
@@ -225,13 +226,35 @@ function handleSchemeChange(id) {
   currentSchemeId = id
   document.getElementById('scheme-slider').value = id
   recalcAG13()
+  // 同步 AG1-3 的 DN 到 AG2-1 已知条件显示
+  const ag13 = moduleCache.ag13
+  if (ag13) {
+    const dnBranch = ag13.DN_pumpOut
+    const dnMain   = ag13.DN_mainOutlet
+    if (dnBranch != null) document.getElementById('room-DN-branch').value = dnBranch
+    if (dnMain   != null) document.getElementById('room-DN-main').value  = dnMain
+  }
   // AG2-1 和 AG3-1 的重绘（不重跑泵选型）
   recalcAG21()
   const ag00Result = moduleCache.ag00
   const ag1Result  = moduleCache.ag11
   const ag2Result  = moduleCache.ag12
   if (ag00Result?.valid && ag2Result?.valid && ag1Result) {
-    const ag21 = runMaintenanceRoom(ag00Result.N, ag2Result.P_motor, ag00Result.N_spare)
+    const d_spacing_hsc = parseFloat(document.getElementById('room-d-spacing').value) || 1.0
+    const e_wall_hsc = parseFloat(document.getElementById('room-e-wall').value) || 0.8
+    const pipeToWall_hsc = parseInt(document.getElementById('room-pipe-to-wall').value, 10) || 800
+    const pipeToPipe_hsc = parseInt(document.getElementById('room-pipe-to-pipe').value, 10) || 800
+    const minStraight_hsc = parseInt(document.getElementById('room-min-straight').value, 10) || 300
+    const DN_branch_hsc = parseInt(document.getElementById('room-DN-branch').value, 10)
+    const DN_main_hsc   = parseInt(document.getElementById('room-DN-main').value, 10)
+    const ag21 = runMaintenanceRoom(ag00Result.N, ag2Result.P_motor, ag00Result.N_spare, {
+      catalogPump: moduleCache.ag12?.displayMatches?.[0] ?? null,
+      DN_branch: DN_branch_hsc || (moduleCache.ag13?.DN_pumpOut ?? 150),
+      DN_main:   DN_main_hsc   || (moduleCache.ag13?.DN_mainOutlet ?? 300),
+      d_spacing: d_spacing_hsc,
+      e_wall: e_wall_hsc,
+      spaceRules: { pipeToWall_mm: pipeToWall_hsc, pipeToPipe_mm: pipeToPipe_hsc, minStraight_mm: minStraight_hsc },
+    })
     ag21.DN_label = ag2Result.DN_outlet
     document.getElementById('card-ag21').innerHTML = renderMaintenanceRoom(ag21)
     const ag31Params = {
@@ -264,16 +287,30 @@ function handleSchemeChange(id) {
 window.handleSchemeChange = handleSchemeChange
 
 function recalcAG21() {
-  const N         = parseInt(document.getElementById('room-N').value, 10)
+  const N          = parseInt(document.getElementById('room-N').value, 10)
   const motorPower = parseFloat(document.getElementById('room-motor').value)
-  const N_spare  = parseInt(document.getElementById('room-N-spare').value, 10) || 0
+  const N_spare    = parseInt(document.getElementById('room-N-spare').value, 10) || 0
+  const d_spacing  = parseFloat(document.getElementById('room-d-spacing').value) || 1.0
+  const e_wall     = parseFloat(document.getElementById('room-e-wall').value) || 0.8
+  const pipeToWall_mm   = parseInt(document.getElementById('room-pipe-to-wall').value, 10) || 800
+  const pipeToPipe_mm   = parseInt(document.getElementById('room-pipe-to-pipe').value, 10) || 800
+  const minStraight_mm  = parseInt(document.getElementById('room-min-straight').value, 10) || 300
+  const DN_branch_in    = parseInt(document.getElementById('room-DN-branch').value, 10)
+  const DN_main_in      = parseInt(document.getElementById('room-DN-main').value, 10)
 
-  if (isNaN(N) || isNaN(motorPower)) {
+  if (isNaN(N)) {
     document.getElementById('card-ag21').innerHTML =
-      '<p class="msg-error">⚠ 缺少必要参数：请填写工作泵台数和电机功率。</p>'
+      '<p class="msg-error">⚠ 缺少必要参数：请填写工作泵台数。</p>'
     return null
   }
-  const result = runMaintenanceRoom(N, motorPower, N_spare)
+  const result = runMaintenanceRoom(N, motorPower, N_spare, {
+    catalogPump: moduleCache.ag12?.displayMatches?.[0] ?? null,
+    DN_branch: DN_branch_in || (moduleCache.ag13?.DN_pumpOut ?? 150),
+    DN_main:   DN_main_in   || (moduleCache.ag13?.DN_mainOutlet ?? 300),
+    d_spacing,
+    e_wall,
+    spaceRules: { pipeToWall_mm, pipeToPipe_mm, minStraight_mm },
+  })
   moduleCache.ag21 = result
   document.getElementById('card-ag21').innerHTML = renderMaintenanceRoom(result)
   return result
@@ -421,10 +458,36 @@ async function runCalculation() {
   }
   recalcAG13()
 
+  // 同步 AG1-3 管径到 AG2-1 已知条件
+  const ag13forSync = moduleCache.ag13
+  if (ag13forSync) {
+    const dnBranch = ag13forSync.DN_pumpOut
+    const dnMain   = ag13forSync.DN_mainOutlet
+    if (dnBranch != null) document.getElementById('room-DN-branch').value = dnBranch
+    if (dnMain   != null) document.getElementById('room-DN-main').value  = dnMain
+  }
+
   // ── AG2-1: 泵房维护间尺寸计算 ─────────────────────────────────────────
   const effectiveMotor = isNaN(motorOverride) ? ag2Result.P_motor : motorOverride
-  const ag21 = runMaintenanceRoom(ag00.N, effectiveMotor, N_spare)
-  ag21.DN_label = (moduleCache.ag13 && moduleCache.ag13.DN_pumpOut) || ag2Result.DN_outlet
+  const catalogPump = moduleCache.ag12?.displayMatches?.[0] ?? null
+  const ag13 = moduleCache.ag13
+  const pipesDN = { DN_branch: ag13?.DN_pumpOut ?? 150, DN_main: ag13?.DN_mainOutlet ?? 300 }
+  const d_spacing_rc = parseFloat(document.getElementById('room-d-spacing').value) || 1.0
+  const e_wall_rc = parseFloat(document.getElementById('room-e-wall').value) || 0.8
+  const pipeToWall_rc = parseInt(document.getElementById('room-pipe-to-wall').value, 10) || 800
+  const pipeToPipe_rc = parseInt(document.getElementById('room-pipe-to-pipe').value, 10) || 800
+  const minStraight_rc = parseInt(document.getElementById('room-min-straight').value, 10) || 300
+  const DN_branch_rc = parseInt(document.getElementById('room-DN-branch').value, 10)
+  const DN_main_rc   = parseInt(document.getElementById('room-DN-main').value, 10)
+  const ag21 = runMaintenanceRoom(ag00.N, effectiveMotor, N_spare, {
+    catalogPump,
+    DN_branch: DN_branch_rc || (ag13?.DN_pumpOut ?? 150),
+    DN_main:   DN_main_rc   || (ag13?.DN_mainOutlet ?? 300),
+    d_spacing: d_spacing_rc,
+    e_wall: e_wall_rc,
+    spaceRules: { pipeToWall_mm: pipeToWall_rc, pipeToPipe_mm: pipeToPipe_rc, minStraight_mm: minStraight_rc },
+  })
+  ag21.DN_label = (ag13 && ag13.DN_pumpOut) || ag2Result.DN_outlet
   document.getElementById('card-ag21').innerHTML = renderMaintenanceRoom(ag21)
 
   // ── AG3-1: SVG绘图 ───────────────────────────────────────────────
@@ -439,7 +502,6 @@ async function runCalculation() {
   // ── AG3-1: SVG绘图（拓扑数据富化）─────────────────────────────
   // 用 AG1-3 的变径结果富化拓扑中的 pump 节点
   const ag12 = moduleCache.ag12
-  const ag13 = moduleCache.ag13
   const baseTopo = ag00Result.topo.topology
 
   const enrichedTopo = (baseTopo && ag12 != null) ? {

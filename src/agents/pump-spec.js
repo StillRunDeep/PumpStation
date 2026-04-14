@@ -222,6 +222,7 @@ export function runPumpSpec({
     catalogMatches,
     catalogMatchesTolerant,
     catalogIsTolerant,
+    displayMatches,
     catalogDiagnosis,
     // 泵出口 DN（来自资料库）
     DN_pump_outlet,
