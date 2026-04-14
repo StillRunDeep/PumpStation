@@ -584,7 +584,7 @@ document.getElementById('btn-ag41-more').addEventListener('click', () => {
 
       try {
         const existing = getVariants();
-        const newRaw = await runAG41(existing); // Pass existing variants
+        const newRaw = await runAG41(existing, () => !isGeneratingLayouts);
         const { variants, improved, newScored } = mergeVariants(existing, newRaw);
         renderLayoutPanel(variants);
 
@@ -614,6 +614,19 @@ document.getElementById('btn-ag41-more').addEventListener('click', () => {
     // Kick off the first iteration
     generationReqId = requestAnimationFrame(generationLoop);
   }
+});
+
+// 用户展开方案详图时自动暂停持续生成
+window.addEventListener('ag41-detail-opened', () => {
+  if (!isGeneratingLayouts) return;
+  isGeneratingLayouts = false;
+  if (generationReqId) {
+    cancelAnimationFrame(generationReqId);
+    generationReqId = null;
+  }
+  const btn = document.getElementById('btn-ag41-more');
+  if (btn) btn.textContent = '生成更多方案';
+  showAg41Notify('已暂停生成（展开详图）', false);
 });
 
 document.getElementById('btn-ag41-reset').addEventListener('click', async () => {
@@ -690,7 +703,7 @@ document.getElementById('btn-room-downstream').addEventListener('click', runFrom
 // ── 折叠状态持久化 ─────────────────────────────────────────────
 function persistCollapseState() {
   const collapsibleSections = document.querySelectorAll(
-    '.agent-card, #topology-details, #advanced-params-details, #ag41-comparison-details, #ag41-variants-details, #ag41-detail-details'
+    '.agent-card, #topology-details, #advanced-params-details, #ag41-comparison-details'
   );
   const collapseState = JSON.parse(localStorage.getItem('collapseState')) || {};
 

@@ -521,36 +521,7 @@
           </div>
         </summary>
         <div class="card-body">
-          <!-- 1. 方案详图 -->
-          <details id="ag41-detail-details" open>
-            <summary class="ag41-section-header">方案详图（包括正式视图和调试视图）</summary>
-            <div id="layout-detail-wrap" hidden>
-              <div class="layout-detail-header">
-                <span id="layout-detail-title">选中方案详图（地面层 ＋ 一层）</span>
-                <div style="margin-left:auto;display:flex;gap:5px">
-                  <button class="svg-zoom-btn" id="btn-ag41-zin"  title="放大">＋</button>
-                  <button class="svg-zoom-btn" id="btn-ag41-rst"  title="复位">⊙</button>
-                  <button class="svg-zoom-btn" id="btn-ag41-zout" title="缩小">－</button>
-                </div>
-              </div>
-              <div class="layout-detail-main-wrap" style="display: flex;">
-                <svg id="svg-ag41" viewBox="0 0 1080 560"
-                     style="display:block;width:60%;height:560px;cursor:grab;background:#f4f6f8">
-                </svg>
-                <div id="debug-grid-container" style="width:40%; height:560px; border-left: 1px solid #ccc; padding-left: 10px; box-sizing: border-box;">
-                  <h4 style="margin-top:0; margin-bottom: 10px; font-size: 12px; color: #555;">调试视图：网格和种子</h4>
-                </div>
-              </div>
-            </div>
-          </details>
-
-          <!-- 2. 方案库 -->
-          <details id="ag41-variants-details" open>
-            <summary class="ag41-section-header">方案库</summary>
-            <div id="layout-variants"></div>
-          </details>
-
-          <!-- 3. 方案排名 -->
+          <!-- 方案排名（含行内展开详图） -->
           <details id="ag41-comparison-details" open>
             <summary class="ag41-section-header">方案排名</summary>
             <div id="layout-comparison"></div>
