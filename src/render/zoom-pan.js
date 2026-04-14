@@ -6,8 +6,12 @@
  * @param {number} vw   initial viewBox width
  * @param {number} vh   initial viewBox height
  * @param {object} [btnIds]  { zIn, zOut, zRst } — DOM element IDs for toolbar buttons
+ * @param {object} [opts]  { minScale, maxScale, onReset } — zoom limits and reset callback
  */
-export function initSvgZoomPan(svg, vw, vh, btnIds = {}) {
+export function initSvgZoomPan(svg, vw, vh, btnIds = {}, opts = {}) {
+  const minScale = opts.minScale ?? 0.25
+  const maxScale = opts.maxScale ?? 8
+  const onReset  = opts.onReset   ?? null
   svg._zpclean && svg._zpclean()
   let vb = { x: 0, y: 0, w: vw, h: vh }
   let isZoomActive = false;
@@ -27,22 +31,27 @@ export function initSvgZoomPan(svg, vw, vh, btnIds = {}) {
     const rect = svg.getBoundingClientRect()
     const mx = (e.clientX - rect.left) / rect.width * vb.w + vb.x
     const my = (e.clientY - rect.top) / rect.height * vb.h + vb.y
-    vb.w *= f; vb.h *= f
+    vb.w = Math.min(Math.max(vb.w * f, vw / maxScale), vw / minScale)
+    vb.h = vb.w * (vh / vw)
     vb.x = mx - (e.clientX - rect.left) / rect.width * vb.w
     vb.y = my - (e.clientY - rect.top) / rect.height * vb.h
     applyVB()
   }
 
   let drag = false, last = { x: 0, y: 0 }
-  function onDown(e) {
-    // Activate this SVG for zooming
+  function activateSvg() {
     for (const otherSvg of window._zoomableSvgs) {
         otherSvg.classList.remove('zoom-active');
         otherSvg._zp_deactivate && otherSvg._zp_deactivate();
     }
     isZoomActive = true;
     svg.classList.add('zoom-active');
-
+  }
+  function onEnter(e) {
+    activateSvg()
+  }
+  function onDown(e) {
+    activateSvg()
     drag = true;
     last = { x: e.clientX, y: e.clientY };
     svg.style.cursor = 'grabbing';
@@ -59,9 +68,19 @@ export function initSvgZoomPan(svg, vw, vh, btnIds = {}) {
   }
 
   svg.addEventListener('wheel', onWheel, { passive: false })
+  svg.addEventListener('mouseenter', onEnter)
   svg.addEventListener('mousedown', onDown)
   window.addEventListener('mouseup', onUp)
   window.addEventListener('mousemove', onMove)
+  window.addEventListener('click', onWindowClick)
+  let _lastClickTarget = null
+  function onWindowClick(e) {
+    _lastClickTarget = e.target
+    if (!svg.contains(e.target) && e.target !== svg) {
+      isZoomActive = false
+      svg.classList.remove('zoom-active')
+    }
+  }
 
   // Touch: single-finger pan + two-finger pinch
   let touch = { active: false, last: { x: 0, y: 0 }, pinchDist: 0 }
@@ -100,9 +119,11 @@ export function initSvgZoomPan(svg, vw, vh, btnIds = {}) {
       const d = pinchDist(e.touches)
       if (touch.pinchDist > 0) {
         const f = touch.pinchDist / d
-        vb.w *= f; vb.h *= f
-        vb.x = touch.midSvg.x - (touch.midScreen.x - rect.left) / rect.width * vb.w
-        vb.y = touch.midSvg.y - (touch.midScreen.y - rect.top) / rect.height * vb.h
+        const newW = Math.min(Math.max(vb.w * f, vw / maxScale), vw / minScale)
+        const newH = newW * (vh / vw)
+        vb.x = touch.midSvg.x - (touch.midScreen.x - rect.left) / rect.width * newW
+        vb.y = touch.midSvg.y - (touch.midScreen.y - rect.top) / rect.height * newH
+        vb.w = newW; vb.h = newH
         touch.pinchDist = d
         applyVB()
       }
@@ -114,10 +135,20 @@ export function initSvgZoomPan(svg, vw, vh, btnIds = {}) {
   svg.addEventListener('touchend', onTouchEnd)
 
   // Toolbar buttons
-  function zoomBy(f) { const cx = vb.x + vb.w / 2, cy = vb.y + vb.h / 2; vb.w *= f; vb.h *= f; vb.x = cx - vb.w / 2; vb.y = cy - vb.h / 2; applyVB() }
+  function zoomBy(f) {
+    const cx = vb.x + vb.w / 2, cy = vb.y + vb.h / 2
+    const newW = Math.min(Math.max(vb.w * f, vw / maxScale), vw / minScale)
+    const newH = newW * (vh / vw)
+    vb = { x: cx - newW / 2, y: cy - newH / 2, w: newW, h: newH }
+    applyVB()
+  }
   function doZin()  { zoomBy(0.8) }
   function doZout() { zoomBy(1.25) }
-  function doRst()  { vb = { x: 0, y: 0, w: vw, h: vh }; applyVB() }
+  function doRst()  {
+    vb = { x: 0, y: 0, w: vw, h: vh }
+    applyVB()
+    if (onReset) onReset()
+  }
 
   const zIn  = btnIds.zIn  ? document.getElementById(btnIds.zIn)  : null
   const zOut = btnIds.zOut ? document.getElementById(btnIds.zOut) : null
@@ -128,9 +159,11 @@ export function initSvgZoomPan(svg, vw, vh, btnIds = {}) {
 
   svg._zpclean = () => {
     svg.removeEventListener('wheel', onWheel)
+    svg.removeEventListener('mouseenter', onEnter)
     svg.removeEventListener('mousedown', onDown)
     window.removeEventListener('mouseup', onUp)
     window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('click', onWindowClick)
     svg.removeEventListener('touchstart', onTouchStart)
     svg.removeEventListener('touchmove', onTouchMove)
     svg.removeEventListener('touchend', onTouchEnd)

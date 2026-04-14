@@ -454,7 +454,26 @@
               <tr>
                 <td class="itd-label">N_spare（备用泵）</td>
                 <td class="itd-input"><input type="number" id="room-N-spare" min="0" max="3" step="1"></td>
-                <td></td><td></td>
+                <td class="itd-label">泵间净距 d_spacing（m）</td>
+                <td class="itd-input"><input type="number" id="room-d-spacing" step="0.1" value="1.0"></td>
+              </tr>
+              <tr>
+                <td class="itd-label">端部距墙净距 e_wall（m）</td>
+                <td class="itd-input"><input type="number" id="room-e-wall" step="0.1" value="0.8"></td>
+                <td class="itd-label">管外壁到墙面净距（mm）</td>
+                <td class="itd-input"><input type="number" id="room-pipe-to-wall" step="10" value="800"></td>
+              </tr>
+              <tr>
+                <td class="itd-label">相邻管外壁净距（mm）</td>
+                <td class="itd-input"><input type="number" id="room-pipe-to-pipe" step="10" value="800"></td>
+                <td class="itd-label">阀件间最小直管段（mm）</td>
+                <td class="itd-input"><input type="number" id="room-min-straight" step="10" value="300"></td>
+              </tr>
+              <tr>
+                <td class="itd-label">支管 DN_branch（mm）</td>
+                <td class="itd-input"><input type="number" id="room-DN-branch" step="10" style="width:64px;font-size:12px;padding:2px 4px;border:1px solid #ccc;border-radius:3px;color:#1a3a5c;font-weight:600" value="150"/></td>
+                <td class="itd-label">主管 DN_main（mm）</td>
+                <td class="itd-input"><input type="number" id="room-DN-main" step="10" style="width:64px;font-size:12px;padding:2px 4px;border:1px solid #ccc;border-radius:3px;color:#1a3a5c;font-weight:600" value="300"/></td>
               </tr>
             </table>
           </details>

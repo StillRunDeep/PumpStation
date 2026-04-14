@@ -215,3 +215,151 @@ export function calculateLabelPosition(cells) {
         y: (bestRect.y + minY + bestRect.h / 2),
     };
 }
+
+// ── 管件 SVG helpers（全部返回 SVG 字符串，不含 DOM 操作）───────────────────────
+
+/**
+ * 90° 长半径弯头（弧形）
+ * @param {number} x - 圆心 x
+ * @param {number} y - 圆心 y
+ * @param {number} r - 弯头半径
+ * @param {string} fromDir - 入口方向：'right'|'left'|'top'|'bottom'
+ * @param {string} toDir - 出口方向
+ * @param {string} stroke - 线色
+ * @param {number} sw - 线宽
+ */
+export function _elbow(x, y, r, fromDir, toDir, stroke = '#5d6d7e', sw = 2) {
+  const startAngle = { right: 0, top: 90, left: 180, bottom: 270 }[fromDir] ?? 0
+  const endAngle   = { right: 0, top: 90, left: 180, bottom: 270 }[toDir]   ?? 90
+  const dx = r * Math.cos(startAngle * Math.PI / 180)
+  const dy = -r * Math.sin(startAngle * Math.PI / 180)
+  return `<path d="M${(x + dx).toFixed(1)},${(y + dy).toFixed(1)} A${r},${r} 0 0 0 ${(x + r * Math.cos(endAngle * Math.PI / 180)).toFixed(1)},${(y - r * Math.sin(endAngle * Math.PI / 180)).toFixed(1)}" fill="none" stroke="${stroke}" stroke-width="${sw}"/>`
+}
+
+/**
+ * 旋启式止回阀（菱形符号含两端法兰线）
+ * @param {number} cx - 中心 x
+ * @param {number} cy - 中心 y
+ * @param {number} halfLen - 半长（不含法兰）
+ * @param {boolean} horiz - 水平布置
+ * @param {string} color - 颜色
+ */
+export function _checkValve(cx, cy, halfLen, horiz = true, color = '#c0392b') {
+  const fl = Math.min(halfLen * 0.3, 6)  // 法兰宽度
+  if (horiz) {
+    const x1 = cx - halfLen - fl, x2 = cx - halfLen
+    const x3 = cx + halfLen, x4 = cx + halfLen + fl
+    const y0 = cy, s = halfLen * 0.5
+    return _l(x1, y0, x2, y0, color, 2) +
+      `<polygon points="${x2.toFixed(1)},${(y0 - s).toFixed(1)} ${x3.toFixed(1)},${y0.toFixed(1)} ${x2.toFixed(1)},${(y0 + s).toFixed(1)}" fill="${color}" opacity="0.85"/>` +
+      _l(x3, y0, x4, y0, color, 2)
+  } else {
+    const y1 = cy - halfLen - fl, y2 = cy - halfLen
+    const y3 = cy + halfLen, y4 = cy + halfLen + fl
+    const s = halfLen * 0.5
+    return _l(cx, y1, cx, y2, color, 2) +
+      `<polygon points="${(cx - s).toFixed(1)},${y2.toFixed(1)} ${cx.toFixed(1)},${y3.toFixed(1)} ${(cx + s).toFixed(1)},${y2.toFixed(1)}" fill="${color}" opacity="0.85"/>` +
+      _l(cx, y3, cx, y4, color, 2)
+  }
+}
+
+/**
+ * 闸阀（矩形符号）
+ * @param {number} cx - 中心 x
+ * @param {number} cy - 中心 y
+ * @param {number} halfLen - 半长（不含法兰）
+ * @param {boolean} horiz - 水平布置
+ * @param {string} color - 颜色
+ */
+export function _gateValve(cx, cy, halfLen, horiz = true, color = '#922b21') {
+  const fl = Math.min(halfLen * 0.3, 6)
+  if (horiz) {
+    const x1 = cx - halfLen - fl, x2 = cx - halfLen, x3 = cx + halfLen, x4 = cx + halfLen + fl
+    return _l(x1, cy, x2, cy, color, 2) +
+      `<rect x="${x2.toFixed(1)}" y="${(cy - halfLen * 0.4).toFixed(1)}" width="${(x3 - x2).toFixed(1)}" height="${(halfLen * 0.8).toFixed(1)}" fill="${color}" opacity="0.85" rx="2"/>` +
+      _l(x3, cy, x4, cy, color, 2)
+  } else {
+    const y1 = cy - halfLen - fl, y2 = cy - halfLen, y3 = cy + halfLen, y4 = cy + halfLen + fl
+    return _l(cx, y1, cx, y2, color, 2) +
+      `<rect x="${(cx - halfLen * 0.4).toFixed(1)}" y="${y2.toFixed(1)}" width="${(halfLen * 0.8).toFixed(1)}" height="${(y3 - y2).toFixed(1)}" fill="${color}" opacity="0.85" rx="2"/>` +
+      _l(cx, y3, cx, y4, color, 2)
+  }
+}
+
+/**
+ * 电磁流量计（矩形+圆形叠加）
+ * @param {number} cx - 中心 x
+ * @param {number} cy - 中心 y
+ * @param {number} halfLen - 半长
+ * @param {number} dn_px - DN 换算的像素半径
+ * @param {boolean} horiz - 水平布置
+ * @param {string} color - 颜色
+ */
+export function _flowmeter(cx, cy, halfLen, dn_px, horiz = true, color = '#1a5276') {
+  const fl = Math.min(halfLen * 0.3, 6)
+  const bodyH = Math.max(8, dn_px * 1.5)
+  const bodyW = halfLen * 2
+  if (horiz) {
+    const x1 = cx - halfLen - fl, x2 = cx - halfLen, x3 = cx + halfLen, x4 = cx + halfLen + fl
+    return _l(x1, cy, x2, cy, color, 2) +
+      `<rect x="${x2.toFixed(1)}" y="${(cy - bodyH / 2).toFixed(1)}" width="${(x3 - x2).toFixed(1)}" height="${bodyH.toFixed(1)}" fill="${color}" opacity="0.8" rx="3"/>` +
+      `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${(bodyH * 0.35).toFixed(1)}" fill="none" stroke="#fff" stroke-width="1.5" opacity="0.6"/>` +
+      _l(x3, cy, x4, cy, color, 2)
+  } else {
+    const y1 = cy - halfLen - fl, y2 = cy - halfLen, y3 = cy + halfLen, y4 = cy + halfLen + fl
+    return _l(cx, y1, cx, y2, color, 2) +
+      `<rect x="${(cx - bodyH / 2).toFixed(1)}" y="${y2.toFixed(1)}" width="${bodyH.toFixed(1)}" height="${(y3 - y2).toFixed(1)}" fill="${color}" opacity="0.8" rx="3"/>` +
+      `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${(bodyH * 0.35).toFixed(1)}" fill="none" stroke="#fff" stroke-width="1.5" opacity="0.6"/>` +
+      _l(cx, y3, cx, y4, color, 2)
+  }
+}
+
+/**
+ * T 型节点
+ * @param {number} cx - 中心 x
+ * @param {number} cy - 中心 y
+ * @param {number} r - 节点半径
+ * @param {string} color - 颜色
+ */
+export function _tee(cx, cy, r, color = '#2980b9') {
+  return `<circle cx="${(+cx).toFixed(1)}" cy="${(+cy).toFixed(1)}" r="${r}" fill="${color}" opacity="0.8"/>`
+}
+
+/**
+ * 偏心大小头（梯形）
+ * @param {number} x1 - 起点 x（左侧端面中心）
+ * @param {number} y1 - 起点 y
+ * @param {number} dn1_px - 大端 DN 换算半径（px）
+ * @param {number} dn2_px - 小端 DN 换算半径（px）
+ * @param {number} len_px - 长度（px）
+ * @param {boolean} horiz - 水平布置
+ * @param {string} color - 颜色
+ */
+export function _reducer(x1, y1, dn1_px, dn2_px, len_px, horiz = true, color = '#27ae60') {
+  if (horiz) {
+    const x2 = x1 + len_px
+    const ytop1 = y1 - dn1_px, ybot1 = y1 + dn1_px
+    const ytop2 = y2 - dn2_px, ybot2 = y2 + dn2_px
+    return `<polygon points="${x1.toFixed(1)},${ytop1.toFixed(1)} ${x2.toFixed(1)},${ytop2.toFixed(1)} ${x2.toFixed(1)},${ybot2.toFixed(1)} ${x1.toFixed(1)},${ybot1.toFixed(1)}" fill="${color}" opacity="0.7"/>`
+  } else {
+    const y2 = y1 - len_px
+    return `<polygon points="${(x1 - dn1_px).toFixed(1)},${y1.toFixed(1)} ${(x1 + dn1_px).toFixed(1)},${y1.toFixed(1)} ${(x1 + dn2_px).toFixed(1)},${y2.toFixed(1)} ${(x1 - dn2_px).toFixed(1)},${y2.toFixed(1)}" fill="${color}" opacity="0.7"/>`
+  }
+}
+
+/**
+ * 引线标注（斜线 + 水平横线 + 文字）
+ * @param {number} x1 - 引出点 x
+ * @param {number} y1 - 引出点 y
+ * @param {number} x2 - 标注文字位置 x
+ * @param {number} y2 - 标注文字位置 y
+ * @param {string} label - 标注文字
+ * @param {number} size - 字号
+ * @param {string} color - 颜色
+ */
+export function _leader(x1, y1, x2, y2, label, size = 10, color = '#555') {
+  const midX = (x1 + x2) / 2, midY = (y1 + y2) / 2
+  return _l(x1, y1, midX, midY, color, 1) + _l(midX, midY, x2, y2, color, 1) +
+    `<line x1="${midX.toFixed(1)}" y1="${(midY - 4).toFixed(1)}" x2="${(midX + 6).toFixed(1)}" y2="${(midY - 4).toFixed(1)}" stroke="${color}" stroke-width="1"/>` +
+    _t(x2 + 5, midY + 4, label, size, color, 'start')
+}
