@@ -8,7 +8,7 @@ import { getDefaultUserParams, getUserConfirmedParams } from '../layout/user-par
  *
  * @returns {Promise<Array>} unsorted layout variants
  */
-export async function runAG41(existingVariants = []) {
+export async function runAG41(existingVariants = [], isCancelled = () => false) {
   // 1. 获取用户确认的参数
   const defaultUserParams = getDefaultUserParams();
   const userParams = await getUserConfirmedParams(defaultUserParams);
@@ -20,6 +20,9 @@ export async function runAG41(existingVariants = []) {
   let pCount = 0;
   let rCount = 0;
 
+  // 每生成一个方案后 yield，让浏览器处理积压的事件（点击等）
+  const yieldToEventLoop = () => new Promise(resolve => setTimeout(resolve, 0))
+
   // 生成遗传算法方案
   if (topVariants.length >= 2) {
     const parentPairs = [
@@ -28,21 +31,25 @@ export async function runAG41(existingVariants = []) {
       [topVariants[1], topVariants[topVariants.length > 2 ? 2 : 1]],
     ];
     for (let i = 0; i < 3; i++) {
+      if (isCancelled()) return variants
       const [parentA, parentB] = parentPairs[i];
       const seed = Math.floor(Math.random() * 100000) + pCount;
       const t = generateHybridLayout(parentA, parentB, seed, buildingW, buildingD, roomTargetAreas, 'S', pCount + 1);
       variants.push(t);
       pCount++;
+      await yieldToEventLoop()
     }
   }
 
   // 生成纯随机方案
   const numRandom = numToGenerate - pCount;
   for (let i = 0; i < numRandom; i++) {
+    if (isCancelled()) return variants
     const seed = Math.floor(Math.random() * 100000) + i;
     const t = generateConstrainedLayout(seed, buildingW, buildingD, roomTargetAreas, 'S', rCount + 1, 'R');
     variants.push(t);
     rCount++;
+    await yieldToEventLoop()
   }
 
   return variants;
