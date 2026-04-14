@@ -3,6 +3,9 @@ import { adjacent, centerX, centerY } from './placer.js'
 // Rooms excluded from space efficiency numerator (non-functional spaces)
 const NON_FUNCTIONAL = new Set(['corridor_l1', 'dock1', 'dock2'])
 
+// Ground-floor rooms considered for accessibility scoring
+const ACCESSIBILITY_ROOMS = ['trafo1', 'trafo2', 'meter_main', 'meter_sub', 'fire_equip', 'parking', 'repair_zone']
+
 function floorFunctionalArea(placements) {
   const seen = new Set()
   return Object.values(placements || {})
@@ -31,13 +34,59 @@ export function computeSpaceEfficiency(result) {
 }
 
 /**
+ * Compute accessibility score (0~30).
+ *
+ * Proxy approach: use Euclidean distance from the nominal main entrance
+ * (south-wall midpoint of ground floor) to each functional room's centroid,
+ * converted to grid units (100 mm each).  Full BFS can replace this once
+ * door positions are finalised.
+ *
+ * Formula (from spec §3.3):
+ *   accessibilityScore = clamp((150 − avgGrids) / 100, 0, 1) × 30
+ *
+ * @returns {number} integer 0~30
+ */
+export function computeAccessibilityScore(result) {
+  const { buildingW, buildingD, groundPlacements } = result
+
+  // Nominal main entrance: south-wall midpoint (y = buildingD, x = buildingW/2)
+  const entranceX = buildingW / 2
+  const entranceY = buildingD
+
+  const distances = []
+  for (const roomId of ACCESSIBILITY_ROOMS) {
+    const p = (groundPlacements || {})[roomId]
+    if (!p) continue
+    const dx = centerX(p) - entranceX
+    const dy = centerY(p) - entranceY
+    const distMm = Math.hypot(dx, dy)
+    distances.push(distMm / 100) // convert mm → grid units
+  }
+
+  if (distances.length === 0) return 0
+
+  const avgGrids = distances.reduce((s, d) => s + d, 0) / distances.length
+  return Math.round(Math.max(0, Math.min(1, (150 - avgGrids) / 100)) * 30)
+}
+
+/**
  * Score a layout result (higher = better).
- * Returns { score, spaceEfficiency, efficiencyScore, breakdown }.
+ * Returns { score, spaceEfficiency, efficiencyScore, accessibilityScore, diversityPenalty, breakdown }.
  */
 export function scoreLayout(result) {
   const { buildingW, buildingD, groundPlacements, level1Placements } = result
   const allPlacements = { ...groundPlacements, ...level1Placements };
-  const breakdown = { base: 10000, footprint: 0, adjacency: 0, corridor: 0, trafo: 0, fanRoom: 0, efficiency: 0, violations: 0 }
+  const breakdown = {
+    base: 10000,
+    footprint: 0,
+    adjacency: 0,
+    corridor: 0,
+    trafo: 0,
+    fanRoom: 0,
+    efficiency: 0,
+    accessibility: 0,
+    violations: 0,
+  }
   let score = breakdown.base
 
   // 1. Footprint penalty (per m²)
@@ -56,9 +105,16 @@ export function scoreLayout(result) {
     }
   })
 
-  // 3. Both trafos on same side → +20
+  // 3. Both trafos on same exterior wall side → +20
+  //    Checks that both touch the same wall (west or east), not just proximity.
   if (allPlacements.trafo1 && allPlacements.trafo2) {
-    if (Math.abs(allPlacements.trafo1.x - allPlacements.trafo2.x) < 200) {
+    const t1 = allPlacements.trafo1
+    const t2 = allPlacements.trafo2
+    const t1West = t1.x <= 100
+    const t1East = t1.x + t1.w >= bW - 100
+    const t2West = t2.x <= 100
+    const t2East = t2.x + t2.w >= bW - 100
+    if ((t1West && t2West) || (t1East && t2East)) {
       breakdown.trafo += 20
       score += 20
     }
@@ -96,9 +152,23 @@ export function scoreLayout(result) {
   breakdown.efficiency = efficiencyScore
   score += efficiencyScore
 
-  // 7. Constraint violation penalty
+  // 7. Accessibility bonus (0~+30)
+  //    Proxy: average Euclidean distance from nominal entrance to ground-floor room centroids.
+  //    TODO: replace with full BFS path once door positions are stable.
+  const accessibilityScore = computeAccessibilityScore(result)
+  breakdown.accessibility = accessibilityScore
+  score += accessibilityScore
+
+  // 8. Constraint violation penalty
   breakdown.violations = -(result.violations.length * 50)
   score += breakdown.violations
 
-  return { score: Math.round(score), spaceEfficiency, efficiencyScore, breakdown }
+  return {
+    score: Math.round(score),
+    spaceEfficiency,
+    efficiencyScore,
+    accessibilityScore,
+    diversityPenalty: 0, // placeholder — similarity-based penalty is not yet implemented
+    breakdown,
+  }
 }

@@ -579,7 +579,8 @@ btnParams?.addEventListener('click', () => {
     const panel = renderBuildingParamsPanel(defaultParams);
     const modalBody = buildParamsDialog.querySelector('#modal-params-wrap');
     if (panel && modalBody) {
-        modalBody.innerHTML = panel.innerHTML; // Correctly use the innerHTML property
+        modalBody.innerHTML = panel.innerHTML;
+        panel.init(modalBody);  // 激活 input 监听，变更即刻保存到 localStorage
     }
     buildParamsDialog.showModal();
 });
