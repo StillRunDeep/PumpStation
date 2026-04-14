@@ -1,5 +1,5 @@
 import { ROOM_DEFS } from '../layout/room-defs.js'
-import { _r, _l, _t, _dh, _dv, decomposeRoomIntoRects } from './svg-helpers.js'
+import { _r, _l, _t, _dh, _dv, decomposeRoomIntoRects, calculateLabelPosition } from './svg-helpers.js'
 
 const FONT = 'Microsoft YaHei,sans-serif'
 
@@ -89,11 +89,21 @@ export function renderLayoutSVG(variant, vw, vh, opts = {}) {
         }
     }
 
-    // Labels (use original bbox for positioning)
+    // Labels
+    const debugInfo = variant._debug && variant._debug[floor];
+    const cells = debugInfo && debugInfo.grid && debugInfo.grid.roomData[id];
     const rw = p.w * ps, rd = p.d * ps;
+
     if (rw > 30 && rd > 20) {
-      const cx = ox + (p.x + p.w / 2) * ps
-      const cy = oy + (p.y + p.d / 2) * ps
+      let cx = ox + (p.x + p.w / 2) * ps;
+      let cy = oy + (p.y + p.d / 2) * ps;
+
+      if (cells) {
+        const labelPos = calculateLabelPosition(cells);
+        cx = ox + labelPos.x * p.gridSize * ps;
+        cy = oy + labelPos.y * p.gridSize * ps;
+      }
+
       const maxChars = Math.floor(rw / 7)
       const shortLabel = def.label.length > maxChars ? def.label.slice(0, maxChars - 1) + '…' : def.label
       const labelSz = Math.max(8, Math.min(11, rw / (def.label.length * 0.65)))
@@ -205,10 +215,22 @@ export function renderLayoutSVGDual(variant, vw, vh) {
         }
 
         // Labels
+        const debugInfo = variant._debug && variant._debug[floorLabel === '地面层平面' ? 'ground' : 'level1'];
+        const cells = debugInfo && debugInfo.grid && debugInfo.grid.roomData[id];
         const rw = p.w * ps, rd = p.d * ps;
+
         if (rw > 22 && rd > 16) {
+            let cx = ox + (p.x + p.w / 2) * ps;
+            let cy = oy + (p.y + p.d / 2) * ps + 3;
+
+            if (cells && p.gridSize) {
+                const labelPos = calculateLabelPosition(cells);
+                cx = ox + labelPos.x * p.gridSize * ps;
+                cy = oy + labelPos.y * p.gridSize * ps + 3;
+            }
+
             const labelSz = Math.max(7, Math.min(10, rw / (def.label.length * 0.7)));
-            s += _t(ox + (p.x + p.w / 2) * ps, oy + (p.y + p.d / 2) * ps + 3, def.label.slice(0, Math.floor(rw / 7)), labelSz, '#2c3e50');
+            s += _t(cx, cy, def.label.slice(0, Math.floor(rw / 7)), labelSz, '#2c3e50');
         }
     }
 

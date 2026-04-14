@@ -7,7 +7,9 @@ git clone git@github.com:StillRunDeep/PumpStation.git #ssh方式
 git switch -c feature/your-feature-name
 
  3.1 开始工作前，同步 main 最新内容
-git fetch origin && git rebase origin/main      #&&表示顺序执行
+#执行一次即可，提前配置设置 git pull 时默认rebase
+#git config --global pull.rebase true 
+git pull origin main 
 
  3.2 开发、提交
 git add . && git commit -m "feat: 添加某功能"
@@ -16,7 +18,8 @@ git add . && git commit -m "feat: 添加某功能"
 git push -u origin feature/name
 
  3.4 发起 PR 前，再次同步最新 main
-git fetch origin && git rebase origin/main
+
+git pull origin main 
 git push --force-with-lease origin feature/【name】  
 
  4. GitHub 网页发起 Pull Request

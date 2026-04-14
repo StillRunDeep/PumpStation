@@ -151,3 +151,67 @@ export function decomposeRoomIntoRects(cells) {
 
     return rects;
 }
+
+export function calculateLabelPosition(cells) {
+    if (!cells || cells.length === 0) {
+        return { x: 0, y: 0, w: 0, d: 0 };
+    }
+
+    const minX = Math.min(...cells.map(c => c.x));
+    const minY = Math.min(...cells.map(c => c.y));
+    const maxX = Math.max(...cells.map(c => c.x));
+    const maxY = Math.max(...cells.map(c => c.y));
+
+    const width = maxX - minX + 1;
+    const height = maxY - minY + 1;
+    const localGrid = Array.from({ length: height }, () => Array(width).fill(false));
+
+    for (const cell of cells) {
+        localGrid[cell.y - minY][cell.x - minX] = true;
+    }
+
+    const maxWidths = Array.from({ length: height }, () => Array(width).fill(0));
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            if (localGrid[y][x]) {
+                maxWidths[y][x] = (x > 0) ? maxWidths[y][x - 1] + 1 : 1;
+            }
+        }
+    }
+
+    let maxArea = 0;
+    let bestRect = { x: 0, y: 0, w: 0, h: 0 };
+
+    for (let x = 0; x < width; x++) {
+        const stack = []; // Stores { height, index }
+        for (let y = 0; y < height; y++) {
+            const h = maxWidths[y][x];
+            let start = y;
+            while (stack.length > 0 && stack[stack.length - 1].height >= h) {
+                const { height: prevH, index: prevY } = stack.pop();
+                const w = y - prevY;
+                const area = prevH * w;
+                if (area > maxArea) {
+                    maxArea = area;
+                    bestRect = { x: x - prevH + 1, y: prevY, w: prevH, h: w };
+                }
+                start = prevY;
+            }
+            stack.push({ height: h, index: start });
+        }
+
+        for (const { height: h, index: y } of stack) {
+            const w = height - y;
+            const area = h * w;
+            if (area > maxArea) {
+                maxArea = area;
+                bestRect = { x: x - h + 1, y: y, w: h, h: w };
+            }
+        }
+    }
+
+    return {
+        x: (bestRect.x + minX + bestRect.w / 2),
+        y: (bestRect.y + minY + bestRect.h / 2),
+    };
+}

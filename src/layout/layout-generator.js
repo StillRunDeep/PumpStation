@@ -600,7 +600,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId 
   const gridH = Math.floor(bD / GRID_SIZE);
 
   // 1. Separate rooms by floor
-  const allRooms = Object.values(ROOM_DEFS).map(r => {
+  const allRooms = Object.values(ROOM_DEFS).filter(r => !r.isOpening).map(r => {
     const targetAreaMm2 = (roomAreas[r.id] * 1e6) || (r.w * r.d);
     return {
       id: r.id,
