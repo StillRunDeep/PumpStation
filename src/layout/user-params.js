@@ -7,50 +7,91 @@
 /**
  * 定义用户交互参数的接口
  * @typedef {object} UserParams
- * @property {number} buildingW - 用户确认的建筑宽度 W（mm），默认 18600
- * @property {number} buildingD - 用户确认的建筑深度 D（mm），默认 24000
+ * @property {number} buildingW - 建筑东西向宽度 BW（mm），最大值约束，默认 43850
+ * @property {number} buildingD - 建筑南北向进深 BD（mm），最大值约束，默认 18600
  * @property {object} roomTargetAreas - 各功能空间目标面积（m²），用户可修改
- * @property {number} roomTargetAreas.trafo1 - 默认 20
- * @property {number} roomTargetAreas.trafo2 - 默认 20
- * @property {number} roomTargetAreas.parking - 默认 80，独立功能空间参与生长
- * @property {number} roomTargetAreas.repair_zone - 默认 60
+ * @property {number} roomTargetAreas.trafo1 - 默认 60
+ * @property {number} roomTargetAreas.trafo2 - 默认 60
+ * @property {number} roomTargetAreas.parking - 默认 150（最小值，满足 5.5t 货车停放需求）
+ * @property {number} roomTargetAreas.repair_zone - 默认 120（最小值，满足三条 DN1000 主管布置）
  * @property {number} roomTargetAreas.meter_main - 默认 12
  * @property {number} roomTargetAreas.meter_sub - 默认 8
  * @property {number} roomTargetAreas.fire_equip - 默认 15
  * @property {number} roomTargetAreas.lv_control - 默认 65
- * @property {number} roomTargetAreas.fan_room - 55
+ * @property {number} roomTargetAreas.fan_room - 默认 55
  * @property {number} roomTargetAreas.clean_pump - 默认 25
  * @property {number} roomTargetAreas.rainwater - 默认 25
- * @property {number} roomTargetAreas.corridor_l1 - 默认 18
+ * @property {number} roomTargetAreas.corridor_l1 - 0（走廊面积不作要求，仅限宽度 ≥ 1500 mm）
  */
 
+const STORAGE_KEY = 'pumpstation_building_params'
+
+/** 硬编码的出厂默认值，不含用户缓存。 */
+const HARDCODED_DEFAULTS = {
+  buildingW: 43850,  // 东西向宽度 BW（最大值约束）
+  buildingD: 18600,  // 南北向进深 BD（最大值约束）
+  roomTargetAreas: {
+    trafo1:      60,   // 变压器房 1
+    trafo2:      60,   // 变压器房 2
+    parking:    150,   // 停车位（最小 150 m²，满足 5.5t 货车）
+    repair_zone: 120,  // 泵房维护间（最小 120 m²，满足三条 DN1000 主管）
+    meter_main:  12,   // 总水表房
+    meter_sub:    8,   // 水表房
+    fire_equip:  15,   // 消防设备房
+    lv_control:  65,   // 低压配电及 PLC 控制室
+    fan_room:    55,   // 风机房
+    clean_pump:  25,   // 清洁泵房
+    rainwater:   25,   // 雨水回用泵房
+    corridor_l1:  0,   // 走廊（不作面积要求，宽度须 ≥ 1500 mm）
+  },
+}
+
 /**
- * 获取默认用户参数
- * @returns {UserParams} 默认用户参数
+ * 将参数保存到 localStorage。
+ * @param {UserParams} params
  */
+export function saveParams(params) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(params))
+  } catch (e) {
+    // localStorage 不可用时静默忽略
+  }
+}
+
 /**
- * 获取默认用户参数
- * @returns {UserParams} 默认用户参数
+ * 从 localStorage 读取已保存的参数。
+ * @returns {UserParams|null} 已保存的参数，或 null（若无记录）
+ */
+export function loadSavedParams() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch (e) {
+    return null
+  }
+}
+
+/**
+ * 获取用户参数：若有 localStorage 缓存则深合并覆盖默认值，否则返回出厂默认值。
+ * @returns {UserParams}
  */
 export function getDefaultUserParams() {
+  const saved = loadSavedParams()
+  if (!saved) {
+    return {
+      ...HARDCODED_DEFAULTS,
+      roomTargetAreas: { ...HARDCODED_DEFAULTS.roomTargetAreas },
+    }
+  }
+  // 深合并：用户保存的字段覆盖硬编码默认值，其余保持默认
   return {
-    buildingW: 18600,
-    buildingD: 24000,
+    buildingW: saved.buildingW ?? HARDCODED_DEFAULTS.buildingW,
+    buildingD: saved.buildingD ?? HARDCODED_DEFAULTS.buildingD,
     roomTargetAreas: {
-      trafo1: 20,
-      trafo2: 20,
-      parking: 80,
-      repair_zone: 60,
-      meter_main: 12,
-      meter_sub: 8,
-      fire_equip: 15,
-      lv_control: 65,
-      fan_room: 55,
-      clean_pump: 25,
-      rainwater: 25,
-      corridor_l1: 18,
+      ...HARDCODED_DEFAULTS.roomTargetAreas,
+      ...(saved.roomTargetAreas || {}),
     },
-  };
+  }
 }
 
 /**
@@ -59,8 +100,8 @@ export function getDefaultUserParams() {
  * @returns {number|null} The parsed number or null
  */
 function readOptional(id) {
-  const v = parseFloat(document.getElementById(id)?.value);
-  return isNaN(v) || v <= 0 ? null : v;
+  const v = parseFloat(document.getElementById(id)?.value)
+  return isNaN(v) || v <= 0 ? null : v
 }
 
 /**
@@ -68,29 +109,25 @@ function readOptional(id) {
  * @returns {UserParams} 用户确认或修改后的参数
  */
 export async function getUserConfirmedParams() {
-  const bW = parseFloat(document.getElementById('inp-bw')?.value) || 18600;
-  const bD = parseFloat(document.getElementById('inp-bd')?.value) || 24000;
+  const defaults = getDefaultUserParams()
+  const bW = parseFloat(document.getElementById('inp-bw')?.value) || defaults.buildingW
+  const bD = parseFloat(document.getElementById('inp-bd')?.value) || defaults.buildingD
 
-  const roomAreas = {};
+  const roomAreas = {}
 
-  const raRepair  = readOptional('ra-repair');
-  const raParking = readOptional('ra-parking');
-  const raLv      = readOptional('ra-lv');
-  const raCp      = readOptional('ra-cp');
-  const raFan     = readOptional('ra-fan');
-  const raRw      = readOptional('ra-rw');
+  const raRepair  = readOptional('ra-repair')
+  const raParking = readOptional('ra-parking')
+  const raLv      = readOptional('ra-lv')
+  const raCp      = readOptional('ra-cp')
+  const raFan     = readOptional('ra-fan')
+  const raRw      = readOptional('ra-rw')
 
-  if (raRepair  !== null) roomAreas.repair_zone = raRepair;
-  if (raParking !== null) roomAreas.parking     = raParking;
-  if (raLv      !== null) roomAreas.lv_control  = raLv;
-  if (raCp      !== null) roomAreas.clean_pump  = raCp;
-  if (raFan     !== null) roomAreas.fan_room    = raFan;
-  if (raRw      !== null) roomAreas.rainwater   = raRw;
+  if (raRepair  !== null) roomAreas.repair_zone = raRepair
+  if (raParking !== null) roomAreas.parking     = raParking
+  if (raLv      !== null) roomAreas.lv_control  = raLv
+  if (raCp      !== null) roomAreas.clean_pump  = raCp
+  if (raFan     !== null) roomAreas.fan_room    = raFan
+  if (raRw      !== null) roomAreas.rainwater   = raRw
 
-  // 这里可以添加逻辑来展示提示规则
-  console.log("模拟用户交互：展示 A.0 中的所有可调参数及其初始值。");
-  console.log("对继承自上游模块的参数给出提示（此处未实现具体继承逻辑）。");
-  console.log("等待用户确认或修改，锁定 L、W 及各房间目标面积。");
-
-  return { buildingW: Math.round(bW / 100) * 100, buildingD: Math.round(bD / 100) * 100, roomTargetAreas: roomAreas };
+  return { buildingW: Math.round(bW / 100) * 100, buildingD: Math.round(bD / 100) * 100, roomTargetAreas: roomAreas }
 }

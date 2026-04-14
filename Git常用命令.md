@@ -18,7 +18,10 @@ git add . && git commit -m "feat: 添加某功能"
 git push -u origin feature/name
 
  3.4 发起 PR 前，再次同步最新 main
+<<<<<<< HEAD
+=======
 
+>>>>>>> f088099 (feat: 优化房间名称显示)
 git pull origin main 
 git push --force-with-lease origin feature/【name】  
 
