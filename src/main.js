@@ -507,7 +507,7 @@ document.getElementById('btn-ag41-more').addEventListener('click', () => {
       cancelAnimationFrame(generationReqId);
       generationReqId = null;
     }
-    btn.textContent = '生成方案';
+    btn.textContent = '生成更多方案';
     showAg41Notify('已停止持续生成', false);
   } else {
     // Start generation
@@ -515,18 +515,22 @@ document.getElementById('btn-ag41-more').addEventListener('click', () => {
     btn.textContent = '停止';
 
     const generationLoop = async () => {
-      if (!isGeneratingLayouts) return;
+      if (!isGeneratingLayouts) {
+        btn.textContent = '生成更多方案';
+        return;
+      }
 
       try {
-        const newRaw = await runAG41();
-        const { variants, improved, newScored } = mergeVariants(getVariants(), newRaw);
+        const existing = getVariants();
+        const newRaw = await runAG41(existing); // Pass existing variants
+        const { variants, improved, newScored } = mergeVariants(existing, newRaw);
         renderLayoutPanel(variants);
 
         const maxNewScore = Math.max(...newScored.map(v => v.score));
         const currentTopScore = variants[0]?.score || 0;
 
         if (improved) {
-          showAg41Notify(`发现更优方案，排名已更新！新方案最高分: ${maxNewScore}`, true);
+          showAg41Notify(`发现更优方案！新方案最高分: ${maxNewScore}`, true);
         } else {
           showAg41Notify(`未发现更优方案 (当前最高: ${currentTopScore} / 本轮最高: ${maxNewScore})`, false);
         }
@@ -535,11 +539,11 @@ document.getElementById('btn-ag41-more').addEventListener('click', () => {
         showAg41Notify('生成新方案时出错', false);
         // Stop the loop on error
         isGeneratingLayouts = false;
-        btn.textContent = '生成方案';
+        btn.textContent = '生成更多方案';
         return;
       }
 
-      // Continue the loop
+      // Continue the loop if still active
       if (isGeneratingLayouts) {
         generationReqId = requestAnimationFrame(generationLoop);
       }
@@ -555,10 +559,10 @@ document.getElementById('btn-ag41-reset').addEventListener('click', async () => 
   btn.disabled = true
   btn.textContent = '生成中…'
   try {
-    const newRaw = await runAG41()
+    const newRaw = await runAG41([]) // Start with no existing variants
     const variants = runAG42(newRaw)
     renderLayoutPanel(variants)
-    showAg41Notify('已重新生成 9 个方案', true)
+    showAg41Notify('已生成 9 个初始方案', true)
   } finally {
     btn.disabled = false
     btn.textContent = '重制方案'
