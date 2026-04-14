@@ -34,8 +34,13 @@ git push -u origin feature/name
 git push 
 
  3.4 发起 PR 前，再次同步最新 main
+<<<<<<< HEAD
 git pull origin main          # 默认rebase已开启
 git push --force-with-lease   # 前面建立过绑定关系，无需指定origin feature/name 
+=======
+git pull origin main 
+git push --force-with-lease origin feature/【name】  
+>>>>>>> dd9e8ac (feat:增加git常用命令.md)
 
  4. GitHub 网页发起 Pull Request
  5. 团队 Review，按反馈修改，push 更新 PR
