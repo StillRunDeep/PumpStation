@@ -593,14 +593,14 @@ function makeRng(seed) {
   };
 }
 
-export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId = 'CG', variantIdx = 1) {
+export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId = 'CG', variantIdx = 1, prefix = 'R', initialSeeds = null) {
   const rng = makeRng(seed);
 
   const gridW = Math.floor(bW / GRID_SIZE);
   const gridH = Math.floor(bD / GRID_SIZE);
 
   // 1. Separate rooms by floor
-  const allRooms = Object.values(ROOM_DEFS).map(r => {
+  const allRooms = Object.values(ROOM_DEFS).filter(r => !r.isOpening).map(r => {
     const targetAreaMm2 = (roomAreas[r.id] * 1e6) || (r.w * r.d);
     return {
       id: r.id,
@@ -616,7 +616,18 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId 
   // 2. Create and process grids for each floor
   let groundGridBeforeGaps;
   const groundGrid = new Grid(gridW, gridH);
-  const groundSeeds = placeRoomSeeds(groundGrid, groundRooms, rng);
+  let groundSeeds;
+  if (initialSeeds && initialSeeds.ground) {
+    groundSeeds = initialSeeds.ground;
+    for (const room of groundRooms) {
+        if (groundSeeds[room.id]) {
+            const { x, y } = groundSeeds[room.id];
+            groundGrid.addRoomCell(room.id, x, y);
+        }
+    }
+  } else {
+    groundSeeds = placeRoomSeeds(groundGrid, groundRooms, rng);
+  }
   expandRooms(groundGrid, groundRooms, rng, (gridState) => {
     groundGridBeforeGaps = gridState.clone();
   });
@@ -625,7 +636,18 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId 
 
   let level1GridBeforeGaps;
   const level1Grid = new Grid(gridW, gridH);
-  const level1Seeds = placeRoomSeeds(level1Grid, level1Rooms, rng);
+  let level1Seeds;
+  if (initialSeeds && initialSeeds.level1) {
+    level1Seeds = initialSeeds.level1;
+    for (const room of level1Rooms) {
+        if (level1Seeds[room.id]) {
+            const { x, y } = level1Seeds[room.id];
+            level1Grid.addRoomCell(room.id, x, y);
+        }
+    }
+  } else {
+    level1Seeds = placeRoomSeeds(level1Grid, level1Rooms, rng);
+  }
   expandRooms(level1Grid, level1Rooms, rng, (gridState) => {
     level1GridBeforeGaps = gridState.clone();
   });
@@ -639,7 +661,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId 
   };
 
   return {
-    id: `A-${groupId}-${variantIdx}`,
+    id: `${prefix}-${groupId}-${variantIdx}`,
     label: `约束生长法`,
     desc: `建筑 ${(bW / 1000).toFixed(1)}m×${(bD / 1000).toFixed(1)}m`,
     groundPlacements: finalLayout.ground,
