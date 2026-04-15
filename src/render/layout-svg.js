@@ -1,156 +1,55 @@
 import { ROOM_DEFS } from '../layout/room-defs.js'
 import { _r, _l, _t, _dh, _dv, decomposeRoomIntoRects, calculateLabelPosition } from './svg-helpers.js'
 
-const FONT = 'Microsoft YaHei,sans-serif'
+const FONT = 'Microsoft YaHei,sans-serif';
 
-/**
- * Render a building layout variant as an SVG string.
- *
- * @param {object}  variant     Result from runAG41() (has .template, .groundPlacements, .level1Placements)
- * @param {number}  vw          SVG canvas width (px)
- * @param {number}  vh          SVG canvas height (px)
- * @param {object}  opts
- * @param {boolean} opts.showDims     Draw dimension annotations
- * @param {'ground'|'level1'|'both'} opts.floor  Which floor(s) to show
- * @param {boolean} opts.showCrane    Draw crane coverage dashed box
- */
-export function renderLayoutSVG(variant, vw, vh, opts = {}) {
-  const { showDims = true, floor = 'ground', showCrane = true } = opts
+export function renderLayoutSVG(variant, floor, vw, vh, opts = {}) {
+  const { showDims = true, showCrane = true } = opts;
   const { groundPlacements, level1Placements, buildingW, buildingD, crane15, crane5 } = variant;
   const placements = floor === 'level1' ? level1Placements : groundPlacements;
+  const crane = floor === 'level1' ? crane5 : crane15;
 
-  const MARGIN = { top: 48, right: 48, bottom: 48, left: 56 }
-  const drawW = vw - MARGIN.left - MARGIN.right
-  const drawH = vh - MARGIN.top  - MARGIN.bottom
+  const MARGIN = { top: 48, right: 48, bottom: 48, left: 56 };
+  const drawW = vw - MARGIN.left - MARGIN.right;
+  const drawH = vh - MARGIN.top - MARGIN.bottom;
+  const ps = Math.min(drawW / buildingW, drawH / buildingD);
+  const ox = MARGIN.left + (drawW - buildingW * ps) / 2;
+  const oy = MARGIN.top  + (drawH - buildingD * ps) / 2;
 
-  // Scale to fit: px per mm
-  const ps = Math.min(drawW / buildingW, drawH / buildingD)
+  let s = _r(0, 0, vw, vh, '#f4f6f8', 'none');
+  s += _r(ox, oy, buildingW * ps, buildingD * ps, '#ffffff', '#2c3e50', 2.5);
 
-  // Origin (NW corner of building in SVG px)
-  const ox = MARGIN.left  + (drawW - buildingW * ps) / 2
-  const oy = MARGIN.top   + (drawH - buildingD * ps) / 2
-
-  let s = _r(0, 0, vw, vh, '#f4f6f8', 'none')
-
-  // Building background
-  s += _r(ox, oy, buildingW * ps, buildingD * ps, '#ffffff', '#2c3e50', 2.5)
-
-  // Crane coverage box
-  if (showCrane) {
-    const showCrane15 = floor === 'ground'
-    const showCrane5  = floor === 'level1'
-    if (showCrane15 && crane15) {
-      const c = crane15
-      s += _r(ox + c.x * ps, oy + c.y * ps, c.w * ps, c.d * ps,
-        'rgba(255,193,7,0.08)', '#f0a500', 1.5, 'stroke-dasharray="6,3"')
-      s += _t(ox + c.x * ps + 6, oy + c.y * ps + 14, '15t 桥吊覆盖', 10, '#b7770d', 'start')
-    }
-    if (showCrane5 && crane5) {
-      const c = crane5
-      s += _r(ox + c.x * ps, oy + c.y * ps, c.w * ps, c.d * ps,
-        'rgba(100,149,237,0.08)', '#5b8dd9', 1.5, 'stroke-dasharray="6,3"')
-      s += _t(ox + c.x * ps + 6, oy + c.y * ps + 14, '5t 单轨吊覆盖', 10, '#2e5ca8', 'start')
-    }
+  if (showCrane && crane) {
+      s += _r(ox + crane.x * ps, oy + crane.y * ps, crane.w * ps, crane.d * ps,
+        'rgba(255,193,7,0.08)', '#f0a500', 1.5, 'stroke-dasharray="6,3"');
   }
 
-  // Rooms
   for (const [id, p] of Object.entries(placements || {})) {
-    const def = ROOM_DEFS[id]
-    if (!def) continue
+    const def = ROOM_DEFS[id];
+    if (!def) continue;
 
-    if (p.cells && p.gridSize) {
-        const rects = decomposeRoomIntoRects(p.cells);
-        let pathData = '';
-        for (const r of rects) {
-            const rx = ox + r.x * p.gridSize * ps;
-            const ry = oy + r.y * p.gridSize * ps;
-            const rw = r.w * p.gridSize * ps;
-            const rh = r.h * p.gridSize * ps;
-            pathData += `M ${rx} ${ry} h ${rw} v ${rh} h ${-rw} Z `;
-        }
-
-        if (def.isOpening) {
-            s += `<path d="${pathData}" fill="#cde6f7" stroke="${def.strokeColor || '#2471a3'}" stroke-width="1.5" stroke-dasharray="4,2"/>`;
-            const rx = ox + p.x * ps, ry = oy + p.y * ps, rw = p.w * ps, rd = p.d * ps;
-            s += _l(rx, ry, rx + rw, ry + rd, '#aed6f1', 1);
-            s += _l(rx + rw, ry, rx, ry + rd, '#aed6f1', 1);
-        } else {
-            s += `<path d="${pathData}" fill="${def.color}" stroke="${def.strokeColor || '#555'}" stroke-width="1.5"/>`;
-        }
+    const rx = ox + p.x * ps, ry = oy + p.y * ps, rw = p.w * ps, rd = p.d * ps;
+    if (def.isOpening) {
+      s += _r(rx, ry, rw, rd, '#cde6f7', def.strokeColor || '#2471a3', 1.5, 'stroke-dasharray="4,2"');
     } else {
-        // Fallback to bounding box
-        const rx = ox + p.x * ps, ry = oy + p.y * ps, rw = p.w * ps, rd = p.d * ps;
-        if (def.isOpening) {
-          s += _r(rx, ry, rw, rd, '#cde6f7', def.strokeColor || '#2471a3', 1.5, 'stroke-dasharray="4,2"');
-          s += _l(rx, ry, rx + rw, ry + rd, '#aed6f1', 1);
-          s += _l(rx + rw, ry, rx, ry + rd, '#aed6f1', 1);
-        } else {
-          s += _r(rx, ry, rw, rd, def.color, def.strokeColor || '#555', 1.5);
-        }
+      s += _r(rx, ry, rw, rd, def.color, def.strokeColor || '#555', 1.5);
     }
 
-    // Labels
-    const debugInfo = variant._debug && variant._debug[floor];
-    const cells = debugInfo && debugInfo.grid && debugInfo.grid.roomData[id];
-    const rw = p.w * ps, rd = p.d * ps;
-
-    if (rw > 30 && rd > 20) {
-      let cx = ox + (p.x + p.w / 2) * ps;
-      let cy = oy + (p.y + p.d / 2) * ps;
-
-      if (cells) {
-        const labelPos = calculateLabelPosition(cells);
-        cx = ox + labelPos.x * p.gridSize * ps;
-        cy = oy + labelPos.y * p.gridSize * ps;
-      }
-
-      const maxChars = Math.floor(rw / 7)
-      const shortLabel = def.label.length > maxChars ? def.label.slice(0, maxChars - 1) + '…' : def.label
-      const labelSz = Math.max(8, Math.min(11, rw / (def.label.length * 0.65)))
-      const dimSz   = Math.max(7, Math.min(9, rw / 14))
-
-      s += _t(cx, cy - (rd > 30 ? 5 : 0), shortLabel, labelSz, '#2c3e50')
-      if (rd > 30) {
-        s += _t(cx, cy + 9, `${(p.w / 1000).toFixed(1)}×${(p.d / 1000).toFixed(1)}m`, dimSz, '#666')
-      }
-    }
+    const labelSz = Math.max(7, Math.min(10, rw / (def.label.length * 0.7)));
+    s += _t(rx + rw/2, ry + rd/2, def.label, labelSz, '#2c3e50');
   }
 
-  // Doors
-  if (variant.doors) {
-    for (const door of variant.doors) {
-      const doorW = door.w === 0 ? 4 : door.w * ps;
-      const doorH = door.d === 0 ? 4 : door.d * ps;
-      const doorX = ox + (door.x * ps) - (doorW/2);
-      const doorY = oy + (door.y * ps) - (doorH/2);
-      s += _r(doorX, doorY, doorW, doorH, '#e67e22', 'none');
-    }
-  }
-
-  // Overall dimension annotations
   if (showDims) {
-    const bx1 = ox, bx2 = ox + buildingW * ps
-    const by1 = oy, by2 = oy + buildingD * ps
-
-    s += _dh(bx1, bx2, by2 + 30,
-      `总宽 ${(buildingW / 1000).toFixed(1)} m`, '#1a3a5c')
-    s += _dv(bx1 - 36, by1, by2,
-      `总深 ${(buildingD / 1000).toFixed(1)} m`, '#1a3a5c')
+    const bx1 = ox, bx2 = ox + buildingW * ps;
+    const by1 = oy, by2 = oy + buildingD * ps;
+    s += _dh(bx1, bx2, by2 + 30, `总宽 ${(buildingW / 1000).toFixed(1)} m`, '#1a3a5c');
+    s += _dv(bx1 - 36, by1, by2, `总深 ${(buildingD / 1000).toFixed(1)} m`, '#1a3a5c');
   }
 
-  // Floor label
-  const floorLabel = floor === 'level1' ? '一层平面' : '地面层平面'
-  s += _t(vw / 2, MARGIN.top - 14, floorLabel, 13, '#1a5276', 'middle', 'bold')
+  const floorLabel = floor === 'level1' ? '一层平面' : '地面层平面';
+  s += _t(vw / 2, MARGIN.top - 14, floorLabel, 13, '#1a5276', 'middle', 'bold');
 
-  // Scale bar (1 m)
-  const barLen = ps * 1000  // 1000 mm = 1 m
-  const barX = ox, barY = oy + buildingD * ps + 14
-  s += _l(barX, barY, barX + barLen, barY, '#333', 2)
-  s += _l(barX, barY - 4, barX, barY + 4, '#333', 1.5)
-  s += _l(barX + barLen, barY - 4, barX + barLen, barY + 4, '#333', 1.5)
-  s += _t(barX + barLen / 2, barY - 5, '1 m', 10, '#333')
-
-  return s
+  return s;
 }
 
 /**

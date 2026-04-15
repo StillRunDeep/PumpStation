@@ -276,9 +276,10 @@ function findSmartLineExpansion(grid, roomId) {
     return bestSegment ? bestSegment.cells : null;
 }
 
-function expandRooms(grid, rooms, rng, onRegularExpansionComplete = null) {
+function expandRooms(grid, rooms, rng, onRegularExpansionComplete = null, onRectExpansionComplete = null) {
     let iterations = 0;
     let regularExpansionStalled = false;
+    let rectExpansionHookFired = false;
     // currentArea is now in grid cell counts
     let growingRooms = rooms.map(r => ({ ...r, currentArea: r.id in grid.roomData ? 1 : 0 }));
 
@@ -293,6 +294,11 @@ function expandRooms(grid, rooms, rng, onRegularExpansionComplete = null) {
 
         for (const roomToGrow of activeRooms) {
             let expansionCells = findBestRectangleExpansion(grid, roomToGrow.id);
+
+            if (!expansionCells && !rectExpansionHookFired && onRectExpansionComplete) {
+                onRectExpansionComplete(grid);
+                rectExpansionHookFired = true;
+            }
 
             if (!expansionCells) {
                 expansionCells = findBestFillExpansion(grid, roomToGrow.id);
@@ -340,6 +346,7 @@ function expandRooms(grid, rooms, rng, onRegularExpansionComplete = null) {
 }
 
 function fillGaps(grid, rooms) {
+    console.log("[Debug] fillGaps: 函数开始执行。");
     let emptyCells = [];
     for (let y = 0; y < grid.height; y++) {
         for (let x = 0; x < grid.width; x++) {
@@ -348,6 +355,8 @@ function fillGaps(grid, rooms) {
             }
         }
     }
+
+    console.log(`[Debug] fillGaps: 找到 ${emptyCells.length} 个空白单元格需要填充。`);
 
     if (emptyCells.length === 0) return;
     console.log(`智能填充 ${emptyCells.length} 个间隙单元格...`);
@@ -399,6 +408,7 @@ function fillGaps(grid, rooms) {
 
         // --- 3. 选择最优并填充 ---
         if (bestSegment) {
+            console.log(`[Debug] fillGaps: 决策 - 将长度为 ${bestSegment.cells.length} 的线段分配给房间 ${bestRoomId} (得分: ${bestScore.toFixed(2)})`);
             for (const cell of bestSegment.cells) {
                 grid.addRoomCell(bestRoomId, cell.x, cell.y);
                 emptyCellSet.delete(`${cell.x},${cell.y}`);
@@ -614,9 +624,9 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId 
   const level1Rooms = allRooms.filter(r => r.floor === 'level1');
 
   // 2. Create and process grids for each floor
-  let groundGridBeforeGaps;
+  let groundGridBeforeGaps, groundGridAfterRect;
   const groundGrid = new Grid(gridW, gridH);
-  let groundSeeds;
+  let groundSeeds, groundGridAfterSeeds;
   if (initialSeeds && initialSeeds.ground) {
     groundSeeds = initialSeeds.ground;
     for (const room of groundRooms) {
@@ -628,15 +638,19 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId 
   } else {
     groundSeeds = placeRoomSeeds(groundGrid, groundRooms, rng);
   }
+  groundGridAfterSeeds = groundGrid.clone();
   expandRooms(groundGrid, groundRooms, rng, (gridState) => {
     groundGridBeforeGaps = gridState.clone();
+  }, (gridState) => {
+    groundGridAfterRect = gridState.clone();
   });
+  if (!groundGridAfterRect) groundGridAfterRect = groundGrid.clone();
   if (!groundGridBeforeGaps) groundGridBeforeGaps = groundGrid.clone(); // Fallback if regular expansion never stalled
   fillGaps(groundGrid, groundRooms);
 
-  let level1GridBeforeGaps;
+  let level1GridBeforeGaps, level1GridAfterRect;
   const level1Grid = new Grid(gridW, gridH);
-  let level1Seeds;
+  let level1Seeds, level1GridAfterSeeds;
   if (initialSeeds && initialSeeds.level1) {
     level1Seeds = initialSeeds.level1;
     for (const room of level1Rooms) {
@@ -648,9 +662,13 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId 
   } else {
     level1Seeds = placeRoomSeeds(level1Grid, level1Rooms, rng);
   }
+  level1GridAfterSeeds = level1Grid.clone();
   expandRooms(level1Grid, level1Rooms, rng, (gridState) => {
     level1GridBeforeGaps = gridState.clone();
+  }, (gridState) => {
+    level1GridAfterRect = gridState.clone();
   });
+  if (!level1GridAfterRect) level1GridAfterRect = level1Grid.clone();
   if (!level1GridBeforeGaps) level1GridBeforeGaps = level1Grid.clone(); // Fallback
   fillGaps(level1Grid, level1Rooms);
 
@@ -671,8 +689,8 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId 
     groupId,
     variantIdx,
     _debug: {
-      ground: { grid: groundGrid, seeds: groundSeeds, gridBeforeGaps: groundGridBeforeGaps },
-      level1: { grid: level1Grid, seeds: level1Seeds, gridBeforeGaps: level1GridBeforeGaps },
+      ground: { seeds: groundSeeds, gridAfterSeeds: groundGridAfterSeeds, gridAfterRect: groundGridAfterRect, gridBeforeGaps: groundGridBeforeGaps, gridAfterGaps: groundGrid },
+      level1: { seeds: level1Seeds, gridAfterSeeds: level1GridAfterSeeds, gridAfterRect: level1GridAfterRect, gridBeforeGaps: level1GridBeforeGaps, gridAfterGaps: level1Grid },
     }
   };
 }
