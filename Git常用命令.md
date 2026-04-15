@@ -1,39 +1,53 @@
+A、极简版本：
+```bash
+# 切feature时操作一次：
+git switch -c feature/name
+git push -u origin feature/name 
+# 日常操作
+git pull origin main
+git push --force-with-lease
+```
+B、深入理解复杂版本：
 ```bash
  1. 克隆仓库（首次）
-git clone https://github.com/StillRunDeep/PumpStation.git #默认
-git clone git@github.com:StillRunDeep/PumpStation.git #ssh方式
+# 默认
+git clone https://github.com/StillRunDeep/PumpStation.git 
+# ssh方式
+git clone git@github.com:StillRunDeep/PumpStation.git 
 
  2. 创建功能分支
-git switch -c feature/your-feature-name
+git switch -c feature/name
 
  3.1 开始工作前，同步 main 最新内容
-#执行一次即可，提前配置设置 git pull 时默认rebase
-#git config --global pull.rebase true 
+# 执行一次即可，提前配置设置 git pull 时默认rebase
+git config --global pull.rebase true 
+# 后续直接pull 
 git pull origin main 
 
  3.2 开发、提交
-git add . && git commit -m "feat: 添加某功能"
+git add . && git commit -m "feat/bug/improve: 某功能"
 
- 3.3 推送到远端（日常备份 / 或为了让Claude可以选中并快速工作）
-git push -u origin feature/name
+ 3.3 推送到远端
+# 首次牵线搭桥 加 -u（建立本地和远程的映射 
+git push -u origin feature/name  
+# 如果已经建立过关联，后续直接push
+git push 
 
  3.4 发起 PR 前，再次同步最新 main
-<<<<<<< HEAD
-=======
-
->>>>>>> f088099 (feat: 优化房间名称显示)
-git pull origin main 
-git push --force-with-lease origin feature/【name】  
+git pull origin main          # 默认rebase已开启
+git push --force-with-lease   # 前面建立过绑定关系，无需指定origin feature/name 
 
  4. GitHub 网页发起 Pull Request
-
  5. 团队 Review，按反馈修改，push 更新 PR
-
  6. 通过后合并到 main
 
  7. 清理旧分支
-git push origin --delete feature/your-feature-name #删除远程
-git branch -d feature/your-feature-name #继续开发到功能迭代更完善后再删
+#删除远程
+git push origin --delete feature/your-feature-name    
+#删除本地
+git branch -d feature/your-feature-name               
+#对比远程仓库，把本地那些已经不存在的远程分支记录删掉
+git fetch origin --prune  
 
  8. 开发下一个 feature
 git switch -c feature/name2
