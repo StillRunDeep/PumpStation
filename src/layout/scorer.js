@@ -1,4 +1,5 @@
 import { adjacent, centerX, centerY, touchesExteriorNonSouth } from './placer.js'
+import { SCORER_PARAMS } from './scorer-params.js'
 
 // Rooms excluded from space efficiency numerator (non-functional spaces)
 const NON_FUNCTIONAL = new Set(['corridor_l1', 'dock1', 'dock2'])
@@ -21,7 +22,6 @@ function floorFunctionalArea(placements) {
   return Object.values(placements || {})
     .filter(p => !NON_FUNCTIONAL.has(p.id))
     .filter(p => {
-      // Skip exact duplicates (safety guard for any rooms sharing identical footprint)
       const key = `${p.x},${p.y},${p.w},${p.d}`
       if (seen.has(key)) return false
       seen.add(key)
@@ -32,34 +32,24 @@ function floorFunctionalArea(placements) {
 
 /**
  * Compute space efficiency: average of per-floor (functional area / floor area).
- * Computed separately per floor to avoid double-counting across floors.
  * @returns {number} 0~1
  */
 export function computeSpaceEfficiency(result) {
   const { buildingW, buildingD, groundPlacements, level1Placements } = result
   const floorArea = buildingW * buildingD
-  const groundEff  = floorFunctionalArea(groundPlacements)  / floorArea
-  const level1Eff  = floorFunctionalArea(level1Placements)  / floorArea
+  const groundEff = floorFunctionalArea(groundPlacements) / floorArea
+  const level1Eff = floorFunctionalArea(level1Placements) / floorArea
   return (groundEff + level1Eff) / 2
 }
 
 /**
- * Compute convenience score (0~30) — §3.3.
- *
- * Proxy: Euclidean distance from the nominal main entrance
- * (south-wall midpoint of ground floor) to each functional room's centroid,
- * converted to grid units (100 mm each).
- *
- * Formula: clamp((150 − avgGrids) / 100, 0, 1) × 30
- * Field name `accessibilityScore` is a historical alias; conceptually this is
- * the "convenience" score, not the door-access penalty (see §3.4).
- *
- * @returns {number} integer 0~30
+ * Compute convenience score (0~convenienceMaxBonus) — §3.3.
+ * Field name `accessibilityScore` is historical; this is the "convenience" score.
  */
 export function computeAccessibilityScore(result) {
   const { buildingW, buildingD, groundPlacements } = result
+  const { convenienceIdealGrids, convenienceRange, convenienceMaxBonus } = SCORER_PARAMS
 
-  // Nominal main entrance: south-wall midpoint (y = buildingD, x = buildingW/2)
   const entranceX = buildingW / 2
   const entranceY = buildingD
 
@@ -69,116 +59,102 @@ export function computeAccessibilityScore(result) {
     if (!p) continue
     const dx = centerX(p) - entranceX
     const dy = centerY(p) - entranceY
-    const distMm = Math.hypot(dx, dy)
-    distances.push(distMm / 100) // convert mm → grid units
+    distances.push(Math.hypot(dx, dy) / 100) // mm → grid units
   }
 
   if (distances.length === 0) return 0
-
   const avgGrids = distances.reduce((s, d) => s + d, 0) / distances.length
-  return Math.round(Math.max(0, Math.min(1, (150 - avgGrids) / 100)) * 30)
+  return Math.round(Math.max(0, Math.min(1, (convenienceIdealGrids - avgGrids) / convenienceRange)) * convenienceMaxBonus)
 }
 
 /**
  * Compute door-access penalty (≤0) — §3.4.
- *
- * Rules:
- *   - Ground floor rooms in GROUND_MUST_EXT: must touch a non-south exterior wall.
- *   - parking ↔ repair_zone: must be mutually adjacent (treated as connected).
- *   - Level-1 rooms in LEVEL1_MUST_FACE_CORRIDOR: must be adjacent to corridor_l1.
- *
- * @returns {number} −100 × violatingRoomCount
+ * @returns {number} −doorAccessPenalty × violatingRoomCount
  */
 export function computeDoorAccessPenalty(result) {
   const { buildingW, buildingD, groundPlacements = {}, level1Placements = {} } = result
+  const { doorAccessPenalty } = SCORER_PARAMS
   let violations = 0
 
-  // Ground-floor rooms that must touch exterior wall
   for (const id of GROUND_MUST_EXT) {
     const p = groundPlacements[id]
-    if (!p) continue  // missing rooms are penalised separately in §3.5
+    if (!p) continue
     if (!touchesExteriorNonSouth(p, buildingW, buildingD)) violations++
   }
 
-  // parking ↔ repair_zone connectivity (either one adjacent to the other, or both touch ext wall)
-  const parking     = groundPlacements['parking']
-  const repairZone  = groundPlacements['repair_zone']
+  const parking    = groundPlacements['parking']
+  const repairZone = groundPlacements['repair_zone']
   if (parking && repairZone) {
     const parkingOk = adjacent(parking, repairZone) || touchesExteriorNonSouth(parking, buildingW, buildingD)
     const repairOk  = adjacent(parking, repairZone) || touchesExteriorNonSouth(repairZone, buildingW, buildingD)
-    if (!parkingOk)  violations++
-    if (!repairOk)   violations++
+    if (!parkingOk) violations++
+    if (!repairOk)  violations++
   }
 
-  // Level-1 rooms must be adjacent to corridor_l1
   const corridor = level1Placements['corridor_l1']
   for (const id of LEVEL1_MUST_FACE_CORRIDOR) {
     const p = level1Placements[id]
-    if (!p) continue  // missing rooms are penalised separately in §3.5
+    if (!p) continue
     if (!corridor || !adjacent(p, corridor)) violations++
   }
 
-  return -100 * violations
+  return -doorAccessPenalty * violations
 }
 
 /**
  * Compute missing-room penalty (≤0) — §3.5.
- *
- * Each room absent from its expected floor is penalised −200.
- *
- * @returns {number} −200 × missingCount
+ * @returns {number} −missingRoomPenalty × missingCount
  */
 export function computeMissingRoomsPenalty(result) {
   const { groundPlacements = {}, level1Placements = {} } = result
+  const { missingRoomPenalty } = SCORER_PARAMS
   let missing = 0
-
-  for (const id of EXPECTED_GROUND) {
-    if (!groundPlacements[id]) missing++
-  }
-  for (const id of EXPECTED_LEVEL1) {
-    if (!level1Placements[id]) missing++
-  }
-
-  return -200 * missing
+  for (const id of EXPECTED_GROUND) { if (!groundPlacements[id]) missing++ }
+  for (const id of EXPECTED_LEVEL1) { if (!level1Placements[id]) missing++ }
+  return -missingRoomPenalty * missing
 }
 
 /**
  * Compute aspect-ratio penalty (≤0) — §3.6.
- *
- * For every placed room (excluding corridor_l1), if max(w,d)/min(w,d) > 4 the
- * room is non-compliant.  Each non-compliant room is penalised −200.
- *
- * @returns {number} −200 × violatingRoomCount
+ * @returns {number} −aspectRatioPenalty × violatingRoomCount
  */
 export function computeAspectRatioPenalty(result) {
   const { groundPlacements = {}, level1Placements = {} } = result
+  const { aspectRatioThreshold, aspectRatioPenalty } = SCORER_PARAMS
   const allPlacements = { ...groundPlacements, ...level1Placements }
   let violations = 0
 
   for (const [id, p] of Object.entries(allPlacements)) {
-    if (id === 'corridor_l1') continue  // corridor is exempt
-    if (!p.w || !p.d) continue         // skip rooms with no valid dimensions
-    const ratio = Math.max(p.w, p.d) / Math.min(p.w, p.d)
-    if (ratio > 4) violations++
+    if (id === 'corridor_l1') continue
+    if (!p.w || !p.d) continue
+    if (Math.max(p.w, p.d) / Math.min(p.w, p.d) > aspectRatioThreshold) violations++
   }
 
-  return -200 * violations
+  return -aspectRatioPenalty * violations
 }
 
 /**
  * Score a layout result (higher = better).
+ *
+ * All numeric constants are read from SCORER_PARAMS at call time, so UI
+ * mutations to that object take effect immediately on the next call.
+ *
  * Returns { score, spaceEfficiency, efficiencyScore, accessibilityScore,
  *           diversityPenalty, breakdown }.
- *
- * breakdown field names:
- *   accessibility  → convenience bonus (§3.3); historical name kept for compatibility
- *   doorAccess     → door-access penalty (§3.4)
- *   missingRooms   → missing-room penalty (§3.5)
- *   aspectRatio    → aspect-ratio penalty (§3.6)
  */
 export function scoreLayout(result) {
   const { buildingW, buildingD, groundPlacements, level1Placements } = result
   const allPlacements = { ...groundPlacements, ...level1Placements }
+  const {
+    footprintPenaltyPerM2,
+    trafoExteriorBonus, trafoSameSideBonus,
+    fanRoomMaxBonus, fanRoomDistDivisor,
+    mustAdjacencyBonus, shouldAdjacencyBonus,
+    corridorHitsThreshold, corridorBonus,
+    efficiencyBase, efficiencyRange, efficiencyMaxBonus,
+    mustViolationPenalty,
+  } = SCORER_PARAMS
+
   const breakdown = {
     base: 10000,
     footprint: 0,
@@ -187,94 +163,93 @@ export function scoreLayout(result) {
     trafo: 0,
     fanRoom: 0,
     efficiency: 0,
-    accessibility: 0,   // convenience bonus — see §3.3 (field name is historical)
-    violations: 0,      // MUST adjacency violations — §3.1
-    doorAccess: 0,      // door-access penalty — §3.4
-    missingRooms: 0,    // missing-room penalty — §3.5
-    aspectRatio: 0,     // aspect-ratio penalty — §3.6
+    accessibility: 0,
+    violations: 0,
+    doorAccess: 0,
+    missingRooms: 0,
+    aspectRatio: 0,
   }
   let score = breakdown.base
 
-  // 1. Footprint penalty (per m²)
+  // 1. Footprint penalty
   const areaMm2 = buildingW * buildingD
-  breakdown.footprint = -Math.round((areaMm2 / 1e6) * 8)
+  breakdown.footprint = -Math.round((areaMm2 / 1e6) * footprintPenaltyPerM2)
   score += breakdown.footprint
 
-  // 2. Trafo touching east or west exterior wall → +20 each
+  // 2. Trafo exterior wall bonus
   const bW = buildingW
   ;['trafo1', 'trafo2'].forEach(id => {
     const p = allPlacements[id]
     if (!p) return
     if (p.x <= 100 || p.x + p.w >= bW - 100) {
-      breakdown.trafo += 20
-      score += 20
+      breakdown.trafo += trafoExteriorBonus
+      score += trafoExteriorBonus
     }
   })
 
-  // 3. Both trafos on same exterior wall side → +20
+  // 3. Both trafos same side bonus
   if (allPlacements.trafo1 && allPlacements.trafo2) {
-    const t1 = allPlacements.trafo1
-    const t2 = allPlacements.trafo2
-    const t1West = t1.x <= 100
-    const t1East = t1.x + t1.w >= bW - 100
-    const t2West = t2.x <= 100
-    const t2East = t2.x + t2.w >= bW - 100
+    const t1 = allPlacements.trafo1, t2 = allPlacements.trafo2
+    const t1West = t1.x <= 100,       t1East = t1.x + t1.w >= bW - 100
+    const t2West = t2.x <= 100,       t2East = t2.x + t2.w >= bW - 100
     if ((t1West && t2West) || (t1East && t2East)) {
-      breakdown.trafo += 20
-      score += 20
+      breakdown.trafo += trafoSameSideBonus
+      score += trafoSameSideBonus
     }
   }
 
-  // 4. Fan room near dock2 → up to +30
+  // 4. Fan room near dock2
   if (allPlacements.fan_room && allPlacements.dock2) {
     const dist = Math.hypot(
       centerX(allPlacements.fan_room) - centerX(allPlacements.dock2),
       centerY(allPlacements.fan_room) - centerY(allPlacements.dock2)
     )
-    const bonus = Math.round(Math.max(0, 30 - dist / 500))
+    const bonus = Math.round(Math.max(0, fanRoomMaxBonus - dist / fanRoomDistDivisor))
     breakdown.fanRoom = bonus
     score += bonus
   }
 
-  // 5. Adjacency satisfaction bonus
+  // 5. Adjacency satisfaction
   const adj = result.adjacency
   if (adj) {
     adj.satisfied.forEach(v => {
-      const pts = v.type === 'must' ? 40 : 15
+      const pts = v.type === 'must' ? mustAdjacencyBonus : shouldAdjacencyBonus
       breakdown.adjacency += pts
       score += pts
     })
     const corridorHits = adj.satisfied.filter(v => v.pair.includes('corridor_l1')).length
-    if (corridorHits >= 2) {
-      breakdown.corridor = 20
-      score += 20
+    if (corridorHits >= corridorHitsThreshold) {
+      breakdown.corridor = corridorBonus
+      score += corridorBonus
     }
   }
 
-  // 6. Space efficiency bonus (0~+50)
+  // 6. Space efficiency bonus
   const spaceEfficiency = computeSpaceEfficiency(result)
-  const efficiencyScore = Math.round(Math.max(0, Math.min(1, (spaceEfficiency - 0.60) / 0.30)) * 50)
+  const efficiencyScore = Math.round(
+    Math.max(0, Math.min(1, (spaceEfficiency - efficiencyBase) / efficiencyRange)) * efficiencyMaxBonus
+  )
   breakdown.efficiency = efficiencyScore
   score += efficiencyScore
 
-  // 7. Convenience bonus (0~+30) — named accessibilityScore for historical reasons
+  // 7. Convenience bonus
   const accessibilityScore = computeAccessibilityScore(result)
   breakdown.accessibility = accessibilityScore
   score += accessibilityScore
 
-  // 8. MUST constraint violation penalty (−50/item)
-  breakdown.violations = -(result.violations.length * 50)
+  // 8. MUST violation penalty
+  breakdown.violations = -(result.violations.length * mustViolationPenalty)
   score += breakdown.violations
 
-  // 9. Door-access penalty (−100/room) — §3.4
+  // 9. Door-access penalty
   breakdown.doorAccess = computeDoorAccessPenalty(result)
   score += breakdown.doorAccess
 
-  // 10. Missing-room penalty (−200/room) — §3.5
+  // 10. Missing-room penalty
   breakdown.missingRooms = computeMissingRoomsPenalty(result)
   score += breakdown.missingRooms
 
-  // 11. Aspect-ratio penalty (−200/room) — §3.6
+  // 11. Aspect-ratio penalty
   breakdown.aspectRatio = computeAspectRatioPenalty(result)
   score += breakdown.aspectRatio
 
@@ -283,7 +258,7 @@ export function scoreLayout(result) {
     spaceEfficiency,
     efficiencyScore,
     accessibilityScore,
-    diversityPenalty: 0, // placeholder — §3.7 not yet implemented
+    diversityPenalty: 0,
     breakdown,
   }
 }

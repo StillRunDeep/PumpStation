@@ -320,7 +320,6 @@ svg.zoom-active {
   transition: transform 0.2s;
 }
 
-#ag41-comparison-details[open] > .ag41-section-header::before,
 #ag41-variants-details[open] > .ag41-section-header::before,
 #ag41-detail-details[open] > .ag41-section-header::before {
   transform: translateY(-50%) rotate(90deg);
