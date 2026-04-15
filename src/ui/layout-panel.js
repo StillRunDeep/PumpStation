@@ -1,6 +1,5 @@
-import { renderLayoutSVGDual } from '../render/layout-svg.js'
+import { renderLayoutSVG, renderLayoutSVGDual } from '../render/layout-svg.js'
 import { renderDebugGrid } from '../render/svg-helpers.js'
-import { initSvgZoomPan } from '../render/zoom-pan.js'
 import {
   SCORER_PARAMS, DEFAULT_SCORER_PARAMS, PARAM_LABELS, PARAM_GROUPS, PARAM_STEPS,
   saveScorerParams,
@@ -166,18 +165,6 @@ function buildBreakdownHtml(v) {
     </table>`
 }
 
-function buildDebugHtml(v) {
-  if (v._debug && v._debug.ground?.gridBeforeGaps && v._debug.level1?.gridBeforeGaps) {
-    return (
-      '<h4 style="margin-top:0;margin-bottom:8px;font-size:12px;color:#555">地面层（填充前）</h4>' +
-      renderDebugGrid({ grid: v._debug.ground.gridBeforeGaps, seeds: v._debug.ground.seeds }, 380, 260) +
-      '<h4 style="margin-top:10px;margin-bottom:8px;font-size:12px;color:#555">一层（填充前）</h4>' +
-      renderDebugGrid({ grid: v._debug.level1.gridBeforeGaps, seeds: v._debug.level1.seeds }, 380, 260)
-    )
-  }
-  return '<p style="color:#888;font-size:12px;text-align:center;margin-top:20px">无调试数据</p>'
-}
-
 function insertDetailRow(idx) {
   removeDetailRow()
 
@@ -185,58 +172,64 @@ function insertDetailRow(idx) {
   const v = sorted[idx]
   if (!v) return
 
-  const svgContent    = renderLayoutSVGDual(v, VW, VH)
-  const debugHtml     = buildDebugHtml(v)
+  const CELL_H = 150;
   const breakdownHtml = buildBreakdownHtml(v)
   const title = `方案 ${v.id}：${v.label}  —  ` +
     `${(v.buildingW / 1000).toFixed(1)} m × ${(v.buildingD / 1000).toFixed(1)} m  得分 ${v.score}`
 
+  const renderFloorRow = (floor) => {
+    const debugData = v._debug?.[floor] ?? {};
+    const finalView = `<svg viewBox="0 0 240 180" style="background:#f4f6f8">${renderLayoutSVG(v, floor, 240, 180, { showDims: false })}</svg>`;
+    const stage3 = debugData.gridAfterGaps ? renderDebugGrid({ grid: debugData.gridAfterGaps, seeds: debugData.seeds }, 200, 150) : '无数据';
+    const stage2 = debugData.gridBeforeGaps ? renderDebugGrid({ grid: debugData.gridBeforeGaps, seeds: debugData.seeds }, 200, 150) : '无数据';
+    const stage1 = debugData.gridAfterRect ? renderDebugGrid({ grid: debugData.gridAfterRect, seeds: debugData.seeds }, 200, 150) : '无数据';
+
+    return `
+      <div class="grid-cell final-view">${finalView}</div>
+      <div class="grid-cell debug-view">${stage3}</div>
+      <div class="grid-cell debug-view">${stage2}</div>
+      <div class="grid-cell debug-view">${stage1}</div>
+    `;
+  };
+
+  const headers = `
+    <div class="grid-header">正式视图</div>
+    <div class="grid-header">阶段3 (FillGaps)</div>
+    <div class="grid-header">阶段2 (L/U形生长)</div>
+    <div class="grid-header">阶段1 (矩形生长)</div>
+  `;
+
   const detailHtml = `
     <tr class="detail-inline-row" style="background:#f0f7ff">
       <td colspan="${COL_COUNT}" style="padding:0;border-top:2px solid #2471a3;border-bottom:2px solid #2471a3">
-        <div class="layout-detail-header" style="display:flex;align-items:center;padding:6px 12px;
-             background:#dceefb;border-bottom:1px solid #aed6f1">
-          <span id="layout-detail-title" style="font-weight:700;font-size:13px;color:#1a3a5c">${title}</span>
-          <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
-            <button class="svg-zoom-btn" id="btn-ag41-zin"  title="放大">＋</button>
-            <button class="svg-zoom-btn" id="btn-ag41-rst"  title="复位">⊙</button>
-            <button class="svg-zoom-btn" id="btn-ag41-zout" title="缩小">－</button>
-            <button class="vc-select-btn"
-                    onclick="event.stopPropagation();window._ag41ConfirmVariant(${idx})"
-                    style="margin-left:10px">选用此方案 →</button>
+        <div style="width: 100%;">
+          <div style="overflow-x: auto; border-bottom: 1px solid #ccc; padding-bottom: 8px; margin-bottom: 8px;">
+            <div id="detail-grid-container" style="display: grid; grid-template-columns: repeat(4, 25%); grid-template-rows: auto repeat(2, 150px); gap: 1px; background-color: #aed6f1; padding: 1px; box-sizing: border-box;">
+              ${headers}
+              ${renderFloorRow('ground')}
+              ${renderFloorRow('level1')}
+            </div>
           </div>
-        </div>
-        <div style="display:flex">
-          <svg id="svg-ag41" viewBox="0 0 ${VW} ${VH}"
-               style="display:block;flex:0 0 55%;height:${VH}px;cursor:grab;background:#f4f6f8">
-            ${svgContent}
-          </svg>
-          <div id="debug-grid-container"
-               style="flex:0 0 27%;height:${VH}px;border-left:1px solid #ccc;
-                      padding:10px;box-sizing:border-box;overflow-y:auto">
-            ${debugHtml}
-          </div>
-          <div id="breakdown-container"
-               style="flex:0 0 18%;height:${VH}px;border-left:1px solid #ccc;
-                      padding:12px;box-sizing:border-box;overflow-y:auto;background:#fafbfc">
+          <div id="breakdown-container" style="padding: 12px; box-sizing: border-box; background: #fafbfc;">
             ${breakdownHtml}
           </div>
         </div>
+        <style>
+          .grid-cell { background: #fff; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; }
+          .grid-header { font-size: 11px; font-weight: 600; color: #1a3a5c; background: #eaf2f8; text-align: center; padding: 4px; }
+          .grid-cell.final-view { background: #f4f6f8; }
+          .grid-cell.debug-view svg { width: 100%; height: 100%; }
+        </style>
       </td>
-    </tr>`
+    </tr>`;
 
-  const tbody = document.getElementById('variant-tbody')
-  if (!tbody) return
-  const targetRow = tbody.querySelector(`.variant-row[data-idx="${idx}"]`)
+  const tbody = document.getElementById('variant-tbody');
+  if (!tbody) return;
+  const targetRow = tbody.querySelector(`.variant-row[data-idx="${idx}"]`);
   if (targetRow) {
-    targetRow.insertAdjacentHTML('afterend', detailHtml)
+    targetRow.insertAdjacentHTML('afterend', detailHtml);
   } else {
-    tbody.insertAdjacentHTML('beforeend', detailHtml)
-  }
-
-  const svg = document.getElementById('svg-ag41')
-  if (svg) {
-    initSvgZoomPan(svg, VW, VH, { zIn: 'btn-ag41-zin', zOut: 'btn-ag41-zout', zRst: 'btn-ag41-rst' })
+    tbody.insertAdjacentHTML('beforeend', detailHtml);
   }
 }
 
