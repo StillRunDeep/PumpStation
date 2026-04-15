@@ -1,40 +1,50 @@
 import { scoreLayout } from '../layout/scorer.js'
-import { evaluateTemplate } from '../layout/placer.js'
+import { evaluateTemplate, centerX, centerY } from '../layout/placer.js'
+import { GRID_SIZE } from '../layout/layout-generator.js'
 
 /**
- * Classify each variant's type based on its characteristics relative to
- * the full set of evaluated variants.
- *
- * Priority order (a variant can only have one type):
- *   compact       – smallest building footprint (buildingW × buildingD)
- *   large-repair  – largest repair_zone actual area
- *   large-parking – largest parking actual area
- *   standard      – everything else
- *
- * @param {Array} variants  Already-scored variants (mutated in place)
+ * Compute average centroid distance (in grid cells) between two layouts.
+ * Lower value = more similar layouts.
  */
-function assignVariantTypes(variants) {
-  if (!variants.length) return
+function computeLayoutSimilarity(varA, varB) {
+  const allA = { ...(varA.groundPlacements || {}), ...(varA.level1Placements || {}) }
+  const allB = { ...(varB.groundPlacements || {}), ...(varB.level1Placements || {}) }
 
-  const footprint = v => (v.buildingW ?? 0) * (v.buildingD ?? 0)
-  const roomArea  = (v, id) => {
-    const p = (v.groundPlacements || {})[id] || (v.level1Placements || {})[id]
-    return p ? p.w * p.d : 0
+  let totalDist = 0
+  let count = 0
+  for (const roomId of Object.keys(allA)) {
+    if (!allB[roomId]) continue
+    const pA = allA[roomId], pB = allB[roomId]
+    totalDist += Math.hypot(
+      (centerX(pA) - centerX(pB)) / GRID_SIZE,
+      (centerY(pA) - centerY(pB)) / GRID_SIZE
+    )
+    count++
   }
+  return count > 0 ? totalDist / count : Infinity
+}
 
-  const minFp       = Math.min(...variants.map(footprint))
-  const maxRepair   = Math.max(...variants.map(v => roomArea(v, 'repair_zone')))
-  const maxParking  = Math.max(...variants.map(v => roomArea(v, 'parking')))
-
-  for (const v of variants) {
-    if (footprint(v) <= minFp) {
-      v.variantType = 'compact'
-    } else if (roomArea(v, 'repair_zone') >= maxRepair && maxRepair > 0) {
-      v.variantType = 'large-repair'
-    } else if (roomArea(v, 'parking') >= maxParking && maxParking > 0) {
-      v.variantType = 'large-parking'
-    } else {
-      v.variantType = 'standard'
+/**
+ * Apply diversity penalty to a ranked list (mutates in place).
+ * A variant is penalised if it is too similar (avg centroid dist < threshold)
+ * to any higher-ranked variant already in the list.
+ *
+ * @param {Array}  variants        Already sorted best-first
+ * @param {number} threshold       Min avg centroid dist (grid cells) to be "different"
+ * @param {number} penaltyPts      Score deduction per similar variant
+ */
+function applyDiversityPenalty(variants, threshold = 3.0, penaltyPts = 30) {
+  for (let i = 1; i < variants.length; i++) {
+    for (let j = 0; j < i; j++) {
+      if (computeLayoutSimilarity(variants[j], variants[i]) < threshold) {
+        variants[i].score -= penaltyPts
+        variants[i].diversityPenalty = (variants[i].diversityPenalty || 0) - penaltyPts
+        // Keep breakdown in sync so UI can show why score differs from raw scorer output
+        if (variants[i].breakdown) {
+          variants[i].breakdown.diversityPenalty = variants[i].diversityPenalty
+        }
+        break // penalise at most once per variant
+      }
     }
   }
 }
@@ -59,9 +69,6 @@ function scoreVariant(template) {
 export function runAG42(rawVariants) {
   const evaluatedAndScored = rawVariants.map(scoreVariant)
 
-  // Assign variant type labels across the full candidate pool
-  assignVariantTypes(evaluatedAndScored)
-
   // 筛选规则：优先保留 violations = 0 的方案，按 score 降序排列
   const feasibleVariants   = evaluatedAndScored.filter(v => v.violations.length === 0)
   const unfeasibleVariants = evaluatedAndScored.filter(v => v.violations.length > 0)
@@ -78,6 +85,8 @@ export function runAG42(rawVariants) {
   }
 
   finalVariants.sort((a, b) => b.score - a.score)
+  applyDiversityPenalty(finalVariants)
+  finalVariants.sort((a, b) => b.score - a.score)
   return finalVariants
 }
 
@@ -93,12 +102,13 @@ export function mergeVariants(existingVariants, newRawTemplates) {
   const newScored = newRawTemplates.map(t => ({ ...scoreVariant(t), _isNew: true }))
 
   const combined   = [...existingVariants, ...newScored]
-  assignVariantTypes(combined)
 
   const feasible   = combined.filter(v => v.violations.length === 0).sort((a, b) => b.score - a.score)
   const unfeasible = combined.filter(v => v.violations.length > 0).sort((a, b) => b.score - a.score)
 
   const top9 = [...feasible, ...unfeasible.slice(0, Math.max(0, 9 - feasible.length))].slice(0, 9)
+  top9.sort((a, b) => b.score - a.score)
+  applyDiversityPenalty(top9)
   top9.sort((a, b) => b.score - a.score)
 
   const improved = top9.some(v => v._isNew)

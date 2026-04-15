@@ -77,6 +77,30 @@ export function renderDebugGrid(debugData, width, height) {
     }
   }
 
+  // Draw bold room outlines
+  for (let y = 0; y < gridH; y++) {
+    for (let x = 0; x < gridW; x++) {
+      const roomId = grid.getCell(x, y);
+      if (!roomId) continue;
+
+      const top    = grid.getCell(x, y - 1);
+      const bottom = grid.getCell(x, y + 1);
+      const left   = grid.getCell(x - 1, y);
+      const right  = grid.getCell(x + 1, y);
+
+      const strokeColor = FgColors[roomId] || '#555';
+      const sw = 0.5;
+
+      const x1 = ox + x * cellSize, x2 = x1 + cellSize;
+      const y1 = oy + y * cellSize, y2 = y1 + cellSize;
+
+      if (top !== roomId)    s += _l(x1, y1, x2, y1, strokeColor, sw);
+      if (bottom !== roomId) s += _l(x1, y2, x2, y2, strokeColor, sw);
+      if (left !== roomId)   s += _l(x1, y1, x1, y2, strokeColor, sw);
+      if (right !== roomId)  s += _l(x2, y1, x2, y2, strokeColor, sw);
+    }
+  }
+
   // Draw seeds on top
   if (seeds) {
     for (const [id, pos] of Object.entries(seeds)) {

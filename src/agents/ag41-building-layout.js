@@ -1,5 +1,6 @@
-import { generateConstrainedLayout } from '../layout/layout-generator.js'
+import { generateConstrainedLayout, GRID_SIZE } from '../layout/layout-generator.js'
 import { getDefaultUserParams, getUserConfirmedParams } from '../layout/user-params.js'
+import { centerX, centerY } from '../layout/placer.js'
 
 /**
  * AG4-2: Building Space Layout Generator
@@ -15,7 +16,7 @@ export async function runAG41(existingVariants = [], isCancelled = () => false) 
   const { buildingW, buildingD, roomTargetAreas } = userParams;
 
   const variants = [];
-  const topVariants = [...existingVariants].sort((a, b) => b.score - a.score).slice(0, 3);
+  const sortedExisting = [...existingVariants].sort((a, b) => b.score - a.score);
   const numToGenerate = 9;
   let pCount = 0;
   let rCount = 0;
@@ -23,14 +24,20 @@ export async function runAG41(existingVariants = [], isCancelled = () => false) 
   // 每生成一个方案后 yield，让浏览器处理积压的事件（点击等）
   const yieldToEventLoop = () => new Promise(resolve => setTimeout(resolve, 0))
 
-  // 生成遗传算法方案
-  if (topVariants.length >= 2) {
-    const parentPairs = [
-      [topVariants[0], topVariants[1]],
-      [topVariants[0], topVariants[topVariants.length > 2 ? 2 : 1]],
-      [topVariants[1], topVariants[topVariants.length > 2 ? 2 : 1]],
-    ];
-    for (let i = 0; i < 3; i++) {
+  // 生成遗传算法方案（2 个，防止第一名影响过大）
+  // 组A: 第1名 + 第5名
+  // 组B: 第5名 + 第9名
+  if (sortedExisting.length >= 5) {
+    const parentPairs = [];
+    
+    // Pair 1: Rank 1 + Rank 5
+    parentPairs.push([sortedExisting[0], sortedExisting[4]]);
+    
+    // Pair 2: Rank 5 + Rank 9 (if exists) or Rank 5 + Rank 1 (if less than 9)
+    const rank9 = sortedExisting[8] || sortedExisting[0];
+    parentPairs.push([sortedExisting[4], rank9]);
+
+    for (let i = 0; i < 2; i++) {
       if (isCancelled()) return variants
       const [parentA, parentB] = parentPairs[i];
       const seed = Math.floor(Math.random() * 100000) + pCount;
@@ -41,7 +48,7 @@ export async function runAG41(existingVariants = [], isCancelled = () => false) 
     }
   }
 
-  // 生成纯随机方案
+  // 生成纯随机方案（补足 9 个）
   const numRandom = numToGenerate - pCount;
   for (let i = 0; i < numRandom; i++) {
     if (isCancelled()) return variants
@@ -55,8 +62,21 @@ export async function runAG41(existingVariants = [], isCancelled = () => false) 
   return variants;
 }
 
+/**
+ * Convert a room placement (mm coords) to grid-cell center.
+ * Uses the parent layout's actual bounding-box center as the child seed,
+ * so children inherit the spatial structure of their parents.
+ */
+function placementToGridCenter(placement) {
+  return {
+    x: Math.round(centerX(placement) / GRID_SIZE),
+    y: Math.round(centerY(placement) / GRID_SIZE),
+  }
+}
+
 function generateHybridLayout(parentA, parentB, seed, bW, bD, roomAreas, groupId, variantIdx) {
-  const rng = () => (seed % 10000) / 10000; // Simple RNG from seed
+  // Use seed to determine which parent dominates for each room
+  const rng = () => (seed % 10000) / 10000;
 
   const childSeeds = { ground: {}, level1: {} };
 
@@ -68,30 +88,30 @@ function generateHybridLayout(parentA, parentB, seed, bW, bD, roomAreas, groupId
   ]);
 
   for (const roomId of allRoomIds) {
-      const seedA_ground = parentA._debug.ground.seeds[roomId];
-      const seedB_ground = parentB._debug.ground.seeds[roomId];
-      const seedA_level1 = parentA._debug.level1.seeds[roomId];
-      const seedB_level1 = parentB._debug.level1.seeds[roomId];
+      const hasGroundA = parentA._debug.ground.seeds[roomId];
+      const hasGroundB = parentB._debug.ground.seeds[roomId];
+      const hasLevel1A = parentA._debug.level1.seeds[roomId];
+      const hasLevel1B = parentB._debug.level1.seeds[roomId];
 
-      // Ground floor crossover and mutation
-      if (seedA_ground || seedB_ground) {
-          const parentSeed = rng() < 0.5 ? (seedA_ground || seedB_ground) : (seedB_ground || seedA_ground);
-          if (parentSeed) {
-              childSeeds.ground[roomId] = {
-                  x: parentSeed.x + Math.floor(Math.random() * 5) - 2, // Mutate x by +/- 2
-                  y: parentSeed.y + Math.floor(Math.random() * 5) - 2  // Mutate y by +/- 2
-              };
+      // Ground floor crossover: use bounding-box center of chosen parent's actual room placement
+      if (hasGroundA || hasGroundB) {
+          const chosenParent = rng() < 0.5 ? parentA : parentB;
+          const fallbackParent = chosenParent === parentA ? parentB : parentA;
+          const placement = (chosenParent.groundPlacements || {})[roomId]
+                         || (fallbackParent.groundPlacements || {})[roomId];
+          if (placement) {
+              childSeeds.ground[roomId] = placementToGridCenter(placement);
           }
       }
 
-      // Level 1 crossover and mutation
-      if (seedA_level1 || seedB_level1) {
-          const parentSeed = rng() < 0.5 ? (seedA_level1 || seedB_level1) : (seedB_level1 || seedA_level1);
-          if (parentSeed) {
-              childSeeds.level1[roomId] = {
-                  x: parentSeed.x + Math.floor(Math.random() * 5) - 2, // Mutate x by +/- 2
-                  y: parentSeed.y + Math.floor(Math.random() * 5) - 2  // Mutate y by +/- 2
-              };
+      // Level 1 crossover: same strategy
+      if (hasLevel1A || hasLevel1B) {
+          const chosenParent = rng() < 0.5 ? parentA : parentB;
+          const fallbackParent = chosenParent === parentA ? parentB : parentA;
+          const placement = (chosenParent.level1Placements || {})[roomId]
+                         || (fallbackParent.level1Placements || {})[roomId];
+          if (placement) {
+              childSeeds.level1[roomId] = placementToGridCenter(placement);
           }
       }
   }

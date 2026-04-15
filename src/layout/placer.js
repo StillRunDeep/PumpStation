@@ -73,9 +73,7 @@ export const CONSTRAINT_CHECKS = {
  * Returns { feasible, placements, violations }.
  */
 export function evaluateTemplate(template) {
-  console.log('evaluateTemplate called with template:', template);
   const allPlacements = { ...template.groundPlacements, ...template.level1Placements }
-  console.log('allPlacements before placeDoors:', allPlacements);
   const violations = []
 
   for (const [id, placement] of Object.entries(allPlacements)) {
@@ -109,6 +107,5 @@ export function evaluateTemplate(template) {
     doors, // Add doors to the returned object
   };
 
-  console.log("Evaluated Template Result:", result);
   return result;
 }
