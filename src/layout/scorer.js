@@ -1,14 +1,15 @@
 import { adjacent, centerX, centerY, touchesExteriorNonSouth } from './placer.js'
 import { SCORER_PARAMS } from './scorer-params.js'
 
+// ── Room ID constants ────────────────────────────────────────────────────────
+
 // Rooms excluded from space efficiency numerator (non-functional spaces)
 const NON_FUNCTIONAL = new Set(['corridor_l1', 'dock1', 'dock2'])
 
-// Ground-floor rooms considered for convenience scoring (§3.3)
-const CONVENIENCE_ROOMS = ['trafo1', 'trafo2', 'meter_main', 'meter_sub', 'fire_equip', 'parking', 'repair_zone']
+// Ground-floor rooms: single source for expected rooms & convenience scoring.
+// CONVENIENCE_ROOMS and EXPECTED_GROUND were previously duplicated identically.
+const GROUND_ROOMS = ['trafo1', 'trafo2', 'meter_main', 'meter_sub', 'fire_equip', 'parking', 'repair_zone']
 
-// Required rooms per floor (§3.5 missing-room check)
-const EXPECTED_GROUND = ['trafo1', 'trafo2', 'meter_main', 'meter_sub', 'fire_equip', 'parking', 'repair_zone']
 const EXPECTED_LEVEL1 = ['fan_room', 'clean_pump', 'rainwater', 'lv_control', 'corridor_l1']
 
 // Level-1 rooms that must be adjacent to corridor_l1 (§3.4 door-access check)
@@ -16,6 +17,21 @@ const LEVEL1_MUST_FACE_CORRIDOR = ['fan_room', 'clean_pump', 'rainwater', 'lv_co
 
 // Ground-floor rooms that must touch exterior wall (non-south) — §3.4
 const GROUND_MUST_EXT = ['trafo1', 'trafo2', 'meter_main', 'meter_sub', 'fire_equip']
+
+// ── Utility functions ────────────────────────────────────────────────────────
+
+/**
+ * Linear-interpolate a value into [0, maxBonus], clamp to range.
+ * value ∈ [base, base+range] → bonus ∈ [0, maxBonus]
+ */
+function linearScore(value, base, range, maxBonus) {
+  return Math.round(Math.max(0, Math.min(1, (value - base) / range)) * maxBonus)
+}
+
+/** Normalised aspect ratio: always ≥ 1. Consistent with layout-generator.js. */
+function aspectRatio(w, d) {
+  return Math.max(w / d, d / w)
+}
 
 function floorFunctionalArea(placements) {
   const seen = new Set()
@@ -54,7 +70,7 @@ export function computeAccessibilityScore(result) {
   const entranceY = buildingD
 
   const distances = []
-  for (const roomId of CONVENIENCE_ROOMS) {
+  for (const roomId of GROUND_ROOMS) {
     const p = (groundPlacements || {})[roomId]
     if (!p) continue
     const dx = centerX(p) - entranceX
@@ -64,7 +80,7 @@ export function computeAccessibilityScore(result) {
 
   if (distances.length === 0) return 0
   const avgGrids = distances.reduce((s, d) => s + d, 0) / distances.length
-  return Math.round(Math.max(0, Math.min(1, (convenienceIdealGrids - avgGrids) / convenienceRange)) * convenienceMaxBonus)
+  return linearScore(convenienceIdealGrids - avgGrids, 0, convenienceRange, convenienceMaxBonus)
 }
 
 /**
@@ -109,7 +125,7 @@ export function computeMissingRoomsPenalty(result) {
   const { groundPlacements = {}, level1Placements = {} } = result
   const { missingRoomPenalty } = SCORER_PARAMS
   let ids = []
-  for (const id of EXPECTED_GROUND) { if (!groundPlacements[id]) ids.push(id) }
+  for (const id of GROUND_ROOMS) { if (!groundPlacements[id]) ids.push(id) }
   for (const id of EXPECTED_LEVEL1) { if (!level1Placements[id]) ids.push(id) }
   return { penalty: -missingRoomPenalty * ids.length, ids }
 }
@@ -138,7 +154,7 @@ export function computeAspectRatioPenalty(result) {
     if (id === 'corridor_l1') continue
     if (!p.w || !p.d) continue
     
-    const ratio = Math.max(p.w, p.d) / Math.min(p.w, p.d)
+    const ratio = aspectRatio(p.w, p.d)
     if (ratio > maxAspectRatio) maxAspectRatio = ratio
 
     let roomViolations = 0
@@ -217,6 +233,7 @@ export function scoreLayout(result) {
     doorAccess: 0,
     missingRooms: 0,
     aspectRatio: 0,
+    diversityPenalty: 0, // filled in by applyDiversityPenalty (ag42) after ranking
   }
   let score = breakdown.base
 
@@ -271,18 +288,18 @@ export function scoreLayout(result) {
       breakdown.adjacency += pts
       score += pts
     })
+    // Linear corridor score: proportional to how many rooms corridor touches.
+    // corridorHitsThreshold is the "full bonus" baseline — more hits still cap at corridorBonus.
     const corridorHits = adj.satisfied.filter(v => v.pair.includes('corridor_l1')).length
-    if (corridorHits >= corridorHitsThreshold) {
-      breakdown.corridor = corridorBonus
-      score += corridorBonus
-    }
+    const corridorScore = corridorHits === 0 ? 0
+      : Math.min(corridorBonus, Math.round((corridorHits / corridorHitsThreshold) * corridorBonus))
+    breakdown.corridor = corridorScore
+    score += corridorScore
   }
 
   // 6. Space efficiency bonus
   const spaceEfficiency = computeSpaceEfficiency(result)
-  const efficiencyScore = Math.round(
-    Math.max(0, Math.min(1, (spaceEfficiency - efficiencyBase) / efficiencyRange)) * efficiencyMaxBonus
-  )
+  const efficiencyScore = linearScore(spaceEfficiency, efficiencyBase, efficiencyRange, efficiencyMaxBonus)
   breakdown.efficiency = efficiencyScore
   score += efficiencyScore
 
@@ -326,7 +343,7 @@ export function scoreLayout(result) {
     efficiencyScore,
     accessibilityScore,
     aspectRatio: aspectRatioRes.maxAspectRatio,
-    diversityPenalty: 0,
+    diversityPenalty: 0, // Applied externally by mergeVariants after ranking
     breakdown,
   }
 }

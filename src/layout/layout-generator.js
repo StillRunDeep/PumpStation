@@ -1,7 +1,16 @@
 import { ROOM_DEFS } from './room-defs.js';
 
-const GRID_SIZE = 500; // 500mm per grid cell
+export const GRID_SIZE = 500; // 500mm per grid cell — single source of truth, imported by ag41/ag42
 const MAX_EXPANSION_ITERATIONS = 5000;
+
+// ── Geometry helpers (used internally) ───────────────────────────────────────
+
+/** Normalised aspect ratio: always ≥ 1. */
+function aspectRatio(w, d) {
+  return Math.max(w / d, d / w);
+}
+
+const DEBUG_LAYOUT = false; // set true locally for fill-gap tracing
 
 class Grid {
   constructor(width, height) {
@@ -109,7 +118,34 @@ function placeRoomSeeds(grid, rooms, rng) {
     return placedSeeds;
 }
 
-function findBestRectangleExpansion(grid, roomId) {
+/**
+ * Returns the minimum cross-sectional width of a room in either axis (in grid cells).
+ * Used to enforce the corridor min-width guard.
+ */
+function getRoomMinCrossWidth(grid, roomId) {
+  const bbox = grid.getBoundingBox(roomId);
+  if (!bbox) return 0;
+  let minW = Infinity;
+  for (let y = bbox.minY; y <= bbox.maxY; y++) {
+    let rowCount = 0;
+    for (let x = bbox.minX; x <= bbox.maxX; x++) {
+      if (grid.getCell(x, y) === roomId) rowCount++;
+    }
+    if (rowCount > 0) minW = Math.min(minW, rowCount);
+  }
+  for (let x = bbox.minX; x <= bbox.maxX; x++) {
+    let colCount = 0;
+    for (let y = bbox.minY; y <= bbox.maxY; y++) {
+      if (grid.getCell(x, y) === roomId) colCount++;
+    }
+    if (colCount > 0) minW = Math.min(minW, colCount);
+  }
+  return minW === Infinity ? 0 : minW;
+}
+
+const CORRIDOR_MIN_WIDTH_CELLS = 3; // 3 × 500mm = 1500mm
+
+function findBestRectangleExpansion(grid, roomId, preferElongated = false) {
   const bbox = grid.getBoundingBox(roomId);
   if (!bbox) return null;
 
@@ -157,22 +193,25 @@ function findBestRectangleExpansion(grid, roomId) {
 
   if (potentialExpansions.length === 0) return null;
 
-  // Prioritize expansions that result in a more square-like room
   const currentW = bbox.maxX - bbox.minX + 1;
   const currentD = bbox.maxY - bbox.minY + 1;
 
   potentialExpansions.forEach(exp => {
     const newW = exp.dir === 'W' || exp.dir === 'E' ? currentW + 1 : currentW;
     const newD = exp.dir === 'N' || exp.dir === 'S' ? currentD + 1 : currentD;
-    const aspectRatio = Math.max(newW / newD, newD / newW);
-    // Lower score is better (closer to 1.0)
-    exp.aspectScore = aspectRatio;
+    exp.aspectScore = aspectRatio(newW, newD);
   });
 
-  // Sort by aspect ratio score (ascending), then by size (descending)
+  // For corridor: prefer elongated growth (higher aspect ratio keeps the corridor linear).
+  // For regular rooms: prefer square-ish growth (lower aspect ratio).
   potentialExpansions.sort((a, b) => {
-    if (a.aspectScore < b.aspectScore) return -1;
-    if (a.aspectScore > b.aspectScore) return 1;
+    if (preferElongated) {
+      if (a.aspectScore > b.aspectScore) return -1;
+      if (a.aspectScore < b.aspectScore) return 1;
+    } else {
+      if (a.aspectScore < b.aspectScore) return -1;
+      if (a.aspectScore > b.aspectScore) return 1;
+    }
     return b.size - a.size;
   });
 
@@ -226,8 +265,7 @@ function findBestFillExpansion(grid, roomId) {
       }
       const newW = tempMaxX - tempMinX + 1;
       const newD = tempMaxY - tempMinY + 1;
-      const aspectRatio = Math.max(newW / newD, newD / newW);
-      exp.aspectScore = aspectRatio;
+      exp.aspectScore = aspectRatio(newW, newD);
       exp.size = exp.cells.length;
   });
 
@@ -316,83 +354,115 @@ function countRoomVertices(grid, roomId) {
 
 function expandRooms(grid, rooms, rng, onRegularExpansionComplete = null, onRectExpansionComplete = null) {
     let iterations = 0;
-    let rectExpansionHookFired = false;
+    let stage = 1; // Stage 1: Rectangular only, Stage 2: All types allowed
     // currentArea is now in grid cell counts
     let growingRooms = rooms.map(r => ({ ...r, currentArea: r.id in grid.roomData ? 1 : 0 }));
 
     while (iterations < MAX_EXPANSION_ITERATIONS) {
         let activeRooms = growingRooms.filter(room => room.currentArea < room.targetGridCount);
-        if (activeRooms.length === 0) break;
+        
+        // If all rooms reached their target area
+        if (activeRooms.length === 0) {
+            if (stage === 1) {
+                // If we finished Stage 1 perfectly, take the rect snapshot before finishing
+                if (onRectExpansionComplete) onRectExpansionComplete(grid);
+            }
+            break;
+        }
 
         // Sort by completion ratio
         activeRooms.sort((a, b) => (a.currentArea / a.targetGridCount) - (b.currentArea / b.targetGridCount));
 
         let growthHappenedThisCycle = false;
 
-        for (const roomToGrow of activeRooms) {
-            let expansionCells = findBestRectangleExpansion(grid, roomToGrow.id);
-
-            if (!expansionCells && !rectExpansionHookFired && onRectExpansionComplete) {
-                onRectExpansionComplete(grid);
-                rectExpansionHookFired = true;
-            }
-
-            if (!expansionCells) {
-                expansionCells = findBestFillExpansion(grid, roomToGrow.id);
-            }
-
-            if (!expansionCells) {
-                expansionCells = findSmartLineExpansion(grid, roomToGrow.id);
-            }
-
-            if (expansionCells && expansionCells.length > 0) {
-                // Morphological constraint: limit non-corridor rooms to 8 vertices (U-shape)
-                if (roomToGrow.id !== 'corridor_l1') {
-                    // Dry run: apply expansion to a clone of the room's cell list
-                    // (More efficient than cloning the whole grid)
-                    const originalCells = [...(grid.roomData[roomToGrow.id] || [])];
-                    const testGrid = {
-                        getCell: (x, y) => {
-                            if (expansionCells.some(c => c.x === x && c.y === y)) return roomToGrow.id;
-                            return grid.getCell(x, y);
-                        },
-                        getBoundingBox: (id) => {
-                            if (id !== roomToGrow.id) return grid.getBoundingBox(id);
-                            const combined = [...originalCells, ...expansionCells];
-                            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-                            for (const c of combined) {
-                                if (c.x < minX) minX = c.x;
-                                if (c.x > maxX) maxX = c.x;
-                                if (c.y < minY) minY = c.y;
-                                if (c.y > maxY) maxY = c.y;
-                            }
-                            return { minX, minY, maxX, maxY };
-                        }
-                    };
-                    
-                    if (countRoomVertices(testGrid, roomToGrow.id) > 8) {
-                        // Expansion would make the room too complex, skip this type of expansion for this room
-                        continue;
-                    }
-                }
-
-                for (const cell of expansionCells) {
-                    if (roomToGrow.currentArea < roomToGrow.targetGridCount) {
+        if (stage === 1) {
+            // Stage 1: Try strictly rectangular expansion for ALL rooms
+            for (const roomToGrow of activeRooms) {
+                const isCorridor = roomToGrow.id === 'corridor_l1';
+                let expansionCells = findBestRectangleExpansion(grid, roomToGrow.id, isCorridor);
+                if (expansionCells && expansionCells.length > 0) {
+                    // To keep it a rectangle, we MUST add the entire line.
+                    // If adding the entire line makes us overgrow significantly, 
+                    // we could stop, but usually adding one more edge is better than a jagged L-shape.
+                    // However, to be most balanced: we only grow if the current area is still below target.
+                    for (const cell of expansionCells) {
                         grid.addRoomCell(roomToGrow.id, cell.x, cell.y);
-                        roomToGrow.currentArea++; // Increment by 1 grid cell
-                    } else {
-                        break;
+                        roomToGrow.currentArea++;
                     }
+                    growthHappenedThisCycle = true;
+                    break; // Only grow one room per cycle to re-evaluate sorting
                 }
-                growthHappenedThisCycle = true;
+            }
+
+            // If no room could grow rectangularly, Stage 1 is complete
+            if (!growthHappenedThisCycle) {
+                if (onRectExpansionComplete) {
+                    onRectExpansionComplete(grid); // Take snapshot AFTER all possible rect growths are done
+                }
+                stage = 2; // Proceed to L/U shape phase
+                continue; // Restart the while loop for Stage 2
+            }
+        } else if (stage === 2) {
+            // Stage 2: Allow all types of expansion
+            for (const roomToGrow of activeRooms) {
+                const isCorridor = roomToGrow.id === 'corridor_l1';
+                let expansionCells = findBestRectangleExpansion(grid, roomToGrow.id, isCorridor);
+
+                if (!expansionCells) {
+                    expansionCells = findBestFillExpansion(grid, roomToGrow.id);
+                }
+
+                if (!expansionCells) {
+                    expansionCells = findSmartLineExpansion(grid, roomToGrow.id);
+                }
+
+                if (expansionCells && expansionCells.length > 0) {
+                    // Morphological constraint: limit non-corridor rooms to 8 vertices (U-shape)
+                    if (roomToGrow.id !== 'corridor_l1') {
+                        // Dry run: apply expansion to a test grid
+                        const originalCells = [...(grid.roomData[roomToGrow.id] || [])];
+                        const testGrid = {
+                            getCell: (x, y) => {
+                                if (expansionCells.some(c => c.x === x && c.y === y)) return roomToGrow.id;
+                                return grid.getCell(x, y);
+                            },
+                            getBoundingBox: (id) => {
+                                if (id !== roomToGrow.id) return grid.getBoundingBox(id);
+                                const combined = [...originalCells, ...expansionCells];
+                                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                                for (const c of combined) {
+                                    if (c.x < minX) minX = c.x;
+                                    if (c.x > maxX) maxX = c.x;
+                                    if (c.y < minY) minY = c.y;
+                                    if (c.y > maxY) maxY = c.y;
+                                }
+                                return { minX, minY, maxX, maxY };
+                            }
+                        };
+                        
+                        if (countRoomVertices(testGrid, roomToGrow.id) > 8) {
+                            // Expansion would make the room too complex, try next room
+                            continue;
+                        }
+                    }
+
+                    for (const cell of expansionCells) {
+                        if (roomToGrow.currentArea < roomToGrow.targetGridCount) {
+                            grid.addRoomCell(roomToGrow.id, cell.x, cell.y);
+                            roomToGrow.currentArea++; // Increment by 1 grid cell
+                        } else {
+                            break;
+                        }
+                    }
+                    growthHappenedThisCycle = true;
+                    break;
+                }
+            }
+
+            if (!growthHappenedThisCycle) {
+                console.warn("Expansion stuck. No rooms could grow in Stage 2.");
                 break;
             }
-        }
-
-
-        if (!growthHappenedThisCycle) {
-            console.warn("Expansion stuck. No rooms could grow.");
-            break;
         }
 
         iterations++;
@@ -402,14 +472,13 @@ function expandRooms(grid, rooms, rng, onRegularExpansionComplete = null, onRect
         console.warn("Expansion reached max iterations.");
     }
 
-    // Capture the state after ALL growth stages (Rect, Fill/LU, and SmartLine) are complete
+    // Capture the final state after ALL growth stages (Stage 1 + Stage 2) are complete
     if (onRegularExpansionComplete) {
         onRegularExpansionComplete(grid);
     }
 }
 
 function fillGaps(grid, rooms) {
-    console.log("[Debug] fillGaps: 函数开始执行。");
     let emptyCells = [];
     for (let y = 0; y < grid.height; y++) {
         for (let x = 0; x < grid.width; x++) {
@@ -419,10 +488,8 @@ function fillGaps(grid, rooms) {
         }
     }
 
-    console.log(`[Debug] fillGaps: 找到 ${emptyCells.length} 个空白单元格需要填充。`);
-
     if (emptyCells.length === 0) return;
-    console.log(`智能填充 ${emptyCells.length} 个间隙单元格...`);
+    if (DEBUG_LAYOUT) console.log(`[Layout] fillGaps: ${emptyCells.length} empty cells`);
 
     const emptyCellSet = new Set(emptyCells.map(c => `${c.x},${c.y}`));
 
@@ -445,6 +512,20 @@ function fillGaps(grid, rooms) {
             if (neighbors.size === 0) continue;
 
             for (const roomId of neighbors) {
+                // --- 走廊宽度守护 ---
+                // If corridor_l1 is present but still narrower than the minimum width,
+                // skip assigning this segment to a non-corridor room so corridor can
+                // still claim these cells in a later iteration.
+                if (roomId !== 'corridor_l1' && grid.roomData['corridor_l1']) {
+                    const isAdjacentToCorridor = seg.cells.some(cell => {
+                        const deltas = [{dx:1,dy:0},{dx:-1,dy:0},{dx:0,dy:1},{dx:0,dy:-1}];
+                        return deltas.some(({dx,dy}) => grid.getCell(cell.x+dx, cell.y+dy) === 'corridor_l1');
+                    });
+                    if (isAdjacentToCorridor && getRoomMinCrossWidth(grid, 'corridor_l1') < CORRIDOR_MIN_WIDTH_CELLS) {
+                        continue;
+                    }
+                }
+
                 // --- 2a. 阶段一：优先填充凹角 (方案C) ---
                 const凹角Score = calculateConcaveScore(grid, seg, roomId);
                 if (凹角Score > 0) {
@@ -471,7 +552,7 @@ function fillGaps(grid, rooms) {
 
         // --- 3. 选择最优并填充 ---
         if (bestSegment) {
-            console.log(`[Debug] fillGaps: 决策 - 将长度为 ${bestSegment.cells.length} 的线段分配给房间 ${bestRoomId} (得分: ${bestScore.toFixed(2)})`);
+            if (DEBUG_LAYOUT) console.log(`[Layout] assign seg(${bestSegment.cells.length}) → ${bestRoomId} score=${bestScore.toFixed(2)}`);
             for (const cell of bestSegment.cells) {
                 grid.addRoomCell(bestRoomId, cell.x, cell.y);
                 emptyCellSet.delete(`${cell.x},${cell.y}`);
@@ -696,7 +777,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId 
     const currentTotalTarget = rooms.reduce((sum, r) => sum + r.targetGridCount, 0);
     if (currentTotalTarget > 0 && (currentTotalTarget / totalGridArea) < TARGET_UTILIZATION) {
       const scaleFactor = (totalGridArea * TARGET_UTILIZATION) / currentTotalTarget;
-      console.log(`[Info] ${rooms[0]?.floor} 层房间面积占比过低 (${(currentTotalTarget / totalGridArea * 100).toFixed(1)}%)，自动放大目标面积，系数: ${scaleFactor.toFixed(2)}`);
+      if (DEBUG_LAYOUT) console.log(`[Layout] autoscale ${rooms[0]?.floor}: ×${scaleFactor.toFixed(2)}`);
       rooms.forEach(r => {
         r.targetGridCount = Math.round(r.targetGridCount * scaleFactor);
       });
