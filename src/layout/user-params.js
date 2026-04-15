@@ -27,7 +27,7 @@
 const STORAGE_KEY = 'pumpstation_building_params'
 
 /** 硬编码的出厂默认值，不含用户缓存。 */
-const HARDCODED_DEFAULTS = {
+export const HARDCODED_DEFAULTS = {
   buildingW: 43850,  // 东西向宽度 BW（最大值约束）
   buildingD: 18600,  // 南北向进深 BD（最大值约束）
   roomTargetAreas: {
@@ -106,28 +106,12 @@ function readOptional(id) {
 
 /**
  * 从 UI 收集 AG4-1 用户参数。
+ * 在新的流程中，此函数直接返回从 localStorage 或默认值加载的参数，
+ * 因为 UI 的 `init` 函数会实时将用户的输入保存到 localStorage。
  * @returns {UserParams} 用户确认或修改后的参数
  */
 export async function getUserConfirmedParams() {
-  const defaults = getDefaultUserParams()
-  const bW = parseFloat(document.getElementById('inp-bw')?.value) || defaults.buildingW
-  const bD = parseFloat(document.getElementById('inp-bd')?.value) || defaults.buildingD
-
-  const roomAreas = {}
-
-  const raRepair  = readOptional('ra-repair')
-  const raParking = readOptional('ra-parking')
-  const raLv      = readOptional('ra-lv')
-  const raCp      = readOptional('ra-cp')
-  const raFan     = readOptional('ra-fan')
-  const raRw      = readOptional('ra-rw')
-
-  if (raRepair  !== null) roomAreas.repair_zone = raRepair
-  if (raParking !== null) roomAreas.parking     = raParking
-  if (raLv      !== null) roomAreas.lv_control  = raLv
-  if (raCp      !== null) roomAreas.clean_pump  = raCp
-  if (raFan     !== null) roomAreas.fan_room    = raFan
-  if (raRw      !== null) roomAreas.rainwater   = raRw
-
-  return { buildingW: Math.round(bW / 100) * 100, buildingD: Math.round(bD / 100) * 100, roomTargetAreas: roomAreas }
+  // UI 面板的 `init` 方法会监听输入并实时调用 `saveParams`。
+  // 因此，这里直接从 `getDefaultUserParams`（它会从localStorage加载）获取最新值即可。
+  return getDefaultUserParams();
 }

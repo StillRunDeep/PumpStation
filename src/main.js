@@ -559,6 +559,19 @@ document.getElementById('btn-calc').addEventListener('click', runCalculation)
 let isGeneratingLayouts = false;
 let generationReqId = null;
 
+// 用户展开方案详图时自动暂停持续生成
+window.addEventListener('ag41-detail-opened', () => {
+  if (!isGeneratingLayouts) return;
+  isGeneratingLayouts = false;
+  if (generationReqId) {
+    cancelAnimationFrame(generationReqId);
+    generationReqId = null;
+  }
+  const btn = document.getElementById('btn-ag41-more');
+  if (btn) btn.textContent = '生成更多方案';
+  showAg41Notify('已暂停生成（展开详图）', false);
+});
+
 document.getElementById('btn-ag41-more').addEventListener('click', () => {
   const btn = document.getElementById('btn-ag41-more');
 
@@ -585,6 +598,11 @@ document.getElementById('btn-ag41-more').addEventListener('click', () => {
       try {
         const existing = getVariants();
         const newRaw = await runAG41(existing, () => !isGeneratingLayouts);
+        if (newRaw === null) { // runAG41 might be cancelled
+          isGeneratingLayouts = false;
+          btn.textContent = '生成更多方案';
+          return;
+        }
         const { variants, improved, newScored } = mergeVariants(existing, newRaw);
         renderLayoutPanel(variants);
 
@@ -599,34 +617,18 @@ document.getElementById('btn-ag41-more').addEventListener('click', () => {
       } catch (error) {
         console.error("Error during layout generation loop:", error);
         showAg41Notify('生成新方案时出错', false);
-        // Stop the loop on error
         isGeneratingLayouts = false;
         btn.textContent = '生成更多方案';
         return;
       }
 
-      // Continue the loop if still active
       if (isGeneratingLayouts) {
         generationReqId = requestAnimationFrame(generationLoop);
       }
     };
 
-    // Kick off the first iteration
     generationReqId = requestAnimationFrame(generationLoop);
   }
-});
-
-// 用户展开方案详图时自动暂停持续生成
-window.addEventListener('ag41-detail-opened', () => {
-  if (!isGeneratingLayouts) return;
-  isGeneratingLayouts = false;
-  if (generationReqId) {
-    cancelAnimationFrame(generationReqId);
-    generationReqId = null;
-  }
-  const btn = document.getElementById('btn-ag41-more');
-  if (btn) btn.textContent = '生成更多方案';
-  showAg41Notify('已暂停生成（展开详图）', false);
 });
 
 document.getElementById('btn-ag41-reset').addEventListener('click', async () => {
@@ -635,14 +637,16 @@ document.getElementById('btn-ag41-reset').addEventListener('click', async () => 
   btn.textContent = '生成中…'
   try {
     const newRaw = await runAG41([]) // Start with no existing variants
-    const variants = runAG42(newRaw)
-    renderLayoutPanel(variants)
-    showAg41Notify('已生成 9 个初始方案', true)
+    if (newRaw) {
+      const variants = runAG42(newRaw)
+      renderLayoutPanel(variants)
+      showAg41Notify('已生成 9 个初始方案', true)
+    }
   } finally {
     btn.disabled = false
     btn.textContent = '重制方案'
   }
-})
+});
 
 // ── 建筑参数面板设置 ──
 const btnParams = document.getElementById('btn-ag41-params');
@@ -655,7 +659,23 @@ btnParams?.addEventListener('click', () => {
     const modalBody = buildParamsDialog.querySelector('#modal-params-wrap');
     if (panel && modalBody) {
         modalBody.innerHTML = panel.innerHTML;
-        panel.init(modalBody);  // 激活 input 监听，变更即刻保存到 localStorage
+        panel.init(modalBody);
+
+        const actionsContainer = buildParamsDialog.querySelector('#modal-params-actions');
+        if (actionsContainer) {
+          actionsContainer.innerHTML = `
+            <button id="btn-params-cancel" style="padding: 8px 16px; font-size: 13px; border-radius: 6px; border: 1px solid #ccc; background: #fff; cursor: pointer;">取消</button>
+            <button id="btn-params-done" style="padding: 8px 16px; font-size: 13px; border-radius: 6px; border: none; background: #2e86c1; color: white; cursor: pointer; font-weight: 600;">完成</button>
+          `;
+          actionsContainer.querySelector('#btn-params-done').addEventListener('click', () => {
+            if (panel.validateAndConfirm()) {
+              buildParamsDialog.close();
+            }
+          });
+          actionsContainer.querySelector('#btn-params-cancel').addEventListener('click', () => {
+            buildParamsDialog.close();
+          });
+        }
     }
     buildParamsDialog.showModal();
 });
@@ -664,11 +684,8 @@ closeBtn?.addEventListener('click', () => {
     buildParamsDialog.close();
 });
 
-// Optional: close dialog by clicking on the backdrop
-buildParamsDialog.addEventListener('click', (event) => {
-    if (event.target === buildParamsDialog) {
-        buildParamsDialog.close();
-    }
+buildParamsDialog.addEventListener('params-confirmed', () => {
+  buildParamsDialog.close();
 });
 
 // ── 高级参数标签页切换 ─────────────────────────────────────────────
@@ -728,6 +745,27 @@ function persistCollapseState() {
 }
 
 // Initialize persistence on page load
-document.addEventListener('DOMContentLoaded', persistCollapseState);
+document.addEventListener('DOMContentLoaded', () => {
+  persistCollapseState();
+  initSummaryToggleLogic();
+});
+
+// ── Summary Click Logic (Only triangle triggers toggle) ──
+function initSummaryToggleLogic() {
+  document.addEventListener('click', (e) => {
+    const summary = e.target.closest('summary.card-header, summary.ag41-section-header');
+    if (!summary) return;
+
+    const rect = summary.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+
+    // The triangle is within the first 35px. 
+    // If click is further to the right, prevent the default toggle.
+    if (clickX > 35) {
+      e.preventDefault();
+    }
+  });
+}
+
 document.getElementById('btn-rainfall-recalc').addEventListener('click', recalcRainfall)
 document.getElementById('btn-rainfall-downstream').addEventListener('click', runFromRainfall)

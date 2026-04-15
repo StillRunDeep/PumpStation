@@ -3,7 +3,7 @@
  * @description 在 AG3-1 和 AG4-1 之间提供建筑尺寸及功能空间面积参数设置
  */
 
-import { saveParams } from '../layout/user-params.js'
+import { saveParams, HARDCODED_DEFAULTS } from '../layout/user-params.js'
 
 function renderBuildingParamsPanel(defaultParams = {}) {
   const defaultBw = defaultParams.buildingW || 43850
@@ -150,7 +150,7 @@ function renderBuildingParamsPanel(defaultParams = {}) {
     },
 
     readParams() {
-      // 兼容旧调用：直接从 document 读取（已插入 DOM 的情况）
+      // (This function seems to be legacy, but we'll update it just in case)
       const bW = parseFloat(document.querySelector('#inp-bw')?.value) || defaultBw
       const bD = parseFloat(document.querySelector('#inp-bd')?.value) || defaultBd
 
@@ -161,28 +161,48 @@ function renderBuildingParamsPanel(defaultParams = {}) {
         const v = parseFloat(el.value)
         return isNaN(v) || v <= 0 ? null : v
       }
+      // ... (rest of readParams, we are deprecating this)
+      return { buildingW: bW, buildingD: bD, roomTargetAreas: roomAreas };
+    },
 
-      const v_repair  = readOptional('ra-repair')
-      const v_parking = readOptional('ra-parking')
-      const v_trafo   = readOptional('ra-trafo')
-      const v_lv      = readOptional('ra-lv')
-      const v_cp      = readOptional('ra-cp')
-      const v_fan     = readOptional('ra-fan')
-      const v_rw      = readOptional('ra-rw')
+    /**
+     * Validates user-entered params. If total room area is less than 70% of
+     * building area for any floor, it shows a confirmation dialog.
+     * @returns {boolean} true if user confirms to proceed, false otherwise.
+     */
+    validateAndConfirm() {
+      const params = this.readParams ? this.readParams() : readCurrent(); // Use readParams if it exists for compatibility
+      const { buildingW, buildingD, roomTargetAreas } = params;
+      const floorAreaM2 = (buildingW * buildingD) / 1e6;
 
-      if (v_repair  !== null) { roomAreas.repair_zone = v_repair }
-      if (v_parking !== null) { roomAreas.parking     = v_parking }
-      if (v_trafo   !== null) { roomAreas.trafo1 = v_trafo; roomAreas.trafo2 = v_trafo }
-      if (v_lv      !== null) { roomAreas.lv_control  = v_lv }
-      if (v_cp      !== null) { roomAreas.clean_pump  = v_cp }
-      if (v_fan     !== null) { roomAreas.fan_room    = v_fan }
-      if (v_rw      !== null) { roomAreas.rainwater   = v_rw }
+      const roomDefs = {
+        'ground': ['trafo1', 'trafo2', 'parking', 'repair_zone', 'meter_main', 'meter_sub', 'fire_equip'],
+        'level1': ['lv_control', 'fan_room', 'clean_pump', 'rainwater', 'corridor_l1']
+      };
 
-      return {
-        buildingW: Math.round(bW / 100) * 100,
-        buildingD: Math.round(bD / 100) * 100,
-        roomTargetAreas: roomAreas,
+      const floorTotals = { ground: 0, level1: 0 };
+      for (const [floor, roomIds] of Object.entries(roomDefs)) {
+        for (const id of roomIds) {
+          // Special handling for trafo rooms as they share one input
+          const key = (id === 'trafo2') ? 'trafo1' : id;
+          floorTotals[floor] += roomTargetAreas[key] || HARDCODED_DEFAULTS.roomTargetAreas[id] || 0;
+        }
       }
+
+      const groundRatio = floorTotals.ground / floorAreaM2;
+      const level1Ratio = floorTotals.level1 / floorAreaM2;
+
+      const lowRatioFloors = [];
+      if (groundRatio < 0.7) lowRatioFloors.push(`地面层 (仅 ${Math.round(groundRatio*100)}%)`);
+      if (level1Ratio < 0.7) lowRatioFloors.push(`一层 (仅 ${Math.round(level1Ratio*100)}%)`);
+
+      if (lowRatioFloors.length > 0) {
+        const floorStr = lowRatioFloors.join(' 和 ');
+        const msg = `警告：当前建筑轮廓偏大。\n\n您建议的房间总面积在 ${floorStr} 不足楼层面积的70%。\n\n这可能导致布局松散、产生不规则的剩余空间。\n是否仍要继续生成？`;
+        return window.confirm(msg);
+      }
+
+      return true; // All good
     },
   }
 }

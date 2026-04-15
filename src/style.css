@@ -181,13 +181,17 @@ details .adv-grid { margin-top: 12px; }
   position: relative; /* Change to relative for positioning context */
   top: 0;
   z-index: 10;
-  cursor: pointer;
+  cursor: default; /* Change from pointer to default */
   list-style: none; /* Remove default marker */
+  text-decoration: none; /* Ensure no underline */
 }
 
-.card-header::-webkit-details-marker {
-  display: none; /* For Chrome/Safari */
+.card-header:hover {
+  text-decoration: none; /* No underline on hover */
 }
+
+/* We can use a trick with a pseudo-element or just keep it simple with JS handling. 
+   Actually, the most intuitive way is to have the whole header NOT look like a giant button. */
 
 .card-header::before {
   content: '▶';
@@ -197,6 +201,7 @@ details .adv-grid { margin-top: 12px; }
   transform: translateY(-50%) rotate(0deg);
   font-size: 0.8em;
   transition: transform 0.2s;
+  cursor: pointer; /* Triangle itself should have pointer */
 }
 
 details[open] > .card-header::before {
@@ -300,14 +305,15 @@ svg.zoom-active {
   background-color: #eaf2fb;
   border-top: 1px solid #d6eaf8;
   border-bottom: 1px solid #d6eaf8;
-  cursor: pointer;
+  cursor: default; /* Change from pointer to default */
   list-style: none;
   position: relative;
   padding-left: 38px;
+  text-decoration: none;
 }
 
-.ag41-section-header::-webkit-details-marker {
-  display: none;
+.ag41-section-header:hover {
+  text-decoration: none;
 }
 
 .ag41-section-header::before {
@@ -318,6 +324,7 @@ svg.zoom-active {
   transform: translateY(-50%);
   font-size: 0.8em;
   transition: transform 0.2s;
+  cursor: pointer; /* Triangle has pointer */
 }
 
 #ag41-variants-details[open] > .ag41-section-header::before,

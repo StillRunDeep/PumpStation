@@ -8,8 +8,8 @@ const NON_FUNCTIONAL = new Set(['corridor_l1', 'dock1', 'dock2'])
 const CONVENIENCE_ROOMS = ['trafo1', 'trafo2', 'meter_main', 'meter_sub', 'fire_equip', 'parking', 'repair_zone']
 
 // Required rooms per floor (§3.5 missing-room check)
-const EXPECTED_GROUND = ['trafo1', 'trafo2', 'meter_main', 'meter_sub', 'fire_equip', 'parking', 'repair_zone', 'dock1']
-const EXPECTED_LEVEL1 = ['fan_room', 'clean_pump', 'rainwater', 'lv_control', 'dock2', 'corridor_l1']
+const EXPECTED_GROUND = ['trafo1', 'trafo2', 'meter_main', 'meter_sub', 'fire_equip', 'parking', 'repair_zone']
+const EXPECTED_LEVEL1 = ['fan_room', 'clean_pump', 'rainwater', 'lv_control', 'corridor_l1']
 
 // Level-1 rooms that must be adjacent to corridor_l1 (§3.4 door-access check)
 const LEVEL1_MUST_FACE_CORRIDOR = ['fan_room', 'clean_pump', 'rainwater', 'lv_control']
@@ -69,17 +69,17 @@ export function computeAccessibilityScore(result) {
 
 /**
  * Compute door-access penalty (≤0) — §3.4.
- * @returns {number} −doorAccessPenalty × violatingRoomCount
+ * @returns {{penalty: number, ids: string[]}}
  */
 export function computeDoorAccessPenalty(result) {
   const { buildingW, buildingD, groundPlacements = {}, level1Placements = {} } = result
   const { doorAccessPenalty } = SCORER_PARAMS
-  let violations = 0
+  let ids = []
 
   for (const id of GROUND_MUST_EXT) {
     const p = groundPlacements[id]
     if (!p) continue
-    if (!touchesExteriorNonSouth(p, buildingW, buildingD)) violations++
+    if (!touchesExteriorNonSouth(p, buildingW, buildingD)) ids.push(id)
   }
 
   const parking    = groundPlacements['parking']
@@ -87,50 +87,96 @@ export function computeDoorAccessPenalty(result) {
   if (parking && repairZone) {
     const parkingOk = adjacent(parking, repairZone) || touchesExteriorNonSouth(parking, buildingW, buildingD)
     const repairOk  = adjacent(parking, repairZone) || touchesExteriorNonSouth(repairZone, buildingW, buildingD)
-    if (!parkingOk) violations++
-    if (!repairOk)  violations++
+    if (!parkingOk) ids.push('parking')
+    if (!repairOk)  ids.push('repair_zone')
   }
 
   const corridor = level1Placements['corridor_l1']
   for (const id of LEVEL1_MUST_FACE_CORRIDOR) {
     const p = level1Placements[id]
     if (!p) continue
-    if (!corridor || !adjacent(p, corridor)) violations++
+    if (!corridor || !adjacent(p, corridor)) ids.push(id)
   }
 
-  return -doorAccessPenalty * violations
+  return { penalty: -doorAccessPenalty * ids.length, ids }
 }
 
 /**
  * Compute missing-room penalty (≤0) — §3.5.
- * @returns {number} −missingRoomPenalty × missingCount
+ * @returns {{penalty: number, ids: string[]}}
  */
 export function computeMissingRoomsPenalty(result) {
   const { groundPlacements = {}, level1Placements = {} } = result
   const { missingRoomPenalty } = SCORER_PARAMS
-  let missing = 0
-  for (const id of EXPECTED_GROUND) { if (!groundPlacements[id]) missing++ }
-  for (const id of EXPECTED_LEVEL1) { if (!level1Placements[id]) missing++ }
-  return -missingRoomPenalty * missing
+  let ids = []
+  for (const id of EXPECTED_GROUND) { if (!groundPlacements[id]) ids.push(id) }
+  for (const id of EXPECTED_LEVEL1) { if (!level1Placements[id]) ids.push(id) }
+  return { penalty: -missingRoomPenalty * ids.length, ids }
 }
 
 /**
- * Compute aspect-ratio penalty (≤0) — §3.6.
- * @returns {number} −aspectRatioPenalty × violatingRoomCount
+ * Compute aspect-ratio and shape penalty (≤0) — §3.6.
+ * Includes:
+ * 1. Traditional aspect ratio (max/min > threshold)
+ * 2. Room utilization (actualArea / boundingBoxArea < threshold)
+ * 3. Corner count (vertices > threshold)
+ * @returns {{penalty: number, ids: string[], violationCount: number, maxAspectRatio: number}}
  */
 export function computeAspectRatioPenalty(result) {
   const { groundPlacements = {}, level1Placements = {} } = result
-  const { aspectRatioThreshold, aspectRatioPenalty } = SCORER_PARAMS
+  const {
+    aspectRatioThreshold, aspectRatioPenalty,
+    utilizationThreshold, utilizationStep,
+    vertexThreshold, vertexStep
+  } = SCORER_PARAMS
   const allPlacements = { ...groundPlacements, ...level1Placements }
-  let violations = 0
+  let ids = []
+  let totalViolations = 0
+  let maxAspectRatio = 1
 
   for (const [id, p] of Object.entries(allPlacements)) {
     if (id === 'corridor_l1') continue
     if (!p.w || !p.d) continue
-    if (Math.max(p.w, p.d) / Math.min(p.w, p.d) > aspectRatioThreshold) violations++
+    
+    const ratio = Math.max(p.w, p.d) / Math.min(p.w, p.d)
+    if (ratio > maxAspectRatio) maxAspectRatio = ratio
+
+    let roomViolations = 0
+    
+    // 1. Aspect Ratio
+    if (ratio > aspectRatioThreshold) {
+      roomViolations++
+    }
+    
+    // 2. Room Utilization
+    if (p.actualArea) {
+      const bboxArea = p.w * p.d
+      const utilization = p.actualArea / bboxArea
+      if (utilization < utilizationThreshold) {
+        // Every utilizationStep deficit = 1 violation, at least 1 if below threshold
+        const deficit = utilizationThreshold - utilization
+        roomViolations += 1 + Math.floor(deficit / utilizationStep)
+      }
+    }
+    
+    // 3. Corner Count
+    if (p.vertices > vertexThreshold) {
+      // Every vertexStep extra vertices over threshold = 1 violation
+      roomViolations += (p.vertices - vertexThreshold) / vertexStep
+    }
+
+    if (roomViolations > 0) {
+      ids.push(id)
+      totalViolations += roomViolations
+    }
   }
 
-  return -aspectRatioPenalty * violations
+  return {
+    penalty: -aspectRatioPenalty * totalViolations,
+    ids,
+    violationCount: totalViolations,
+    maxAspectRatio
+  }
 }
 
 /**
@@ -140,7 +186,7 @@ export function computeAspectRatioPenalty(result) {
  * mutations to that object take effect immediately on the next call.
  *
  * Returns { score, spaceEfficiency, efficiencyScore, accessibilityScore,
- *           diversityPenalty, breakdown }.
+ *           aspectRatio, diversityPenalty, breakdown }.
  */
 export function scoreLayout(result) {
   const { buildingW, buildingD, groundPlacements, level1Placements } = result
@@ -153,6 +199,9 @@ export function scoreLayout(result) {
     corridorHitsThreshold, corridorBonus,
     efficiencyBase, efficiencyRange, efficiencyMaxBonus,
     mustViolationPenalty,
+    doorAccessPenalty,
+    missingRoomPenalty,
+    aspectRatioPenalty,
   } = SCORER_PARAMS
 
   const breakdown = {
@@ -212,6 +261,11 @@ export function scoreLayout(result) {
   // 5. Adjacency satisfaction
   const adj = result.adjacency
   if (adj) {
+    const mustHits = adj.satisfied.filter(v => v.type === 'must').length
+    const shouldHits = adj.satisfied.filter(v => v.type === 'should').length
+    breakdown.adjMustCount = mustHits
+    breakdown.adjShouldCount = shouldHits
+
     adj.satisfied.forEach(v => {
       const pts = v.type === 'must' ? mustAdjacencyBonus : shouldAdjacencyBonus
       breakdown.adjacency += pts
@@ -238,19 +292,32 @@ export function scoreLayout(result) {
   score += accessibilityScore
 
   // 8. MUST violation penalty
-  breakdown.violations = -(result.violations.length * mustViolationPenalty)
+  const violationCount = result.violations?.length || 0
+  breakdown.violations = -(violationCount * mustViolationPenalty)
+  breakdown.violationCount = violationCount
+  // Safety check: handle violations that might not have a 'pair' or use 'room' property instead
+  breakdown.violationDetails = result.violations?.map(v => v.room || 'unknown') || []
   score += breakdown.violations
 
   // 9. Door-access penalty
-  breakdown.doorAccess = computeDoorAccessPenalty(result)
+  const doorAccessRes = computeDoorAccessPenalty(result)
+  breakdown.doorAccess = doorAccessRes.penalty
+  breakdown.doorAccessCount = doorAccessRes.ids.length
+  breakdown.doorAccessDetails = doorAccessRes.ids
   score += breakdown.doorAccess
 
   // 10. Missing-room penalty
-  breakdown.missingRooms = computeMissingRoomsPenalty(result)
+  const missingRoomsRes = computeMissingRoomsPenalty(result)
+  breakdown.missingRooms = missingRoomsRes.penalty
+  breakdown.missingRoomCount = missingRoomsRes.ids.length
+  breakdown.missingRoomDetails = missingRoomsRes.ids
   score += breakdown.missingRooms
 
   // 11. Aspect-ratio penalty
-  breakdown.aspectRatio = computeAspectRatioPenalty(result)
+  const aspectRatioRes = computeAspectRatioPenalty(result)
+  breakdown.aspectRatio = aspectRatioRes.penalty
+  breakdown.aspectRatioCount = aspectRatioRes.violationCount
+  breakdown.aspectRatioDetails = aspectRatioRes.ids
   score += breakdown.aspectRatio
 
   return {
@@ -258,6 +325,7 @@ export function scoreLayout(result) {
     spaceEfficiency,
     efficiencyScore,
     accessibilityScore,
+    aspectRatio: aspectRatioRes.maxAspectRatio,
     diversityPenalty: 0,
     breakdown,
   }
