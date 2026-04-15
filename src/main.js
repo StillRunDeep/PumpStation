@@ -703,7 +703,7 @@ document.getElementById('btn-room-downstream').addEventListener('click', runFrom
 // ── 折叠状态持久化 ─────────────────────────────────────────────
 function persistCollapseState() {
   const collapsibleSections = document.querySelectorAll(
-    '.agent-card, #topology-details, #advanced-params-details, #ag41-comparison-details'
+    '.agent-card, #topology-details, #advanced-params-details'
   );
   const collapseState = JSON.parse(localStorage.getItem('collapseState')) || {};
 

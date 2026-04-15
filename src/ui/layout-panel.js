@@ -2,72 +2,76 @@ import { renderLayoutSVGDual } from '../render/layout-svg.js'
 import { renderDebugGrid } from '../render/svg-helpers.js'
 import { initSvgZoomPan } from '../render/zoom-pan.js'
 import {
-  WEIGHT_KEYS, WEIGHT_LABELS, DEFAULT_WEIGHTS,
-  saveWeights, loadWeights, computeWeightedScore,
-} from '../layout/weights.js'
+  SCORER_PARAMS, DEFAULT_SCORER_PARAMS, PARAM_LABELS, PARAM_GROUPS, PARAM_STEPS,
+  saveScorerParams,
+} from '../layout/scorer-params.js'
+import { scoreLayout } from '../layout/scorer.js'
 
 // Module-level state
 let _variants = []
-let _selectedIdx = 0          // current selected row index (in sorted order)
-let _detailOpen = false       // whether the detail inline row is visible
-let _weights = loadWeights()  // per-key score weights, persisted to localStorage
+let _selectedIdx = 0       // row index in sorted order
+let _detailOpen = false    // whether the detail inline row is visible
 const VW = 1080, VH = 560
-const COL_COUNT = 9           // number of table columns
+const COL_COUNT = 8
 
-// ── Weight helpers ────────────────────────────────────────────────────
+// ── Sorted variants ───────────────────────────────────────────────────
 
-/** Return a sorted copy of _variants using current weights. */
 function _sortedVariants() {
-  return [..._variants].sort((a, b) =>
-    computeWeightedScore(b.breakdown, _weights) - computeWeightedScore(a.breakdown, _weights)
-  )
+  return [..._variants].sort((a, b) => b.score - a.score)
 }
 
-// ── Weights panel ─────────────────────────────────────────────────────
+// ── Scorer params panel ───────────────────────────────────────────────
 
-function renderWeightsPanel(weights) {
-  // Render 12 weight inputs in a 2-row × 6-col compact grid
-  const keys = WEIGHT_KEYS
-  const half = Math.ceil(keys.length / 2)
-  const row1 = keys.slice(0, half)
-  const row2 = keys.slice(half)
+function renderScorerParamsPanel(params) {
+  const renderGroup = group => {
+    const inputs = group.keys.map(k => {
+      const step = PARAM_STEPS[k] ?? 1
+      return `
+        <td style="padding:2px 6px;white-space:nowrap;vertical-align:top">
+          <label style="font-size:10px;color:#666;display:block;margin-bottom:1px">${PARAM_LABELS[k]}</label>
+          <input type="number" data-pkey="${k}"
+                 value="${params[k]}"
+                 step="${step}" min="0"
+                 style="width:58px;font-size:12px;padding:1px 4px;border:1px solid #bdc3c7;
+                        border-radius:3px;text-align:right"
+                 onchange="window._ag41UpdateParam('${k}', +this.value)">
+        </td>`
+    }).join('')
+    return `
+      <tr>
+        <td style="padding:2px 6px;white-space:nowrap;vertical-align:middle;
+                   font-size:10px;font-weight:700;color:#1a3a5c;min-width:60px">${group.label}</td>
+        ${inputs}
+      </tr>`
+  }
 
-  const cell = (k) => `
-    <td style="padding:3px 8px;white-space:nowrap">
-      <label style="font-size:11px;color:#555;display:block;margin-bottom:2px">${WEIGHT_LABELS[k]}</label>
-      <input type="number" data-wkey="${k}"
-             value="${weights[k] ?? 1}"
-             min="0" max="10" step="0.1"
-             style="width:56px;font-size:12px;padding:2px 4px;border:1px solid #bdc3c7;
-                    border-radius:3px;text-align:right"
-             onchange="window._ag41UpdateWeight('${k}', +this.value)">
-    </td>`
+  const mid = Math.ceil(PARAM_GROUPS.length / 2)
+  const leftCol  = PARAM_GROUPS.slice(0, mid).map(renderGroup).join('')
+  const rightCol = PARAM_GROUPS.slice(mid).map(renderGroup).join('')
 
   return `
-    <div id="weights-panel" style="background:#f0f4f8;border:1px solid #d5dde5;
+    <div id="scorer-params-panel" style="background:#f0f4f8;border:1px solid #d5dde5;
          border-radius:4px;padding:8px 12px;margin-bottom:8px">
       <div style="display:flex;align-items:center;margin-bottom:6px">
-        <span style="font-size:12px;font-weight:600;color:#1a3a5c">权重参数</span>
-        <span style="font-size:11px;color:#888;margin-left:8px">调整各评分项影响系数（初始值均为 1）</span>
-        <button onclick="window._ag41ResetWeights()"
+        <span style="font-size:12px;font-weight:600;color:#1a3a5c">评分参数</span>
+        <span style="font-size:11px;color:#888;margin-left:8px">修改后立即重新评分并重排名，自动缓存</span>
+        <button onclick="window._ag41ResetParams()"
                 style="margin-left:auto;font-size:11px;padding:3px 10px;
                        background:#fff;border:1px solid #bdc3c7;border-radius:3px;
-                       cursor:pointer;color:#555">重置权重</button>
+                       cursor:pointer;color:#555">重置参数</button>
       </div>
-      <table style="border-collapse:collapse;width:100%">
-        <tr>${row1.map(cell).join('')}</tr>
-        <tr>${row2.map(cell).join('')}</tr>
-      </table>
+      <div style="display:flex;gap:16px;align-items:flex-start">
+        <table style="border-collapse:collapse;flex:1">${leftCol}</table>
+        <div style="width:1px;background:#c8d6e5;align-self:stretch"></div>
+        <table style="border-collapse:collapse;flex:1">${rightCol}</table>
+      </div>
     </div>`
 }
 
 // ── Comparison table ──────────────────────────────────────────────────
 
-function renderComparisonTable(variants, weights) {
-  const bdSign = v => v >= 0 ? `+${v}` : `${v}`
-
+function renderComparisonTable(variants) {
   const rows = variants.map((v, i) => {
-    const bd  = v.breakdown || {}
     const mustSat = (v.adjacency?.satisfied  || []).filter(a => a.type === 'must').length
     const mustTot = mustSat + (v.adjacency?.violated || []).filter(a => a.type === 'must').length
     const violCell = v.violations.length === 0
@@ -76,28 +80,7 @@ function renderComparisonTable(variants, weights) {
     const area = Math.round(v.buildingW * v.buildingD / 1e6)
     const eff  = v.spaceEfficiency != null ? (v.spaceEfficiency * 100).toFixed(1) + '%' : '—'
     const ar   = v.aspectRatio != null ? v.aspectRatio.toFixed(2) : '—'
-    const weightedScore = computeWeightedScore(bd, weights)
 
-    const bdDetail = `
-      <details onclick="event.stopPropagation()">
-        <summary style="cursor:pointer;font-size:11px;color:#666">明细</summary>
-        <table style="font-size:11px;margin-top:4px;border-collapse:collapse">
-          <tr><td style="padding:1px 6px">基础分</td><td style="text-align:right">${bdSign(bd.base ?? 10000)}</td></tr>
-          <tr><td style="padding:1px 6px">占地面积</td><td style="text-align:right;color:#c0392b">${bdSign(bd.footprint ?? 0)}</td></tr>
-          <tr><td style="padding:1px 6px">临近关系</td><td style="text-align:right;color:#27ae60">${bdSign(bd.adjacency ?? 0)}</td></tr>
-          <tr><td style="padding:1px 6px">走廊完整</td><td style="text-align:right;color:#27ae60">${bdSign(bd.corridor ?? 0)}</td></tr>
-          <tr><td style="padding:1px 6px">变压器布置</td><td style="text-align:right;color:#27ae60">${bdSign(bd.trafo ?? 0)}</td></tr>
-          <tr><td style="padding:1px 6px">风机房距离</td><td style="text-align:right;color:#27ae60">${bdSign(bd.fanRoom ?? 0)}</td></tr>
-          <tr><td style="padding:1px 6px">空间有效率</td><td style="text-align:right;color:#27ae60">${bdSign(bd.efficiency ?? 0)}</td></tr>
-          <tr><td style="padding:1px 6px">便捷性</td><td style="text-align:right;color:#27ae60">${bdSign(bd.accessibility ?? 0)}</td></tr>
-          <tr><td style="padding:1px 6px">约束违反</td><td style="text-align:right;color:#c0392b">${bdSign(bd.violations ?? 0)}</td></tr>
-          ${bd.doorAccess   ? `<tr><td style="padding:1px 6px">可达性违反</td><td style="text-align:right;color:#c0392b">${bdSign(bd.doorAccess)}</td></tr>` : ''}
-          ${bd.missingRooms ? `<tr><td style="padding:1px 6px">房间缺失</td><td style="text-align:right;color:#c0392b">${bdSign(bd.missingRooms)}</td></tr>` : ''}
-          ${bd.aspectRatio  ? `<tr><td style="padding:1px 6px">长宽比违反</td><td style="text-align:right;color:#c0392b">${bdSign(bd.aspectRatio)}</td></tr>` : ''}
-        </table>
-      </details>`
-
-    // Row base bg (overridden when selected via DOM update)
     const rowBg = i % 2 === 0 ? '#f8fafc' : '#fff'
 
     return `
@@ -109,12 +92,11 @@ function renderComparisonTable(variants, weights) {
         <td style="padding:7px 8px"><strong>${v.id}</strong><br>
           <span style="font-size:11px;color:#555">${v.label}</span></td>
         <td style="text-align:center;font-size:11px;padding:7px 8px">${ar}</td>
-        <td style="text-align:right;font-weight:700;color:#1a5276;padding:7px 8px">${weightedScore}</td>
+        <td style="text-align:right;font-weight:700;color:#1a5276;padding:7px 8px">${v.score}</td>
         <td style="text-align:right;padding:7px 8px">${area}</td>
         <td style="text-align:right;padding:7px 8px">${eff}</td>
         <td style="text-align:center;padding:7px 8px">${mustSat} / ${mustTot}</td>
         <td style="text-align:center;padding:7px 8px">${violCell}</td>
-        <td style="padding:7px 8px">${bdDetail}</td>
       </tr>`
   }).join('')
 
@@ -126,12 +108,11 @@ function renderComparisonTable(variants, weights) {
             <th style="padding:7px 8px">排名</th>
             <th style="padding:7px 8px;text-align:left">方案</th>
             <th style="padding:7px 8px">长宽比</th>
-            <th style="padding:7px 8px;text-align:right">加权得分</th>
+            <th style="padding:7px 8px;text-align:right">综合得分</th>
             <th style="padding:7px 8px;text-align:right">占地 m²</th>
             <th style="padding:7px 8px;text-align:right">空间有效率</th>
             <th style="padding:7px 8px">必须临近</th>
             <th style="padding:7px 8px">约束违反</th>
-            <th style="padding:7px 8px">得分明细</th>
           </tr>
         </thead>
         <tbody id="variant-tbody">
@@ -142,6 +123,48 @@ function renderComparisonTable(variants, weights) {
 }
 
 // ── Inline detail row ─────────────────────────────────────────────────
+
+function buildBreakdownHtml(v) {
+  const bd = v.breakdown || {}
+  const bdSign = x => x >= 0 ? `+${x}` : `${x}`
+  const posColor = '#27ae60'
+  const negColor = '#c0392b'
+  const color = x => x >= 0 ? posColor : negColor
+
+  const items = [
+    { label: '基础分',    val: bd.base      ?? 10000, always: true },
+    { label: '占地面积',  val: bd.footprint ?? 0 },
+    { label: '临近关系',  val: bd.adjacency ?? 0 },
+    { label: '走廊完整',  val: bd.corridor  ?? 0 },
+    { label: '变压器布置',val: bd.trafo     ?? 0 },
+    { label: '风机房距离',val: bd.fanRoom   ?? 0 },
+    { label: '空间有效率',val: bd.efficiency ?? 0 },
+    { label: '便捷性',   val: bd.accessibility ?? 0 },
+    { label: '约束违反',  val: bd.violations ?? 0 },
+    { label: '可达性违反',val: bd.doorAccess  ?? 0 },
+    { label: '房间缺失',  val: bd.missingRooms ?? 0 },
+    { label: '长宽比违反',val: bd.aspectRatio  ?? 0 },
+  ]
+
+  const rows = items
+    .filter(item => item.always || item.val !== 0)
+    .map(item => `
+      <tr>
+        <td style="padding:3px 8px;color:#555;white-space:nowrap">${item.label}</td>
+        <td style="padding:3px 8px;text-align:right;font-weight:600;color:${color(item.val)}">${bdSign(item.val)}</td>
+      </tr>`)
+    .join('')
+
+  return `
+    <h4 style="margin:0 0 8px;font-size:12px;color:#555">得分明细</h4>
+    <table style="border-collapse:collapse;width:100%;font-size:12px">
+      ${rows}
+      <tr style="border-top:1px solid #bdc3c7">
+        <td style="padding:5px 8px;font-weight:700;color:#1a3a5c">合计</td>
+        <td style="padding:5px 8px;text-align:right;font-weight:700;font-size:14px;color:#1a5276">${v.score}</td>
+      </tr>
+    </table>`
+}
 
 function buildDebugHtml(v) {
   if (v._debug && v._debug.ground?.gridBeforeGaps && v._debug.level1?.gridBeforeGaps) {
@@ -155,19 +178,18 @@ function buildDebugHtml(v) {
   return '<p style="color:#888;font-size:12px;text-align:center;margin-top:20px">无调试数据</p>'
 }
 
-/** Build and insert the inline detail <tr> after the selected variant row. */
 function insertDetailRow(idx) {
   removeDetailRow()
 
-  // idx refers to sorted order; look up the variant from the rendered rows
   const sorted = _sortedVariants()
   const v = sorted[idx]
   if (!v) return
 
-  const svgContent  = renderLayoutSVGDual(v, VW, VH)
-  const debugHtml   = buildDebugHtml(v)
+  const svgContent    = renderLayoutSVGDual(v, VW, VH)
+  const debugHtml     = buildDebugHtml(v)
+  const breakdownHtml = buildBreakdownHtml(v)
   const title = `方案 ${v.id}：${v.label}  —  ` +
-    `${(v.buildingW / 1000).toFixed(1)} m × ${(v.buildingD / 1000).toFixed(1)} m  加权得分 ${computeWeightedScore(v.breakdown, _weights)}`
+    `${(v.buildingW / 1000).toFixed(1)} m × ${(v.buildingD / 1000).toFixed(1)} m  得分 ${v.score}`
 
   const detailHtml = `
     <tr class="detail-inline-row" style="background:#f0f7ff">
@@ -186,19 +208,23 @@ function insertDetailRow(idx) {
         </div>
         <div style="display:flex">
           <svg id="svg-ag41" viewBox="0 0 ${VW} ${VH}"
-               style="display:block;flex:0 0 60%;height:${VH}px;cursor:grab;background:#f4f6f8">
+               style="display:block;flex:0 0 55%;height:${VH}px;cursor:grab;background:#f4f6f8">
             ${svgContent}
           </svg>
           <div id="debug-grid-container"
-               style="flex:0 0 40%;height:${VH}px;border-left:1px solid #ccc;
+               style="flex:0 0 27%;height:${VH}px;border-left:1px solid #ccc;
                       padding:10px;box-sizing:border-box;overflow-y:auto">
             ${debugHtml}
+          </div>
+          <div id="breakdown-container"
+               style="flex:0 0 18%;height:${VH}px;border-left:1px solid #ccc;
+                      padding:12px;box-sizing:border-box;overflow-y:auto;background:#fafbfc">
+            ${breakdownHtml}
           </div>
         </div>
       </td>
     </tr>`
 
-  // Insert after the selected row in the tbody
   const tbody = document.getElementById('variant-tbody')
   if (!tbody) return
   const targetRow = tbody.querySelector(`.variant-row[data-idx="${idx}"]`)
@@ -208,7 +234,6 @@ function insertDetailRow(idx) {
     tbody.insertAdjacentHTML('beforeend', detailHtml)
   }
 
-  // Bind zoom controls
   const svg = document.getElementById('svg-ag41')
   if (svg) {
     initSvgZoomPan(svg, VW, VH, { zIn: 'btn-ag41-zin', zOut: 'btn-ag41-zout', zRst: 'btn-ag41-rst' })
@@ -240,7 +265,6 @@ function selectVariant(idx, { scroll = false, toggle = false } = {}) {
   applyRowSelection(idx)
 
   if (toggle && alreadySelected && _detailOpen) {
-    // Same row re-clicked: collapse
     removeDetailRow()
     _detailOpen = false
     return
@@ -249,7 +273,6 @@ function selectVariant(idx, { scroll = false, toggle = false } = {}) {
   insertDetailRow(idx)
   _detailOpen = true
 
-  // Notify main to pause continuous generation so the main thread stays responsive
   window.dispatchEvent(new CustomEvent('ag41-detail-opened'))
 
   if (scroll) {
@@ -258,7 +281,7 @@ function selectVariant(idx, { scroll = false, toggle = false } = {}) {
   }
 }
 
-// ── Selection restoration helper ──────────────────────────────────────
+// ── Selection restoration ─────────────────────────────────────────────
 
 function _restoreSelection(prevId, wasOpen) {
   const sorted = _sortedVariants()
@@ -278,20 +301,27 @@ function _restoreSelection(prevId, wasOpen) {
   }
 }
 
-// ── Table-only re-render (keeps weight panel intact) ──────────────────
+// ── Re-score all variants, then re-render table ───────────────────────
 
-function _rerenderTable() {
-  const prevId  = _variants[_selectedIdx] ? _sortedVariants()[_selectedIdx]?.id : null
+function _rescoreAndRerender() {
+  // Grab previous state for restoration
+  const prevId  = _sortedVariants()[_selectedIdx]?.id
   const wasOpen = _detailOpen
 
+  // Re-run scoreLayout on every stored variant using the updated SCORER_PARAMS
+  _variants = _variants.map(v => {
+    const { score, spaceEfficiency, efficiencyScore, accessibilityScore, diversityPenalty, breakdown } = scoreLayout(v)
+    return { ...v, score, spaceEfficiency, efficiencyScore, accessibilityScore, diversityPenalty, breakdown }
+  })
+
+  // Replace just the table wrapper (keep params panel intact above)
   const wrap = document.getElementById('comparison-table-wrap')
   if (wrap) {
-    wrap.outerHTML = renderComparisonTable(_sortedVariants(), _weights)
+    wrap.outerHTML = renderComparisonTable(_sortedVariants())
   } else {
-    // Fallback: rebuild everything
     const cmp = document.getElementById('layout-comparison')
     if (cmp) {
-      cmp.innerHTML = renderWeightsPanel(_weights) + renderComparisonTable(_sortedVariants(), _weights)
+      cmp.innerHTML = renderScorerParamsPanel(SCORER_PARAMS) + renderComparisonTable(_sortedVariants())
     }
   }
 
@@ -301,13 +331,13 @@ function _rerenderTable() {
 // ── Public render function ────────────────────────────────────────────
 
 /**
- * Render the AG4-1 panel: weights panel + comparison table with inline
- * expandable detail rows.  Preserves the previously selected variant (by ID)
- * and open/closed state across re-renders.
- * @param {Array} variants  Raw result from runAG42() (unsorted)
+ * Render the AG4-1 panel: scorer params panel + comparison table with inline
+ * expandable detail rows.  Preserves selected variant (by ID) and open/closed
+ * state across re-renders.
+ *
+ * @param {Array} variants  Scored variants from runAG42()
  */
 export function renderLayoutPanel(variants) {
-  // Remember state before re-render
   const prevId  = _sortedVariants()[_selectedIdx]?.id
   const wasOpen = _detailOpen
 
@@ -316,7 +346,7 @@ export function renderLayoutPanel(variants) {
   const cmp = document.getElementById('layout-comparison')
   if (!cmp) return
 
-  cmp.innerHTML = renderWeightsPanel(_weights) + renderComparisonTable(_sortedVariants(), _weights)
+  cmp.innerHTML = renderScorerParamsPanel(SCORER_PARAMS) + renderComparisonTable(_sortedVariants())
 
   _restoreSelection(prevId, wasOpen)
 
@@ -334,7 +364,6 @@ export function renderLayoutPanel(variants) {
 
 // ── Global handlers ───────────────────────────────────────────────────
 
-/** Row click: toggle detail (same row collapses, different row switches). */
 window._ag41SelectVariant = (idx) => selectVariant(idx, { toggle: true })
 
 window._ag41ConfirmVariant = function(idx) {
@@ -345,24 +374,33 @@ window._ag41ConfirmVariant = function(idx) {
   }))
 }
 
-/** Called by weight input onchange. */
-window._ag41UpdateWeight = function(key, value) {
-  _weights[key] = isNaN(value) ? 1 : Math.max(0, value)
-  saveWeights(_weights)
-  _rerenderTable()
+/** Called when a param input changes. Mutates SCORER_PARAMS, saves, rescores. */
+window._ag41UpdateParam = function(key, value) {
+  if (key in DEFAULT_SCORER_PARAMS) {
+    SCORER_PARAMS[key] = isNaN(value) ? DEFAULT_SCORER_PARAMS[key] : Math.max(0, +value)
+    saveScorerParams(SCORER_PARAMS)
+    _rescoreAndRerender()
+  }
 }
 
-/** Called by reset button. */
-window._ag41ResetWeights = function() {
-  _weights = { ...DEFAULT_WEIGHTS }
-  saveWeights(_weights)
+/** Reset all params to defaults, save, rebuild full panel. */
+window._ag41ResetParams = function() {
+  Object.assign(SCORER_PARAMS, DEFAULT_SCORER_PARAMS)
+  saveScorerParams(SCORER_PARAMS)
 
   const cmp = document.getElementById('layout-comparison')
   if (!cmp) return
   const prevId  = _sortedVariants()[_selectedIdx]?.id
   const wasOpen = _detailOpen
 
-  cmp.innerHTML = renderWeightsPanel(_weights) + renderComparisonTable(_sortedVariants(), _weights)
+  // Re-score with reset params
+  _variants = _variants.map(v => {
+    const { score, spaceEfficiency, efficiencyScore, accessibilityScore, diversityPenalty, breakdown } = scoreLayout(v)
+    return { ...v, score, spaceEfficiency, efficiencyScore, accessibilityScore, diversityPenalty, breakdown }
+  })
+
+  // Full rebuild (so input values reset too)
+  cmp.innerHTML = renderScorerParamsPanel(SCORER_PARAMS) + renderComparisonTable(_sortedVariants())
   _restoreSelection(prevId, wasOpen)
 }
 
