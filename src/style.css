@@ -898,4 +898,47 @@ svg.zoom-active {
   padding: 0 4px;
 }
 .modal-close:hover { color: #333; }
+
+/* ── SVG Hover Tooltip ── */
+.svg-tooltip {
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #333;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  pointer-events: none;
+  z-index: 1000;
+  line-height: 1.5;
+  max-width: 220px;
+}
+.svg-tooltip strong {
+  color: #1a5276;
+  font-size: 13px;
+}
+.svg-tooltip small {
+  color: #888;
+  font-size: 11px;
+}
+
+/* ── 剖面符号块交互 ── */
+.section-block {
+  cursor: pointer;
+}
+.section-block.section-selected line {
+  stroke: #e74c3c;
+  stroke-width: 2.5;
+}
+.section-block.section-selected text {
+  fill: #e74c3c;
+  font-weight: bold;
+}
+svg.section-drag-active {
+  cursor: default !important;
+}
+svg.section-drag-active .zoom-overlay,
+svg.section-drag-active [data-zoom-handle] {
+  pointer-events: none;
+}
 .modal-body { padding: 20px; }

@@ -181,7 +181,6 @@ function recalcAG12() {
     setVal('pipe-H-total', result.H_total)
     setVal('pipe-Q-pump',  Q_pump)
     setVal('pipe-Z-stop',  Z_stop)
-    setVal('room-motor',   result.P_motor)
     setVal('pipe-pump-outlet-dn', result.DN_pump_outlet ?? '')
   }
   return result
@@ -240,6 +239,9 @@ function handleSchemeChange(id) {
   const ag1Result  = moduleCache.ag11
   const ag2Result  = moduleCache.ag12
   if (ag00Result?.valid && ag2Result?.valid && ag1Result) {
+    // 获取拓扑数据用于计算管道数量和阀门
+    const currentTopology = getCurrentTopology()
+
     const d_spacing_hsc = parseFloat(document.getElementById('room-d-spacing').value) || 1.0
     const e_wall_hsc = parseFloat(document.getElementById('room-e-wall').value) || 0.8
     const pipeToWall_hsc = parseInt(document.getElementById('room-pipe-to-wall').value, 10) || 800
@@ -247,21 +249,28 @@ function handleSchemeChange(id) {
     const minStraight_hsc = parseInt(document.getElementById('room-min-straight').value, 10) || 300
     const DN_branch_hsc = parseInt(document.getElementById('room-DN-branch').value, 10)
     const DN_main_hsc   = parseInt(document.getElementById('room-DN-main').value, 10)
-    const ag21 = runMaintenanceRoom(ag00Result.N, ag2Result.P_motor, ag00Result.N_spare, {
+    const h_room_hsc = parseFloat(document.getElementById('room-h-room').value)
+    const ag21 = runMaintenanceRoom(ag00Result.N, ag00Result.N_spare, {
       catalogPump: moduleCache.ag12?.displayMatches?.[0] ?? null,
       DN_branch: DN_branch_hsc || (moduleCache.ag13?.DN_pumpOut ?? 150),
       DN_main:   DN_main_hsc   || (moduleCache.ag13?.DN_mainOutlet ?? 300),
       d_spacing: d_spacing_hsc,
       e_wall: e_wall_hsc,
+      h_room: isNaN(h_room_hsc) ? null : h_room_hsc,
       spaceRules: { pipeToWall_mm: pipeToWall_hsc, pipeToPipe_mm: pipeToPipe_hsc, minStraight_mm: minStraight_hsc },
+      topology: currentTopology,  // 拓扑数据用于计算管道数量和阀门
     })
     ag21.DN_label = ag2Result.DN_outlet
     document.getElementById('card-ag21').innerHTML = renderMaintenanceRoom(ag21)
     const ag31Params = {
-      h_active:    ag1Result.Z_max - ag1Result.Z_stop,
+      h_pool:      ag1Result.D,                    // 结构池深 = 16 m
+      h_active:    ag1Result.Z_max - ag1Result.Z_stop,  // 有效水深 = 14.2 m
       Z_stop:      ag1Result.Z_stop,
       Z_start1:    ag1Result.Z_start1,
+      Z_start2:    ag1Result.Z_start2,
       Z_alarm_high: ag1Result.Z_alarm_high,
+      Z_alarm_low: ag1Result.Z_alarm_low,
+      Z_max:       ag1Result.Z_max,
     }
     const ag13 = moduleCache.ag13
     const baseTopo = ag00Result.topo?.topology
@@ -277,7 +286,13 @@ function handleSchemeChange(id) {
         return { ...d, outletReducer }
       })
     } : baseTopo
-    runDrawing(ag00Result.N, ag21, ag31Params, ag1Result.S, enrichedTopo)
+    runDrawing(ag00Result.N, ag21, ag31Params, ag1Result.S, enrichedTopo, {
+      Q_single: ag00Result.Q_pump,
+      H_design: ag2Result?.H_total,
+      P_motor: ag2Result?.P_motor,
+      catalogPump: moduleCache.ag12?.displayMatches?.[0] ?? null,
+      Z_sump: ag00Result.Z_sump,
+    })
   }
   // 同步更新方案卡 UI
   document.getElementById('scheme-options').innerHTML = renderSchemeOptions(currentSchemeId)
@@ -288,28 +303,33 @@ window.handleSchemeChange = handleSchemeChange
 
 function recalcAG21() {
   const N          = parseInt(document.getElementById('room-N').value, 10)
-  const motorPower = parseFloat(document.getElementById('room-motor').value)
   const N_spare    = parseInt(document.getElementById('room-N-spare').value, 10) || 0
   const d_spacing  = parseFloat(document.getElementById('room-d-spacing').value) || 1.0
   const e_wall     = parseFloat(document.getElementById('room-e-wall').value) || 0.8
+  const h_room_in  = parseFloat(document.getElementById('room-h-room').value)
   const pipeToWall_mm   = parseInt(document.getElementById('room-pipe-to-wall').value, 10) || 800
   const pipeToPipe_mm   = parseInt(document.getElementById('room-pipe-to-pipe').value, 10) || 800
   const minStraight_mm  = parseInt(document.getElementById('room-min-straight').value, 10) || 300
   const DN_branch_in    = parseInt(document.getElementById('room-DN-branch').value, 10)
   const DN_main_in      = parseInt(document.getElementById('room-DN-main').value, 10)
 
+  // 获取拓扑数据用于计算管道数量和阀门
+  const currentTopology = getCurrentTopology()
+
   if (isNaN(N)) {
     document.getElementById('card-ag21').innerHTML =
       '<p class="msg-error">⚠ 缺少必要参数：请填写工作泵台数。</p>'
     return null
   }
-  const result = runMaintenanceRoom(N, motorPower, N_spare, {
+  const result = runMaintenanceRoom(N, N_spare, {
     catalogPump: moduleCache.ag12?.displayMatches?.[0] ?? null,
     DN_branch: DN_branch_in || (moduleCache.ag13?.DN_pumpOut ?? 150),
     DN_main:   DN_main_in   || (moduleCache.ag13?.DN_mainOutlet ?? 300),
     d_spacing,
     e_wall,
+    h_room: isNaN(h_room_in) ? null : h_room_in,
     spaceRules: { pipeToWall_mm, pipeToPipe_mm, minStraight_mm },
+    topology: currentTopology,
   })
   moduleCache.ag21 = result
   document.getElementById('card-ag21').innerHTML = renderMaintenanceRoom(result)
@@ -325,6 +345,58 @@ function runFromAG21() { recalcAG21(); }
 
 // ── AG4-1 parameter helpers ───────────────────────────────────────────
 
+
+/**
+ * 计算从汇合点(junction)到泵房维护间边界的管道数量
+ * 通过追踪从junction出发的边，统计进入泵房维护间(pump_room)范围的路径数量
+ * 用于确定W方向需要布置的平行管道数量
+ *
+ * @param {Object} topoParams - topologyToAG31Params()的输出
+ * @returns {number} 管道数量（默认1条）
+ */
+function countPipesFromJunction(topoParams) {
+  if (!topoParams?.devicesByRoom?.pump_room) return 1
+
+  const pumpRoomDevices = topoParams.devicesByRoom.pump_room
+  const edges = topoParams.edges || []
+
+  // 找到汇合点(junction)
+  const junction = pumpRoomDevices.find(d => d.type === 'junction')
+  if (!junction) return 1
+
+  // 泵房维护间右边界（约在 editorX=770 处）
+  const pumpRoomRightBoundary = 770
+
+  // 统计从junction出发，进入泵房维护间范围的管道数量
+  // 沿拓扑边追踪：从junction出发，跟随edges直到离开泵房维护间范围
+  const visited = new Set()
+  const queue = [junction.id]
+
+  while (queue.length > 0) {
+    const currentId = queue.shift()
+    if (visited.has(currentId)) continue
+    visited.add(currentId)
+
+    // 查找所有从currentId出发的边
+    const outgoingEdges = edges.filter(e => e.fromId === currentId)
+    for (const edge of outgoingEdges) {
+      // 检查目标设备是否在泵房维护间范围内
+      const targetDevice = pumpRoomDevices.find(d => d.id === edge.toId)
+      if (targetDevice && targetDevice.editorX < pumpRoomRightBoundary) {
+        // 继续追踪（仍在泵房维护间范围内）
+        if (!visited.has(edge.toId)) {
+          queue.push(edge.toId)
+        }
+      }
+    }
+  }
+
+  // 排除junction自身，返回实际管道数量
+  // visited包含了junction和所有在泵房范围内的设备
+  // 管道数量 = visited中非junction设备（这些设备代表了从junction发出的平行管道）
+  const pipeCount = Math.max(1, visited.size - 1)
+  return pipeCount
+}
 
 /**
  * Auto-fill the repair_zone area hint from AG1-2 output.
@@ -436,10 +508,6 @@ async function runCalculation() {
   if (Z_stop_override !== null) {
     setVal('pump-Z-stop', Z_stop_override)
   }
-  const motorOverride = parseFloat(document.getElementById('inp-motor').value)
-  if (!isNaN(motorOverride)) {
-    setVal('pump-motor', motorOverride)
-  }
   const ag2Result = recalcAG12()
   if (!ag2Result || !ag2Result.valid) {
     ;['card-ag13', 'card-ag21'].forEach(id => {
@@ -468,36 +536,44 @@ async function runCalculation() {
   }
 
   // ── AG2-1: 泵房维护间尺寸计算 ─────────────────────────────────────────
-  const effectiveMotor = isNaN(motorOverride) ? ag2Result.P_motor : motorOverride
+  // 获取拓扑数据用于计算管道数量和阀门
+  const currentTopology = getCurrentTopology()
+
   const catalogPump = moduleCache.ag12?.displayMatches?.[0] ?? null
   const ag13 = moduleCache.ag13
   const pipesDN = { DN_branch: ag13?.DN_pumpOut ?? 150, DN_main: ag13?.DN_mainOutlet ?? 300 }
   const d_spacing_rc = parseFloat(document.getElementById('room-d-spacing').value) || 1.0
   const e_wall_rc = parseFloat(document.getElementById('room-e-wall').value) || 0.8
+  const h_room_rc = parseFloat(document.getElementById('room-h-room').value)
   const pipeToWall_rc = parseInt(document.getElementById('room-pipe-to-wall').value, 10) || 800
   const pipeToPipe_rc = parseInt(document.getElementById('room-pipe-to-pipe').value, 10) || 800
   const minStraight_rc = parseInt(document.getElementById('room-min-straight').value, 10) || 300
   const DN_branch_rc = parseInt(document.getElementById('room-DN-branch').value, 10)
   const DN_main_rc   = parseInt(document.getElementById('room-DN-main').value, 10)
-  const ag21 = runMaintenanceRoom(ag00.N, effectiveMotor, N_spare, {
+  const ag21 = runMaintenanceRoom(ag00.N, N_spare, {
     catalogPump,
     DN_branch: DN_branch_rc || (ag13?.DN_pumpOut ?? 150),
     DN_main:   DN_main_rc   || (ag13?.DN_mainOutlet ?? 300),
     d_spacing: d_spacing_rc,
     e_wall: e_wall_rc,
+    h_room: isNaN(h_room_rc) ? null : h_room_rc,
     spaceRules: { pipeToWall_mm: pipeToWall_rc, pipeToPipe_mm: pipeToPipe_rc, minStraight_mm: minStraight_rc },
+    topology: currentTopology,  // 拓扑数据用于计算管道数量和阀门
   })
   ag21.DN_label = (ag13 && ag13.DN_pumpOut) || ag2Result.DN_outlet
   document.getElementById('card-ag21').innerHTML = renderMaintenanceRoom(ag21)
 
   // ── AG3-1: SVG绘图 ───────────────────────────────────────────────
-  // AG3-1 期望从第三个参数解构 h_active, Z_stop, Z_start1, Z_alarm_high
-  // 这些全部来自 AG1-1（调蓄池计算），其中 h_active = Z_max - Z_stop
+  // h_pool: 结构池深，h_active: 有效水深（Z_max - Z_stop）
   const ag31Params = {
-    h_active:   ag1Result.Z_max - ag1Result.Z_stop,  // 有效水深
+    h_pool:     ag1Result.D,                          // 结构池深 = 16 m
+    h_active:   ag1Result.Z_max - ag1Result.Z_stop,    // 有效水深 = 14.2 m
     Z_stop:     ag1Result.Z_stop,
     Z_start1:   ag1Result.Z_start1,
+    Z_start2:   ag1Result.Z_start2,
     Z_alarm_high: ag1Result.Z_alarm_high,
+    Z_alarm_low: ag1Result.Z_alarm_low,
+    Z_max:      ag1Result.Z_max,
   }
   // ── AG3-1: SVG绘图（拓扑数据富化）─────────────────────────────
   // 用 AG1-3 的变径结果富化拓扑中的 pump 节点
@@ -517,7 +593,13 @@ async function runCalculation() {
     })
   } : baseTopo
 
-  runDrawing(ag00.N, ag21, ag31Params, ag1Result.S, enrichedTopo)
+  runDrawing(ag00.N, ag21, ag31Params, ag1Result.S, enrichedTopo, {
+    Q_single: ag00.Q_pump,
+    H_design: ag12?.H_total,
+    P_motor: ag12?.P_motor,
+    catalogPump: moduleCache.ag12?.displayMatches?.[0] ?? null,
+    Z_sump: ag00.Z_sump,
+  })
 
   // Update repair_zone hint from AG2-1 before reading AG4-1 params
   updateRepairZoneHint(ag21)

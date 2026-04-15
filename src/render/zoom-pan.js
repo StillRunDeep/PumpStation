@@ -51,6 +51,8 @@ export function initSvgZoomPan(svg, vw, vh, btnIds = {}, opts = {}) {
     activateSvg()
   }
   function onDown(e) {
+    // 跳过 section-block（由 drawing.js 自己处理拖动）
+    if (e.target.closest('#section-block')) return
     activateSvg()
     drag = true;
     last = { x: e.clientX, y: e.clientY };
