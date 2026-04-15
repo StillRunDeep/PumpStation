@@ -2,6 +2,7 @@ import { fmt } from '../utils.js'
 import {
   _r, _l, _t, _poly, _dh, _dv,
   _elbow, _checkValve, _gateValve, _flowmeter, _tee, _reducer, _leader,
+  _sectionLineBS,
 } from '../render/svg-helpers.js'
 import { initSvgZoomPan } from '../render/zoom-pan.js'
 import { topologyToAG31Params } from './topology.js'
@@ -10,18 +11,33 @@ import {
   elbowCTF, reducerL, flowmeterBodyL, lookupFF,
 } from '../data/fitting-dims.js'
 
-export function runDrawing(N, ag21, params, S, topology = null) {
+/**
+ * AG3-1：设备流线二维示意
+ *
+ * @param {number} N - 工作泵台数
+ * @param {Object} ag21 - AG2-1 输出 { L, W, d_spacing, e_wall, w_pump, d_pump, N_total, hasCatalogDims, DN_branch, DN_main, c_wall_m, L_elbow_m, DN_label }
+ * @param {Object} params - AG1-1 输出 { h_active: h_pool, Z_stop: stopLevel, Z_start1: startLevel, Z_alarm_high: alarmLevel }
+ * @param {number} S - 集水坑面积（m²）
+ * @param {Object|null} topology - AG0-1 拓扑
+ * @param {Object} extraInfo - 扩展信息 { Q_single, H_design, P_motor, catalogPump }
+ */
+export function runDrawing(N, ag21, params, S, topology = null, extraInfo = {}) {
   const {
-    L, W, d_spacing, e_wall, w_pump, d_pump, N_total,
+    L, W, d_spacing = 1.0, e_wall = 0.8, w_pump, d_pump, N_total,
     hasCatalogDims, DN_branch = 150, DN_main = 300,
     c_wall_m = 0, L_elbow_m = 0,
   } = ag21
   const { h_active: h_pool, Z_stop: stopLevel, Z_start1: startLevel, Z_alarm_high: alarmLevel } = params
+  const { Q_single, H_design, P_motor, catalogPump } = extraInfo
 
   const topoParams = topology ? topologyToAG31Params(topology) : null
-  const pumpRoomMap = {}
+
+  // 检测旁通管道
+  let hasBypass = false
   if (topoParams) {
-    topoParams.pumpsInOrder.forEach((p, idx) => { pumpRoomMap[idx] = p.roomId })
+    const bypassGv = topoParams.devicesByRoom?.pump_room?.find(d => d.label?.startsWith('旁闸'))
+    const bypassCv = topoParams.devicesByRoom?.pump_room?.find(d => d.label?.startsWith('旁止'))
+    hasBypass = !!(bypassGv && bypassCv)
   }
 
   const L_pool = Math.max(L, Math.sqrt(S * 1.5))
@@ -31,8 +47,8 @@ export function runDrawing(N, ag21, params, S, topology = null) {
   const VW = 1080, VH = 580
   let s = ''
 
-  s += _r(0, 0, VW, VH, '#f4f6f8', 'none')
-  s += _l(572, 15, 572, VH - 15, '#ccc', 1, '5,3')
+  s += _r(0, 0, VW, VH, '#fafafa', 'none')
+  s += _l(572, 15, 572, VH - 15, '#e8e8e8', 1, '5,3')
 
   // ── Plan view (left) ──────────────────────────────────────────────────────────
   const PML = 78, PMR = 48, PMT = 55, PMB = 62
@@ -50,16 +66,17 @@ export function runDrawing(N, ag21, params, S, topology = null) {
 
   s += _t(PW / 2, PMT - 14, '平 面 图（俯 视）', 13, '#1a5276', 'middle', 'bold')
 
-  s += _r(pool_ox, room_y2, L_pool * ps, D_pool * ps, '#d6eaf8', '#2471a3', 2)
+  s += _r(pool_ox, room_y2, L_pool * ps, D_pool * ps, '#f8fbff', '#2471a3', 2)
   const pcx = (pool_ox + pool_x2) / 2, pcy = room_y2 + D_pool * ps / 2
   s += _t(pcx, pcy - 8, '集 水 池', 13, '#1a5276', 'middle', 'bold')
-  s += _t(pcx, pcy + 8, `S=${fmt(S, 1)}m²  h_pool=${fmt(h_pool, 1)}m（竖向）`, 10, '#1a5276')
+  s += _t(pcx, pcy + 8, `S=${fmt(S, 1)}m²  h=${fmt(h_pool, 1)}m`, 10, '#1a5276')
   s += _t(pcx, pcy + 21, '水位见右侧剖面图', 9, '#888')
   s += _l(room_ox, room_y2, room_x2, room_y2, '#5d6d7e', 1.5, '4,3')
 
-  s += _r(room_ox, room_oy, L * ps, W * ps, '#eaf2fb', '#2c3e50', 2.5)
+  s += _r(room_ox, room_oy, L * ps, W * ps, '#f8fbff', '#2c3e50', 2.5)
 
-  s += _l(room_ox + e_wall * ps, hdr_y, room_x2 - e_wall * ps, hdr_y, '#922b21', 4)
+  // 总管（DN_main，2.5px 粗线）
+  s += _l(room_ox + e_wall * ps, hdr_y, room_x2 - e_wall * ps, hdr_y, '#922b21', 2.5)
   s += _t(room_ox + e_wall * ps + 3, hdr_y - 6, 'DN' + ag21.DN_label + ' 出水总管', 10, '#922b21', 'start')
 
   const cb_w = Math.min(45, e_wall * ps * 0.9), cb_h = Math.min(26, 0.3 * ps)
@@ -67,94 +84,128 @@ export function runDrawing(N, ag21, params, S, topology = null) {
   s += _r(cb_x, cb_y, cb_w, cb_h, '#e67e22', '#d35400')
   s += _t(cb_x + cb_w / 2, cb_y + cb_h / 2 + 4, '控制柜', 9, '#fff', 'middle', 'bold')
 
-  // ── 水泵机组（平面图）───────────────────────────────
-  const pumpsInOrder = topoParams ? topoParams.pumpsInOrder : null
-  let pumpRoomIdx = 0
-  for (let i = 0; i < N_total; i++) {
-    const topoP     = pumpsInOrder ? pumpsInOrder[i] : null
-    const isSpare   = topoP ? !!topoP.isSpare : (i === N_total - 1)
-    const inWetWell = pumpRoomMap[i] === 'wet_well'
+  // ── DN 换算 px ──────────────────────────────────────────────────
+  const L_cv_px  = lookupFF(CHECK_VALVE_FF, DN_branch) / 1000 * ps
+  const L_gv_px  = lookupFF(GATE_VALVE_FF, DN_branch) / 1000 * ps
+  const L_str_px = Math.max(2 * DN_branch, 300) / 1000 * ps
+  const L_elb_px = elbowCTF(DN_branch) / 1000 * ps
+  const c_wall_px = c_wall_m * ps
 
-    // 泵外形：用 catalog 尺寸或默认值
-    const pw = (hasCatalogDims && topoP && !inWetWell
-      ? topoP.pump?.dimensions_mm?.b / 1000 ?? w_pump
-      : w_pump) * ps
-    const ph = (hasCatalogDims && topoP && !inWetWell
-      ? topoP.pump?.dimensions_mm?.a / 1000 ?? d_pump
-      : d_pump) * ps
-    const pumpFill   = isSpare ? '#7f8c8d' : '#2471a3'
-    const pumpStroke = isSpare ? '#566573' : '#1a5276'
-    const label      = topoP ? topoP.label : (isSpare ? '备' : 'P' + (i + 1))
-
-    if (inWetWell) {
-      const wx = pool_ox + (i + 1) * (L_pool * ps / (N_total + 1))
-      const wy = room_y2 + D_pool * ps * 0.35
-      s += _r(wx - pw / 2, wy - ph / 2, pw, ph, pumpFill, pumpStroke, 1.5)
-      const fsz = Math.max(9, Math.min(12, pw * 0.4))
-      s += _t(wx, wy + 4, label, fsz, '#fff', 'middle', 'bold')
-      s += _t(wx, wy + ph / 2 + 12, '（集水坑内）', 8, '#2471a3', 'middle')
+  // DN 标注辅助函数（空间不足用引线）
+  const dnLabel = (x, y, dn, horiz = true) => {
+    const label = `DN${dn}`
+    if (horiz) {
+      if (y > 15) return _t(x, y - 10, label, 9, '#555', 'middle')
+      return _leader(x, y + 8, x, y + 28, label, 9, '#555')
     } else {
-      const px = room_ox + (e_wall + pumpRoomIdx * (w_pump + d_spacing)) * ps
-      const py = room_y2 - d_pump * ps
-      const cx = px + pw / 2
-
-      // ── 管件按实际比例绘制（维护间内）────────────────────
-      // DN 换算 px（1mm = ps/1000 m）
-      const dn2px = (dn) => (dn / 1000) * ps
-      const L_cv_px  = lookupFF(CHECK_VALVE_FF, DN_branch) / 1000 * ps
-      const L_gv_px  = lookupFF(GATE_VALVE_FF, DN_branch) / 1000 * ps
-      const L_str_px = Math.max(2 * DN_branch, 300) / 1000 * ps
-      const L_elb_px = elbowCTF(DN_branch) / 1000 * ps
-      const c_wall_px = c_wall_m * ps
-
-      // 管道 Y 坐标（从集水坑墙内壁向远侧墙方向）
-      const floorHole_y = room_y2 - c_wall_px          // 穿墙洞口 Y
-      const elbow_y     = floorHole_y - L_elb_px        // 弯头后端 Y
-      const cv_y        = elbow_y - L_str_px            // 止回阀起点 Y
-      const gv_y        = cv_y - L_cv_px - L_str_px    // 闸阀起点 Y
-      const main_y      = hdr_y                        // 总管 Y（靠近远侧墙）
-
-      // 支管水平线（从泵出口向下到弯头）
-      const pump_out_y = py + ph * 0.4  // 泵出口 Y 约在泵底上方 40%
-      s += _l(cx, pump_out_y, cx, floorHole_y, '#2980b9', 2)  // 出水管竖向段
-      // 弯头：从垂直朝下转为水平朝右，以 floorHole_y 为中心
-      const elbow_r = L_elb_px * 0.5
-      s += _elbow(cx + elbow_r, floorHole_y, elbow_r, 'top', 'right', '#2980b9', 2)
-
-      // 水平支管段（弯头后到闸阀，含止回阀）
-      const pipe_y = floorHole_y - L_elb_px * 0.5  // 弯头中心线 Y
-      const horizEnd = cx + L_elb_px + L_str_px + L_cv_px + L_str_px + L_gv_px
-      s += _l(cx + L_elb_px, pipe_y, horizEnd, pipe_y, '#2980b9', 2)  // 水平管道
-      // 止回阀
-      const cv_cx = cx + L_elb_px + L_str_px + L_cv_px / 2
-      s += _checkValve(cv_cx, pipe_y, L_cv_px / 2, true, '#c0392b')
-      // 闸阀
-      const gv_cx = cx + L_elb_px + L_str_px + L_cv_px + L_str_px + L_gv_px / 2
-      s += _gateValve(gv_cx, pipe_y, L_gv_px / 2, true, '#922b21')
-
-      // 连接到总管（竖向）
-      s += _l(horizEnd, pipe_y, horizEnd, main_y, '#c0392b', 2)
-
-      // ── 泵机组矩形 ────────────────────────────────
-      s += _l(cx, room_y2, cx, pool_y2 - 6, '#2980b9', 1.5, '4,3')
-      s += _l(cx, py, cx, hdr_y, '#c0392b', 1.5)
-      const cv_y2 = py - (py - hdr_y) * 0.35, vs = 5
-      s += _poly(`${cx},${cv_y2 - vs} ${cx + vs},${cv_y2} ${cx},${cv_y2 + vs} ${cx - vs},${cv_y2}`, '#e74c3c')
-      const gv_y2 = py - (py - hdr_y) * 0.65
-      s += _r(cx - 4, gv_y2 - 4, 8, 8, '#e74c3c', '#c0392b')
-      s += _r(px, py, pw, ph, pumpFill, pumpStroke, 1.5)
-      const fsz = Math.max(9, Math.min(12, pw * 0.4))
-      s += _t(cx, py + ph / 2 + 4, label, fsz, '#fff', 'middle', 'bold')
-      pumpRoomIdx++
+      if (x > 15) return _t(x - 10, y, label, 9, '#555', 'end', 'normal')
+      return _leader(x + 8, y, x + 28, y, label, 9, '#555')
     }
   }
 
-  // ── A-A 切割线（可拖动）─────────────────────────────────
-  // 初始位置在泵排中心
-  const aaDragY = room_y2 - d_pump * ps / 2  // module-level via closure
-  const aaLineId = 'aa-drag-line'
-  s += `<line id="${aaLineId}" x1="4" y1="${aaDragY.toFixed(1)}" x2="${room_ox - 6}" y2="${aaDragY.toFixed(1)}" stroke="#7f8c8d" stroke-width="1" stroke-dasharray="6,3"/>` + _t(5, aaDragY - 4, 'A', 11, '#555', 'start', 'bold')
-  s += `<line x1="${room_x2 + 6}" y1="${aaDragY.toFixed(1)}" x2="${PW - 6}" y2="${aaDragY.toFixed(1)}" stroke="#7f8c8d" stroke-width="1" stroke-dasharray="6,3"/>` + _t(PW - 5, aaDragY - 4, 'A', 11, '#555', 'end', 'bold')
+  // ── 潜污泵（集水坑内）───────────────────────────────
+  const pumpsInOrder = topoParams ? topoParams.pumpsInOrder : null
+  const pumpXPositions = []  // 记录每台泵的 X 坐标（用于竖向管道）
+
+  for (let i = 0; i < N_total; i++) {
+    const topoP     = pumpsInOrder ? pumpsInOrder[i] : null
+    const isSpare   = topoP ? !!topoP.isSpare : (i === N_total - 1)
+    const label      = topoP ? topoP.label : (isSpare ? '备' : 'P' + (i + 1))
+
+    // 泵外形：用 catalog 尺寸或默认值
+    const pw = (hasCatalogDims && topoP
+      ? (topoP.pump?.dimensions_mm?.b || w_pump) / 1000
+      : w_pump) * ps
+    const ph = (hasCatalogDims && topoP
+      ? (topoP.pump?.dimensions_mm?.a || d_pump) / 1000
+      : d_pump) * ps
+    const pumpFill   = isSpare ? '#7f8c8d' : '#2471a3'
+    const pumpStroke = isSpare ? '#566573' : '#1a5276'
+
+    // 泵位置：集水坑内，沿 X 方向等间距排列
+    const pumpSpacing = (L_pool * ps) / (N_total + 1)
+    const wx = pool_ox + (i + 1) * pumpSpacing
+    const wy = room_y2 + D_pool * ps * 0.4
+    pumpXPositions.push(wx)
+
+    // 泵矩形（hover 用 data-* 属性）
+    const pumpModel = catalogPump?.pump?.model || ''
+    s += `<g class="pump-group"
+        data-pump="${label}"
+        data-q="${Q_single || ''}"
+        data-h="${H_design || ''}"
+        data-kw="${P_motor || ''}"
+        data-model="${pumpModel}">`
+    s += _r(wx - pw / 2, wy - ph / 2, pw, ph, pumpFill, pumpStroke, 1.5)
+    const fsz = Math.max(9, Math.min(12, pw * 0.4))
+    s += _t(wx, wy + 4, label, fsz, '#fff', 'middle', 'bold')
+    s += '</g>'
+
+    // Q 标注（泵上方）
+    if (Q_single) {
+      s += _t(wx, wy - ph / 2 - 8, `Q=${fmt(Q_single, 0)} m³/h`, 9, '#444', 'middle')
+    }
+
+    // ── 压水管（竖向穿楼板）────────────────────────────
+    // 穿楼板孔（圆形）
+    const floorHoleX = wx
+    const floorHoleY = room_y2
+    s += `<circle cx="${floorHoleX.toFixed(1)}" cy="${floorHoleY.toFixed(1)}" r="6" fill="none" stroke="#2980b9" stroke-width="1.5" stroke-dasharray="3,2"/>`
+
+    // 压水管竖向段（集水坑内 → 穿楼板孔）
+    s += _l(floorHoleX, wy + ph / 2, floorHoleX, floorHoleY, '#2980b9', 1.5, '4,3')
+
+    // ── 分支管路（维护间内，Y 方向水平）────────────────
+    // 从穿楼板孔向总管方向（Y 减小方向）延伸
+    const pipeY = floorHoleY - L_elb_px * 0.5  // 弯头中心线 Y
+    const horizEndX = floorHoleX + L_elb_px + L_str_px + L_cv_px + L_str_px + L_gv_px
+
+    // 水平支管段（单线 1.5px）
+    s += _l(floorHoleX + L_elb_px, pipeY, horizEndX, pipeY, '#2980b9', 1.5)
+    s += dnLabel(floorHoleX + L_elb_px + (horizEndX - floorHoleX - L_elb_px) / 2, pipeY + 10, DN_branch)
+
+    // 弯头
+    const elbow_r = L_elb_px * 0.5
+    s += _elbow(floorHoleX + elbow_r, floorHoleY, elbow_r, 'top', 'right', '#2980b9', 1.5)
+
+    // 止回阀（竖向 horiz=false，颜色红）
+    const cv_cx = floorHoleX + L_elb_px + L_str_px + L_cv_px / 2
+    s += `<g class="valve-group" data-type="止回阀" data-dn="${DN_branch}" data-ff="${lookupFF(CHECK_VALVE_FF, DN_branch)}" data-std="GB/T 12221">`
+    s += _checkValve(cv_cx, pipeY, L_cv_px / 2, false, '#c0392b')
+    s += '</g>'
+
+    // 闸阀（竖向 horiz=false，颜色深红）
+    const gv_cx = floorHoleX + L_elb_px + L_str_px + L_cv_px + L_str_px + L_gv_px / 2
+    s += `<g class="valve-group" data-type="闸阀" data-dn="${DN_branch}" data-ff="${lookupFF(GATE_VALVE_FF, DN_branch)}" data-std="GB/T 12221">`
+    s += _gateValve(gv_cx, pipeY, L_gv_px / 2, false, '#922b21')
+    s += '</g>'
+
+    // 连接到总管（竖向）
+    s += _l(horizEndX, pipeY, horizEndX, hdr_y, '#c0392b', 1.5)
+  }
+
+  // ── 旁通管道（若有）───────────────────────────────
+  if (hasBypass) {
+    // 旁通：从总管引出，绕集水坑边缘回进水
+    const bypassY = hdr_y + 20
+    s += _l(room_x2 - e_wall * ps, bypassY, pool_x2 - 10, bypassY, '#7f8c8d', 1.5, '5,3')
+    s += _l(pool_x2 - 10, bypassY, pool_x2 - 10, room_y2 + 10, '#7f8c8d', 1.5, '5,3')
+    s += _l(pool_x2 - 10, room_y2 + 10, pool_ox + 10, room_y2 + 10, '#7f8c8d', 1.5, '5,3')
+    s += _l(pool_ox + 10, room_y2 + 10, pool_ox + 10, pool_y2 - 10, '#7f8c8d', 1.5, '5,3')
+    s += _t(pool_ox + 20, bypassY - 5, '旁通', 9, '#7f8c8d', 'start')
+  }
+
+  // ── BS EN ISO 128 剖面切割线（可点击拖动）──────────────────
+  const aaDragY = room_oy + W * ps / 2  // 初始在维护间 Y 方向中间
+  // 包在 section-block 组内，透明 rect 作为点击区域
+  s += `<g id="section-block" class="section-block">`
+  // 透明点击区（覆盖维护间垂直范围，左侧+右侧延伸部分）
+  s += _r(0, room_oy - 20, room_ox - 4, room_y2 - room_oy + 40, 'transparent', 'none')
+  s += _r(room_x2 + 4, room_oy - 20, PW - room_x2 - 4, room_y2 - room_oy + 40, 'transparent', 'none')
+  // 切割线本身
+  s += _sectionLineBS(4, room_ox - 6, aaDragY, 'A', '#555')
+  s += _sectionLineBS(room_x2 + 6, PW - 4, aaDragY, 'A', '#555')
+  s += `</g>`
 
   // ── 尺寸标注 ─────────────────────────────────────────────────
   const dim_by = pool_y2 + 28
@@ -171,17 +222,19 @@ export function runDrawing(N, ag21, params, S, topology = null) {
   }
   s += _dh(room_ox, room_ox + e_wall * ps, room_oy + 18, 'e=' + fmt(e_wall, 1) + 'm', '#8e44ad')
 
+  // ── 图例（右下角，更紧凑）──────────────────────────
   const legItems = [
-    ['#2471a3', '工作水泵'], ['#7f8c8d', '备用水泵'], ['#d6eaf8', '集水池'],
-    ['#922b21', '出水总管'], ['#2980b9', '进水管'], ['#c0392b', '止回阀'],
-    ['#922b21', '闸阀'], ['#e67e22', '控制柜'],
+    ['#2471a3', '工作水泵'], ['#7f8c8d', '备用水泵'], ['#f8fbff', '集水池'],
+    ['#922b21', '出水总管'], ['#c0392b', '止回阀'], ['#922b21', '闸阀'],
+    ['#7f8c8d', '旁通管道'], ['#e67e22', '控制柜'],
   ]
-  let lyi = room_oy
-  s += _r(4, lyi - 2, 94, legItems.length * 17 + 4, '#fff', '#ccc', 0.5, 'rx="3" opacity="0.9"')
+  const legX = PW - 110, legY = VH - 160
+  s += _r(legX, legY, 100, legItems.length * 15 + 8, '#fff', '#ccc', 0.8, 'rx="3" opacity="0.92"')
+  let lyi = legY + 6
   legItems.forEach(([c, lbl]) => {
-    s += _r(7, lyi, 11, 11, c, '#666', 0.5)
-    s += _t(21, lyi + 9, lbl, 10, '#333', 'start')
-    lyi += 17
+    s += _r(legX + 6, lyi, 10, 10, c, '#666', 0.5)
+    s += _t(legX + 19, lyi + 8, lbl, 9, '#333', 'start')
+    lyi += 15
   })
 
   const bar_len = ps, bx = room_ox, by_bar = pool_y2 + 10
@@ -212,10 +265,10 @@ export function runDrawing(N, ag21, params, S, topology = null) {
   s += `<g id="${sectionPanelId}">`
 
   s += _t(SX0 + SW / 2, SMT - 14, 'A-A 剖 面 图（沿 泵 轴）', 13, '#1a5276', 'middle', 'bold')
-  s += _r(sec_x1 - 6, grade_y, sec_wx + 12, h_pool * ss + 6, '#eaf2fb', 'none')
+  s += _r(sec_x1 - 6, grade_y, sec_wx + 12, h_pool * ss + 6, '#f8fbff', 'none')
   s += _r(sec_x1, alarm_y, sec_wx, pool_bot_y - alarm_y, '#d6eaf8', 'none')
   s += _r(sec_x1, grade_y, sec_wx, h_pool * ss, 'none', '#2471a3', 2)
-  s += _r(sec_x1, room_top_y, sec_wx, room_H * ss, '#eaf2fb', '#2c3e50', 2.5)
+  s += _r(sec_x1, room_top_y, sec_wx, room_H * ss, '#f8fbff', '#2c3e50', 2.5)
   s += _l(SX0 + 4, grade_y, SX0 + SW - 4, grade_y, '#2c3e50', 2)
   s += _t(sec_x1 - 5, grade_y + 4, '±0.00', 9, '#555', 'end')
   s += _l(sec_x1, stop_y, sec_x2, stop_y, '#27ae60', 1.5, '5,3')
@@ -227,11 +280,13 @@ export function runDrawing(N, ag21, params, S, topology = null) {
   const elev_alarm = alarmLevel - h_pool
   const elev_bot   = -h_pool
 
-  const wl_lx = sec_x2 + 6
-  s += _t(wl_lx, stop_y + 4, '停泵 ' + fmt(elev_stop, 2) + 'm', 10, '#27ae60', 'start')
-  s += _t(wl_lx, start_y + 4, '启泵 ' + fmt(elev_start, 2) + 'm', 10, '#e67e22', 'start')
-  s += _t(wl_lx, alarm_y - 3, '报警 ' + fmt(elev_alarm, 2) + 'm', 10, '#c0392b', 'start')
-  s += _t(wl_lx, pool_bot_y + 4, '池底 ' + fmt(elev_bot, 2) + 'm', 10, '#555', 'start')
+  // 水位标注分组：停泵/报警在左侧，启泵在右侧
+  const wl_lx_left = sec_x1 - 6   // 左侧标注（anchor='end'）
+  const wl_lx_right = sec_x2 + 6  // 右侧标注（anchor='start'）
+  s += _t(wl_lx_left, stop_y + 4, '停泵 ' + fmt(elev_stop, 2) + 'm', 10, '#27ae60', 'end')
+  s += _t(wl_lx_right, start_y + 4, '启泵 ' + fmt(elev_start, 2) + 'm', 10, '#e67e22', 'start')
+  s += _t(wl_lx_left, alarm_y - 3, '报警 ' + fmt(elev_alarm, 2) + 'm', 10, '#c0392b', 'end')
+  s += _t(wl_lx_right, pool_bot_y + 4, '池底 ' + fmt(elev_bot, 2) + 'm', 10, '#555', 'start')
 
   // ── 剖面管道圆截面（根据 aaDragY 位置在三段中切换）────────────────
   // aaDragY 是切割线 Y 坐标（px），相对于 room_y2（维护间下边线）
@@ -244,16 +299,15 @@ export function runDrawing(N, ag21, params, S, topology = null) {
   const r_branch = dn2r(DN_branch)
   const r_main    = dn2r(DN_main)
 
+  s += `<g id="section-pipe-xsection">`
   if (relW <= 0.25) {
     // 靠集水坑墙：泵出口竖管截面 + 弯头 + 大小头
-    const pump_x = sec_cx - Math.min(sec_wx * 0.3, 30) / 2
     s += `<ellipse cx="${sec_cx.toFixed(1)}" cy="${grade_y.toFixed(1)}" rx="${r_branch.toFixed(1)}" ry="${(r_branch * 0.3).toFixed(1)}" fill="none" stroke="#2980b9" stroke-width="2"/>`
     s += _t(sec_cx, grade_y - r_branch - 8, `DN${DN_branch}`, 9, '#2980b9', 'middle')
   } else if (relW <= 0.75) {
     // 中间管道区：支路管道圆形截面 + 止回阀/闸阀
     s += `<circle cx="${sec_cx.toFixed(1)}" cy="${grade_y.toFixed(1)}" r="${r_branch.toFixed(1)}" fill="none" stroke="#2980b9" stroke-width="2"/>`
     s += _t(sec_cx, grade_y - r_branch - 8, `DN${DN_branch}`, 9, '#2980b9', 'middle')
-    // 止回阀/闸阀
     s += _checkValve(sec_cx - sec_wx * 0.15, grade_y, r_branch * 2, true, '#c0392b')
     s += _gateValve(sec_cx + sec_wx * 0.15, grade_y, r_branch * 2, true, '#922b21')
   } else {
@@ -261,11 +315,11 @@ export function runDrawing(N, ag21, params, S, topology = null) {
     s += `<circle cx="${sec_cx.toFixed(1)}" cy="${grade_y.toFixed(1)}" r="${r_main.toFixed(1)}" fill="none" stroke="#922b21" stroke-width="2"/>`
     s += _t(sec_cx, grade_y - r_main - 8, `DN${DN_main}`, 9, '#922b21', 'middle')
     s += _flowmeter(sec_cx, grade_y, r_main * 3, r_main, true, '#1a5276')
-    // 流量计标注（5D/2D 直管段）
     const upLabel = `上游${5}D`, dnLabel = `下游${2}D`
     s += _leader(sec_cx - r_main * 3 - 20, grade_y - r_main - 10, sec_cx - r_main * 3 - 80, grade_y - r_main - 25, upLabel, 9, '#1a5276')
     s += _leader(sec_cx + r_main * 3 + 20, grade_y + r_main + 10, sec_cx + r_main * 3 + 80, grade_y + r_main + 25, dnLabel, 9, '#1a5276')
   }
+  s += `</g>`
 
   const pump_w = Math.min(sec_wx * 0.35, 30), pump_h = Math.min(room_H * ss * 0.25, 28)
   const pump_x = sec_cx - pump_w / 2, pump_y = grade_y - pump_h - 4
@@ -291,44 +345,129 @@ export function runDrawing(N, ag21, params, S, topology = null) {
   el.setAttribute('viewBox', `0 0 ${VW} ${VH}`)
   el.innerHTML = s
 
-  // ── 切割线拖动交互 ─────────────────────────────────────────────────
+  // ── 剖面符号块交互（独立于画布 zoom/pan）──────────────────────────
   let aaCurrentY = aaDragY
-  const aaLineEl = document.getElementById(aaLineId)
-  let draggingAA = false, lastAAY = 0
+  let sectionSelected = false   // 选中状态
+  let sectionDragging = false   // 拖动状态
+  let lastSectionY = 0
 
   function constrainAAY(y) {
     return Math.max(room_oy + 10, Math.min(room_y2 - 10, y))
   }
 
-  aaLineEl?.addEventListener('mousedown', (e) => {
-    draggingAA = true
-    lastAAY = e.clientY
-    e.stopPropagation()
-  })
-
-  function onAAUp() { draggingAA = false }
-  function onAAMove(e) {
-    if (!draggingAA) return
-    const dy = e.clientY - lastAAY
-    lastAAY = e.clientY
-    aaCurrentY = constrainAAY(aaCurrentY + dy)
-    // 更新切割线
-    aaLineEl?.setAttribute('y1', aaCurrentY.toFixed(1))
-    aaLineEl?.setAttribute('y2', aaCurrentY.toFixed(1))
-    // 同步右侧 "A" 标注
-    const labelEls = el.querySelectorAll('text')
-    labelEls.forEach(t => {
-      if (t.textContent === 'A' && parseFloat(t.getAttribute('x')) < 572) {
-        t.setAttribute('y', (aaCurrentY - 4).toFixed(1))
-      }
-    })
-    // 重绘剖面内容（动态更新管道截面段）
-    // 简化为更新 section panel 内容
-    redrawSectionPanel(aaCurrentY)
+  function setSectionSelected(val) {
+    sectionSelected = val
+    el.querySelector('#section-block')?.classList.toggle('section-selected', val)
+    // 选中时：画布 zoom 暂停（通过在 svg 上加 class）
+    el.classList.toggle('section-drag-active', val)
   }
 
-  window.addEventListener('mouseup', onAAUp)
-  window.addEventListener('mousemove', onAAMove)
+  // 点击 section-block → 选中（capture phase 先于 zoom-pan 的 bubble listener）
+  el.addEventListener('mousedown', (e) => {
+    const block = el.querySelector('#section-block')
+    if (!block) return
+    if (block.contains(e.target) || e.target === block) {
+      if (!sectionSelected) setSectionSelected(true)
+      sectionDragging = true
+      lastSectionY = e.clientY
+      e.preventDefault()
+      e.stopPropagation()  // 阻止 zoom-pan 的 bubble listener
+    }
+  }, { capture: true })
+
+  // 全局移动/抬起（拖动用）
+  window.addEventListener('mousemove', onSectionMove)
+  window.addEventListener('mouseup', onSectionUp)
+
+  function onSectionMove(e) {
+    if (!sectionDragging) return
+    e.preventDefault()  // 阻止拖动时选中文本
+    const dy = e.clientY - lastSectionY
+    lastSectionY = e.clientY
+    aaCurrentY = constrainAAY(aaCurrentY + dy)
+    redrawSectionLines(aaCurrentY)
+  }
+
+  function onSectionUp() {
+    sectionDragging = false
+  }
+
+  // 点击空白处 → 取消选中
+  el.addEventListener('mousedown', (e) => {
+    const block = el.querySelector('#section-block')
+    if (sectionSelected && block && !block.contains(e.target) && e.target !== block) {
+      setSectionSelected(false)
+    }
+  })
+
+  // ESC → 取消选中
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && sectionSelected) {
+      setSectionSelected(false)
+    }
+  })
+
+  // 重绘切割线位置（完整重建 section-block SVG 内容）
+  function redrawSectionLines(y) {
+    const color = sectionSelected ? '#e74c3c' : '#555'
+    let html = ''
+    // 透明点击区
+    html += _r(0, room_oy - 20, room_ox - 4, room_y2 - room_oy + 40, 'transparent', 'none')
+    html += _r(room_x2 + 4, room_oy - 20, PW - room_x2 - 4, room_y2 - room_oy + 40, 'transparent', 'none')
+    // 切割线
+    html += _sectionLineBS(4, room_ox - 6, y, 'A', color)
+    html += _sectionLineBS(room_x2 + 6, PW - 4, y, 'A', color)
+    const block = el.querySelector('#section-block')
+    if (block) block.innerHTML = html
+    // 同步更新剖面截面
+    redrawSectionPanel(y)
+  }
+
+  // ── Hover 卡片交互 ─────────────────────────────────────────────────
+  const tooltipPump = document.getElementById('pump-tooltip')
+  const tooltipValve = document.getElementById('valve-tooltip')
+
+  el.querySelectorAll('.pump-group').forEach(g => {
+    g.addEventListener('mouseenter', (e) => {
+      if (!tooltipPump) return
+      const { pump, q, h, kw, model } = g.dataset
+      tooltipPump.innerHTML = `<strong>${pump}</strong><br>Q=${q || '—'} m³/h<br>H=${h || '—'} m<br>P=${kw || '—'} kW<br>${model ? `<small>${model}</small>` : ''}`
+      tooltipPump.style.display = 'block'
+      const rect = el.getBoundingClientRect()
+      tooltipPump.style.left = (e.clientX - rect.left + 10) + 'px'
+      tooltipPump.style.top = (e.clientY - rect.top - 10) + 'px'
+    })
+    g.addEventListener('mouseleave', () => {
+      if (tooltipPump) tooltipPump.style.display = 'none'
+    })
+    g.addEventListener('mousemove', (e) => {
+      if (!tooltipPump) return
+      const rect = el.getBoundingClientRect()
+      tooltipPump.style.left = (e.clientX - rect.left + 10) + 'px'
+      tooltipPump.style.top = (e.clientY - rect.top - 10) + 'px'
+    })
+  })
+
+  el.querySelectorAll('.valve-group').forEach(g => {
+    g.addEventListener('mouseenter', (e) => {
+      if (!tooltipValve) return
+      const { type, dn, ff, std } = g.dataset
+      tooltipValve.innerHTML = `<strong>${type}</strong><br>DN${dn}<br>FF=${ff} mm<br>${std}`
+      tooltipValve.style.display = 'block'
+      const rect = el.getBoundingClientRect()
+      tooltipValve.style.left = (e.clientX - rect.left + 10) + 'px'
+      tooltipValve.style.top = (e.clientY - rect.top - 10) + 'px'
+    })
+    g.addEventListener('mouseleave', () => {
+      if (tooltipValve) tooltipValve.style.display = 'none'
+    })
+    g.addEventListener('mousemove', (e) => {
+      if (!tooltipValve) return
+      const rect = el.getBoundingClientRect()
+      tooltipValve.style.left = (e.clientX - rect.left + 10) + 'px'
+      tooltipValve.style.top = (e.clientY - rect.top - 10) + 'px'
+    })
+  })
 
   // ── 剖面组拖动交互 ─────────────────────────────────────────────────
   let secDragging = false, secLast = { x: 0, y: 0 }
@@ -361,11 +500,9 @@ export function runDrawing(N, ag21, params, S, topology = null) {
   window.addEventListener('mouseup', onSecUp)
   window.addEventListener('mousemove', onSecMove)
 
-  // ── 重置回调（传递给 zoom-pan）────────────────────────────────────
+  // ── 重置回调 ──────────────────────────────────────────────────────
   const onResetCb = () => {
     aaCurrentY = aaDragY
-    aaLineEl?.setAttribute('y1', aaCurrentY.toFixed(1))
-    aaLineEl?.setAttribute('y2', aaCurrentY.toFixed(1))
     secDx = 0; secDy = 0
     secPanel?.setAttribute('transform', '')
   }
@@ -375,12 +512,33 @@ export function runDrawing(N, ag21, params, S, topology = null) {
     { zIn: 'btn-ag31-zin', zOut: 'btn-ag31-zout', zRst: 'btn-ag31-rst' },
     { minScale: 1.0, maxScale: 6, onReset: onResetCb })
 
-  // ── 辅助：重绘剖面内容（根据切割线位置）──────────────────────────
+  // ── 辅助：重绘剖面截面（根据切割线 Y 位置）────────────────────────
   function redrawSectionPanel(aaY) {
-    // 简化实现：更新管道圆截面区域文本
-    const relY2 = (aaY - room_oy) / (room_y2 - room_oy)
-    const relW2 = 1 - relY2
-    // 可通过重新调用 runDrawing 更新，但为性能仅更新标签
-    // 此处简化为不操作（完整重绘在 onReset 时触发）
+    const relY = (aaY - room_oy) / (room_y2 - room_oy)
+    const relW = 1 - relY
+    const dn2r = (dn) => (dn / 1000) * ss
+    const r_branch = dn2r(DN_branch)
+    const r_main   = dn2r(DN_main)
+
+    let html = ''
+    if (relW <= 0.25) {
+      html += `<ellipse cx="${sec_cx.toFixed(1)}" cy="${grade_y.toFixed(1)}" rx="${r_branch.toFixed(1)}" ry="${(r_branch * 0.3).toFixed(1)}" fill="none" stroke="#2980b9" stroke-width="2"/>`
+      html += `<text x="${sec_cx}" y="${(grade_y - r_branch - 8).toFixed(1)}" text-anchor="middle" font-size="9" fill="#2980b9">DN${DN_branch}</text>`
+    } else if (relW <= 0.75) {
+      html += `<circle cx="${sec_cx.toFixed(1)}" cy="${grade_y.toFixed(1)}" r="${r_branch.toFixed(1)}" fill="none" stroke="#2980b9" stroke-width="2"/>`
+      html += `<text x="${sec_cx}" y="${(grade_y - r_branch - 8).toFixed(1)}" text-anchor="middle" font-size="9" fill="#2980b9">DN${DN_branch}</text>`
+      // 止回阀/闸阀符号（简化：矩形表示）
+      html += `<rect x="${(sec_cx - sec_wx * 0.15 - r_branch).toFixed(1)}" y="${(grade_y - r_branch).toFixed(1)}" width="${(r_branch * 2).toFixed(1)}" height="${(r_branch * 2).toFixed(1)}" fill="none" stroke="#c0392b" stroke-width="1.5" transform="rotate(45,${sec_cx.toFixed(1)},${grade_y.toFixed(1)})"/>`
+      html += `<rect x="${(sec_cx + sec_wx * 0.15 - r_branch).toFixed(1)}" y="${(grade_y - r_branch).toFixed(1)}" width="${(r_branch * 2).toFixed(1)}" height="${(r_branch * 2).toFixed(1)}" fill="none" stroke="#922b21" stroke-width="1.5"/>`
+    } else {
+      html += `<circle cx="${sec_cx.toFixed(1)}" cy="${grade_y.toFixed(1)}" r="${r_main.toFixed(1)}" fill="none" stroke="#922b21" stroke-width="2"/>`
+      html += `<text x="${sec_cx}" y="${(grade_y - r_main - 8).toFixed(1)}" text-anchor="middle" font-size="9" fill="#922b21">DN${DN_main}</text>`
+      // 流量计（简化矩形）
+      html += `<rect x="${(sec_cx - r_main * 3).toFixed(1)}" y="${(grade_y - r_main).toFixed(1)}" width="${(r_main * 6).toFixed(1)}" height="${(r_main * 2).toFixed(1)}" fill="none" stroke="#1a5276" stroke-width="1.5"/>`
+      html += `<text x="${sec_cx}" y="${(grade_y + r_main * 2 + 14).toFixed(1)}" text-anchor="middle" font-size="9" fill="#1a5276">流量计</text>`
+    }
+
+    const xsection = el.querySelector('#section-pipe-xsection')
+    if (xsection) xsection.innerHTML = html
   }
 }

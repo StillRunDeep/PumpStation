@@ -363,3 +363,35 @@ export function _leader(x1, y1, x2, y2, label, size = 10, color = '#555') {
     `<line x1="${midX.toFixed(1)}" y1="${(midY - 4).toFixed(1)}" x2="${(midX + 6).toFixed(1)}" y2="${(midY - 4).toFixed(1)}" stroke="${color}" stroke-width="1"/>` +
     _t(x2 + 5, midY + 4, label, size, color, 'start')
 }
+
+/**
+ * BS EN ISO 128 剖面切割线符号
+ * 两端 L 形粗线 + 箭头（等边三角形）+ 中间细虚线 + 字母标注
+ * @param {number} x1 - 切割线起点 x
+ * @param {number} x2 - 切割线终点 x
+ * @param {number} y - 切割线 y 坐标
+ * @param {string} label - 标注字母，默认 'A'
+ * @param {string} color - 颜色，默认 #555
+ */
+export function _sectionLineBS(x1, x2, y, label = 'A', color = '#555') {
+  const arrowSize = 8
+  const lLen = 12  // L 形端线长度
+  // 左端 L 形 + 箭头
+  const leftL = [
+    _l(x1, y - lLen, x1, y + lLen, color, 3),  // L 形垂直段
+    _l(x1 - arrowSize, y, x1, y - arrowSize, color, 2),  // 上箭头斜边
+    _l(x1 - arrowSize, y, x1, y + arrowSize, color, 2),  // 下箭头斜边
+  ].join('')
+  // 右端 L 形 + 箭头
+  const rightL = [
+    _l(x2, y - lLen, x2, y + lLen, color, 3),  // L 形垂直段
+    _l(x2 + arrowSize, y, x2, y - arrowSize, color, 2),  // 上箭头斜边
+    _l(x2 + arrowSize, y, x2, y + arrowSize, color, 2),  // 下箭头斜边
+  ].join('')
+  // 中间细虚线
+  const centerDash = _l(x1 + arrowSize, y, x2 - arrowSize, y, color, 1, '6,3')
+  // 字母 A（两端各一个）
+  const leftA = _t(x1 - arrowSize - 6, y + 4, label, 10, color, 'end', 'bold')
+  const rightA = _t(x2 + arrowSize + 6, y + 4, label, 10, color, 'start', 'bold')
+  return leftL + centerDash + rightL + leftA + rightA
+}

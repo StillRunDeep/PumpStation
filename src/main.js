@@ -277,7 +277,12 @@ function handleSchemeChange(id) {
         return { ...d, outletReducer }
       })
     } : baseTopo
-    runDrawing(ag00Result.N, ag21, ag31Params, ag1Result.S, enrichedTopo)
+    runDrawing(ag00Result.N, ag21, ag31Params, ag1Result.S, enrichedTopo, {
+      Q_single: ag00Result.Q_pump,
+      H_design: ag2Result?.H_total,
+      P_motor: ag2Result?.P_motor,
+      catalogPump: moduleCache.ag12?.displayMatches?.[0] ?? null,
+    })
   }
   // 同步更新方案卡 UI
   document.getElementById('scheme-options').innerHTML = renderSchemeOptions(currentSchemeId)
@@ -517,7 +522,12 @@ async function runCalculation() {
     })
   } : baseTopo
 
-  runDrawing(ag00.N, ag21, ag31Params, ag1Result.S, enrichedTopo)
+  runDrawing(ag00.N, ag21, ag31Params, ag1Result.S, enrichedTopo, {
+    Q_single: ag00.Q_pump,
+    H_design: ag12?.H_total,
+    P_motor: ag12?.P_motor,
+    catalogPump: moduleCache.ag12?.displayMatches?.[0] ?? null,
+  })
 
   // Update repair_zone hint from AG2-1 before reading AG4-1 params
   updateRepairZoneHint(ag21)

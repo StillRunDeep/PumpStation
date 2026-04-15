@@ -12,12 +12,15 @@ import {
  * 否则使用固定默认值（0.6×0.8 m）。
  *
  * @param {number} N - 工作泵台数
- * @param {number} motorPower - 电机功率（kW），参考用，不再用于推算间距
+ * @param {number} [motorPower] - **废弃参数**，仅保留以避免 break。电机功率不再用于推算间距
  * @param {number} N_spare - 备用泵台数，默认 0
  * @param {object} options - { catalogPump, DN_branch, DN_main, d_spacing, e_wall, spaceRules }
- * @param {number} options.d_spacing - 泵间净距（m），直接输入
- * @param {number} options.e_wall - 端部距墙净距（m），直接输入
+ * @param {number} options.d_spacing - 泵间净距（m），直接输入（默认 1.0 m）
+ * @param {number} options.e_wall - 端部距墙净距（m），直接输入（默认 0.8 m）
  * @param {object} options.spaceRules - { pipeToWall_mm, pipeToPipe_mm, minStraight_mm }
+ *
+ * **间距规则说明**：本项目遵循 DSD 渠务署香港规范。d_spacing/e_wall 由调用侧直接提供，
+ * GB 50265-2022 §7 功率→间距规则仅作技术参考。
  */
 export function runMaintenanceRoom(N, motorPower, N_spare = 0, options = {}) {
   const {
