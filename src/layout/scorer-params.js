@@ -38,7 +38,7 @@ export const PARAM_GROUPS = [
   },
   {
     label: '违反惩罚',
-    keys: ['mustViolationPenalty', 'doorAccessPenalty', 'missingRoomPenalty', 'aspectRatioThreshold', 'aspectRatioPenalty'],
+    keys: ['mustViolationPenalty', 'doorAccessPenalty', 'missingRoomPenalty', 'aspectRatioThreshold', 'aspectRatioPenalty', 'utilizationThreshold', 'utilizationStep', 'vertexThreshold', 'vertexStep'],
   },
 ]
 
@@ -62,12 +62,18 @@ export const PARAM_LABELS = {
   doorAccessPenalty:      '可达性违反扣分',
   missingRoomPenalty:     '房间缺失扣分',
   aspectRatioThreshold:   '长宽比超标阈值',
-  aspectRatioPenalty:     '长宽比违反扣分',
+  aspectRatioPenalty:     '形状/比例违反扣分',
+  utilizationThreshold:   '利用率达标阈值',
+  utilizationStep:        '利用率惩罚步长',
+  vertexThreshold:        '顶点数达标阈值',
+  vertexStep:             '顶点惩罚步长',
 }
 
 export const PARAM_STEPS = {
   efficiencyBase:  0.01,
   efficiencyRange: 0.01,
+  utilizationThreshold: 0.01,
+  utilizationStep: 0.01,
 }
 
 export const DEFAULT_SCORER_PARAMS = {
@@ -91,6 +97,10 @@ export const DEFAULT_SCORER_PARAMS = {
   missingRoomPenalty:     200,
   aspectRatioThreshold:   4,
   aspectRatioPenalty:     200,
+  utilizationThreshold:   0.70,
+  utilizationStep:        0.15,
+  vertexThreshold:        6,
+  vertexStep:             2,
 }
 
 const STORAGE_KEY = 'pumpstation_scorer_params'

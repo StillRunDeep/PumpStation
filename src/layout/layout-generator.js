@@ -180,58 +180,64 @@ function findBestRectangleExpansion(grid, roomId) {
 }
 
 function findBestFillExpansion(grid, roomId) {
-    const occupiedCells = grid.roomData[roomId] || [];
-    if (occupiedCells.length === 0) return null;
+  const bbox = grid.getBoundingBox(roomId);
+  if (!bbox) return null;
 
-    const boundaryCells = new Map();
+  const potentialExpansions = [];
 
-    // 1. Identify all unique, empty boundary cells
-    for (const cell of occupiedCells) {
-        const neighbors = [
-            { x: cell.x + 1, y: cell.y }, { x: cell.x - 1, y: cell.y },
-            { x: cell.x, y: cell.y + 1 }, { x: cell.x, y: cell.y - 1 }
-        ];
+  const directions = [
+    { dir: 'W', dx: -1, dy: 0, axis: 'y', start: bbox.minY, end: bbox.maxY },
+    { dir: 'E', dx: 1, dy: 0, axis: 'y', start: bbox.minY, end: bbox.maxY },
+    { dir: 'N', dx: 0, dy: -1, axis: 'x', start: bbox.minX, end: bbox.maxX },
+    { dir: 'S', dx: 0, dy: 1, axis: 'x', start: bbox.minX, end: bbox.maxX }
+  ];
 
-        for (const n of neighbors) {
-            const key = `${n.x},${n.y}`;
-            if (grid.getCell(n.x, n.y) === 0 && !boundaryCells.has(key)) {
-                boundaryCells.set(key, { pos: n, connections: 0 });
-            }
+  for (const { dir, dx, dy, axis, start, end } of directions) {
+    const newXOrY = (dx !== 0) ? (dx > 0 ? bbox.maxX + 1 : bbox.minX - 1) : (dy > 0 ? bbox.maxY + 1 : bbox.minY - 1);
+
+    let currentSegment = [];
+    for (let i = start; i <= end; i++) {
+      const x = (axis === 'x') ? i : newXOrY;
+      const y = (axis === 'y') ? i : newXOrY;
+
+      if (grid.getCell(x, y) === 0) {
+        currentSegment.push({ x, y });
+      } else {
+        if (currentSegment.length > 1) {
+          potentialExpansions.push({ cells: currentSegment, dir });
         }
+        currentSegment = [];
+      }
     }
-
-    if (boundaryCells.size === 0) return null;
-
-    // 2. Calculate connectivity for each boundary cell
-    let bestCell = null;
-    let maxConnections = 0;
-
-    for (const [key, cellInfo] of boundaryCells.entries()) {
-        const { pos } = cellInfo;
-        const neighbors = [
-            { x: pos.x + 1, y: pos.y }, { x: pos.x - 1, y: pos.y },
-            { x: pos.x, y: pos.y + 1 }, { x: pos.x, y: pos.y - 1 }
-        ];
-
-        for (const n of neighbors) {
-            if (grid.getCell(n.x, n.y) === roomId) {
-                cellInfo.connections++;
-            }
-        }
-
-        // 3. Find the cell with the highest connectivity
-        if (cellInfo.connections > maxConnections) {
-            maxConnections = cellInfo.connections;
-            bestCell = cellInfo.pos;
-        }
+    if (currentSegment.length > 1) {
+      potentialExpansions.push({ cells: currentSegment, dir });
     }
+  }
 
-    // Only consider this a "fill" expansion if it's filling a corner or gap (connectivity > 1)
-    if (maxConnections > 1 && bestCell) {
-        return [bestCell];
-    }
+  if (potentialExpansions.length === 0) return null;
 
-    return null;
+  potentialExpansions.forEach(exp => {
+      let tempMinX = bbox.minX, tempMinY = bbox.minY, tempMaxX = bbox.maxX, tempMaxY = bbox.maxY;
+      for(const cell of exp.cells) {
+          tempMinX = Math.min(tempMinX, cell.x);
+          tempMaxX = Math.max(tempMaxX, cell.x);
+          tempMinY = Math.min(tempMinY, cell.y);
+          tempMaxY = Math.max(tempMaxY, cell.y);
+      }
+      const newW = tempMaxX - tempMinX + 1;
+      const newD = tempMaxY - tempMinY + 1;
+      const aspectRatio = Math.max(newW / newD, newD / newW);
+      exp.aspectScore = aspectRatio;
+      exp.size = exp.cells.length;
+  });
+
+  potentialExpansions.sort((a, b) => {
+    if (a.aspectScore < b.aspectScore) return -1;
+    if (a.aspectScore > b.aspectScore) return 1;
+    return b.size - a.size;
+  });
+
+  return potentialExpansions.length > 0 ? potentialExpansions[0].cells : null;
 }
 
 function findSmartLineExpansion(grid, roomId) {
@@ -276,9 +282,40 @@ function findSmartLineExpansion(grid, roomId) {
     return bestSegment ? bestSegment.cells : null;
 }
 
+/**
+ * Counts the number of vertices (corners) of a room's orthogonal polygon on the grid.
+ * A rectangle has 4, L-shape has 6, U-shape has 8.
+ */
+function countRoomVertices(grid, roomId) {
+    const bbox = grid.getBoundingBox(roomId);
+    if (!bbox) return 0;
+
+    let vertices = 0;
+    // Check all intersection points in and around the bounding box
+    for (let y = bbox.minY; y <= bbox.maxY + 1; y++) {
+        for (let x = bbox.minX; x <= bbox.maxX + 1; x++) {
+            let count = 0;
+            if (grid.getCell(x - 1, y - 1) === roomId) count++;
+            if (grid.getCell(x, y - 1) === roomId) count++;
+            if (grid.getCell(x - 1, y) === roomId) count++;
+            if (grid.getCell(x, y) === roomId) count++;
+
+            if (count === 1 || count === 3) {
+                vertices++;
+            } else if (count === 2) {
+                // Diagonal cells of the same room meeting at this vertex
+                if ((grid.getCell(x - 1, y - 1) === roomId && grid.getCell(x, y) === roomId) ||
+                    (grid.getCell(x, y - 1) === roomId && grid.getCell(x - 1, y) === roomId)) {
+                    vertices += 2;
+                }
+            }
+        }
+    }
+    return vertices;
+}
+
 function expandRooms(grid, rooms, rng, onRegularExpansionComplete = null, onRectExpansionComplete = null) {
     let iterations = 0;
-    let regularExpansionStalled = false;
     let rectExpansionHookFired = false;
     // currentArea is now in grid cell counts
     let growingRooms = rooms.map(r => ({ ...r, currentArea: r.id in grid.roomData ? 1 : 0 }));
@@ -304,20 +341,41 @@ function expandRooms(grid, rooms, rng, onRegularExpansionComplete = null, onRect
                 expansionCells = findBestFillExpansion(grid, roomToGrow.id);
             }
 
-            if (!expansionCells && !regularExpansionStalled) {
-                // This is the moment regular expansion has finished for all rooms.
-                // Trigger the callback to capture this state.
-                if (onRegularExpansionComplete) {
-                    onRegularExpansionComplete(grid);
-                }
-                regularExpansionStalled = true; // Ensure this only fires once
-            }
-
             if (!expansionCells) {
                 expansionCells = findSmartLineExpansion(grid, roomToGrow.id);
             }
 
             if (expansionCells && expansionCells.length > 0) {
+                // Morphological constraint: limit non-corridor rooms to 8 vertices (U-shape)
+                if (roomToGrow.id !== 'corridor_l1') {
+                    // Dry run: apply expansion to a clone of the room's cell list
+                    // (More efficient than cloning the whole grid)
+                    const originalCells = [...(grid.roomData[roomToGrow.id] || [])];
+                    const testGrid = {
+                        getCell: (x, y) => {
+                            if (expansionCells.some(c => c.x === x && c.y === y)) return roomToGrow.id;
+                            return grid.getCell(x, y);
+                        },
+                        getBoundingBox: (id) => {
+                            if (id !== roomToGrow.id) return grid.getBoundingBox(id);
+                            const combined = [...originalCells, ...expansionCells];
+                            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                            for (const c of combined) {
+                                if (c.x < minX) minX = c.x;
+                                if (c.x > maxX) maxX = c.x;
+                                if (c.y < minY) minY = c.y;
+                                if (c.y > maxY) maxY = c.y;
+                            }
+                            return { minX, minY, maxX, maxY };
+                        }
+                    };
+                    
+                    if (countRoomVertices(testGrid, roomToGrow.id) > 8) {
+                        // Expansion would make the room too complex, skip this type of expansion for this room
+                        continue;
+                    }
+                }
+
                 for (const cell of expansionCells) {
                     if (roomToGrow.currentArea < roomToGrow.targetGridCount) {
                         grid.addRoomCell(roomToGrow.id, cell.x, cell.y);
@@ -342,6 +400,11 @@ function expandRooms(grid, rooms, rng, onRegularExpansionComplete = null, onRect
 
     if (iterations === MAX_EXPANSION_ITERATIONS) {
         console.warn("Expansion reached max iterations.");
+    }
+
+    // Capture the state after ALL growth stages (Rect, Fill/LU, and SmartLine) are complete
+    if (onRegularExpansionComplete) {
+        onRegularExpansionComplete(grid);
     }
 }
 
@@ -580,6 +643,8 @@ function finalizeLayout(grid) {
         y: bbox.minY * GRID_SIZE,
         w: (bbox.maxX - bbox.minX + 1) * GRID_SIZE,
         d: (bbox.maxY - bbox.minY + 1) * GRID_SIZE,
+        actualArea: grid.roomData[roomId].length * GRID_SIZE * GRID_SIZE,
+        vertices: countRoomVertices(grid, roomId)
       };
 
       const roomDef = ROOM_DEFS[roomId];
@@ -622,6 +687,25 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId 
 
   const groundRooms = allRooms.filter(r => r.floor === 'ground');
   const level1Rooms = allRooms.filter(r => r.floor === 'level1');
+
+  // --- Auto-scale room areas to meet target utilization (prevents rooms from being too small in a large building) ---
+  const TARGET_UTILIZATION = 0.9;
+  const totalGridArea = gridW * gridH;
+
+  const autoscaleFloor = (rooms) => {
+    const currentTotalTarget = rooms.reduce((sum, r) => sum + r.targetGridCount, 0);
+    if (currentTotalTarget > 0 && (currentTotalTarget / totalGridArea) < TARGET_UTILIZATION) {
+      const scaleFactor = (totalGridArea * TARGET_UTILIZATION) / currentTotalTarget;
+      console.log(`[Info] ${rooms[0]?.floor} 层房间面积占比过低 (${(currentTotalTarget / totalGridArea * 100).toFixed(1)}%)，自动放大目标面积，系数: ${scaleFactor.toFixed(2)}`);
+      rooms.forEach(r => {
+        r.targetGridCount = Math.round(r.targetGridCount * scaleFactor);
+      });
+    }
+  };
+
+  if (groundRooms.length > 0) autoscaleFloor(groundRooms);
+  if (level1Rooms.length > 0) autoscaleFloor(level1Rooms);
+  // --- End auto-scale ---
 
   // 2. Create and process grids for each floor
   let groundGridBeforeGaps, groundGridAfterRect;

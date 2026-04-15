@@ -42,8 +42,8 @@ function assignVariantTypes(variants) {
 /** Score and enrich a single raw variant. */
 function scoreVariant(template) {
   const evaluated = evaluateTemplate(template)
-  const { score, spaceEfficiency, efficiencyScore, accessibilityScore, diversityPenalty, breakdown } = scoreLayout(evaluated)
-  return { ...evaluated, score, spaceEfficiency, efficiencyScore, accessibilityScore, diversityPenalty, breakdown }
+  const { score, spaceEfficiency, efficiencyScore, accessibilityScore, aspectRatio, diversityPenalty, breakdown } = scoreLayout(evaluated)
+  return { ...evaluated, score, spaceEfficiency, efficiencyScore, accessibilityScore, aspectRatio, diversityPenalty, breakdown }
 }
 
 /**

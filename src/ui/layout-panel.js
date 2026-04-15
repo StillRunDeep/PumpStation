@@ -5,6 +5,7 @@ import {
   saveScorerParams,
 } from '../layout/scorer-params.js'
 import { scoreLayout } from '../layout/scorer.js'
+import { ROOM_DEFS } from '../layout/room-defs.js'
 
 // Module-level state
 let _variants = []
@@ -130,37 +131,65 @@ function buildBreakdownHtml(v) {
   const negColor = '#c0392b'
   const color = x => x >= 0 ? posColor : negColor
 
+  const getLabel = id => ROOM_DEFS[id]?.label || id
+  const fmtDetails = ids => ids && ids.length > 0 ? `<div style="font-size:10px;color:#999;font-weight:normal;line-height:1.2;margin-top:2px">${ids.map(getLabel).join(', ')}</div>` : ''
+
+  // Ordered according to PARAM_GROUPS in scorer-params.js
   const items = [
-    { label: '基础分',    val: bd.base      ?? 10000, always: true },
+    { label: '基础分',    val: bd.base ?? 10000, always: true },
     { label: '占地面积',  val: bd.footprint ?? 0 },
-    { label: '临近关系',  val: bd.adjacency ?? 0 },
-    { label: '走廊完整',  val: bd.corridor  ?? 0 },
-    { label: '变压器布置',val: bd.trafo     ?? 0 },
-    { label: '风机房距离',val: bd.fanRoom   ?? 0 },
+    { label: '变压器布置',val: bd.trafo ?? 0 },
+    { label: '风机房距离',val: bd.fanRoom ?? 0 },
+    { 
+      label: '临近关系' + (bd.adjMustCount || bd.adjShouldCount ? ` <small style="color:#999;font-weight:normal">(M:${bd.adjMustCount || 0}, S:${bd.adjShouldCount || 0})</small>` : ''), 
+      val: bd.adjacency ?? 0 
+    },
+    { label: '走廊完整',  val: bd.corridor ?? 0 },
     { label: '空间有效率',val: bd.efficiency ?? 0 },
     { label: '便捷性',   val: bd.accessibility ?? 0 },
-    { label: '约束违反',  val: bd.violations ?? 0 },
-    { label: '可达性违反',val: bd.doorAccess  ?? 0 },
-    { label: '房间缺失',  val: bd.missingRooms ?? 0 },
-    { label: '长宽比违反',val: bd.aspectRatio  ?? 0 },
+    { 
+      label: '约束违反' + (bd.violationCount ? ` <small style="color:#999;font-weight:normal">(${bd.violationCount}项)</small>` : '') + fmtDetails(bd.violationDetails), 
+      val: bd.violations ?? 0 
+    },
+    { 
+      label: '可达性违反' + (bd.doorAccessCount ? ` <small style="color:#999;font-weight:normal">(${bd.doorAccessCount}处)</small>` : '') + fmtDetails(bd.doorAccessDetails), 
+      val: bd.doorAccess ?? 0 
+    },
+    { 
+      label: '房间缺失' + (bd.missingRoomCount ? ` <small style="color:#999;font-weight:normal">(${bd.missingRoomCount}间)</small>` : '') + fmtDetails(bd.missingRoomDetails), 
+      val: bd.missingRooms ?? 0 
+    },
+    { 
+      label: '长宽比惩罚' + (bd.aspectRatioCount ? ` <small style="color:#999;font-weight:normal">(${bd.aspectRatioCount}项)</small>` : '') + fmtDetails(bd.aspectRatioDetails), 
+      val: bd.aspectRatio ?? 0 
+    },
   ]
 
-  const rows = items
-    .filter(item => item.always || item.val !== 0)
-    .map(item => `
+  const activeItems = items.filter(item => item.always || item.val !== 0)
+  const rows = []
+  
+  for (let i = 0; i < activeItems.length; i += 2) {
+    const it1 = activeItems[i]
+    const it2 = activeItems[i + 1]
+    rows.push(`
       <tr>
-        <td style="padding:3px 8px;color:#555;white-space:nowrap">${item.label}</td>
-        <td style="padding:3px 8px;text-align:right;font-weight:600;color:${color(item.val)}">${bdSign(item.val)}</td>
-      </tr>`)
-    .join('')
+        <td style="padding:2px 8px;color:#777;width:25%">${it1.label}</td>
+        <td style="padding:2px 8px;text-align:right;font-weight:600;color:${color(it1.val)};width:25%;border-right:1px solid #eee">${bdSign(it1.val)}</td>
+        ${it2 ? `
+          <td style="padding:2px 8px;color:#777;width:25%;padding-left:15px">${it2.label}</td>
+          <td style="padding:2px 8px;text-align:right;font-weight:600;color:${color(it2.val)};width:25%">${bdSign(it2.val)}</td>
+        ` : '<td colspan="2"></td>'}
+      </tr>
+    `)
+  }
 
   return `
     <h4 style="margin:0 0 8px;font-size:12px;color:#555">得分明细</h4>
-    <table style="border-collapse:collapse;width:100%;font-size:12px">
-      ${rows}
-      <tr style="border-top:1px solid #bdc3c7">
-        <td style="padding:5px 8px;font-weight:700;color:#1a3a5c">合计</td>
-        <td style="padding:5px 8px;text-align:right;font-weight:700;font-size:14px;color:#1a5276">${v.score}</td>
+    <table style="border-collapse:collapse;width:100%;font-size:11px;background:#fff;border:1px solid #eee">
+      ${rows.join('')}
+      <tr style="background:#f8f9f9;border-top:1px solid #ddd">
+        <td colspan="3" style="padding:4px 8px;font-weight:700;color:#1a3a5c;text-align:right">合计总分</td>
+        <td style="padding:4px 8px;text-align:right;font-weight:700;font-size:13px;color:#1a5276">${v.score}</td>
       </tr>
     </table>`
 }
