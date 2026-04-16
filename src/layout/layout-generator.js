@@ -1,4 +1,9 @@
 import { ROOM_DEFS } from './room-defs.js';
+import { checkAdjacency } from './adjacency.js';
+import { placeDoors } from './door-placer.js';
+import { SCORER_PARAMS } from './scorer-params.js';
+import { evaluateCheckpointA, GROUND_MUST_EXT, LEVEL1_MUST_FACE_CORRIDOR } from './scorer.js';
+import { adjacent, centerX, centerY, touchesExteriorNonSouth, CONSTRAINT_CHECKS, evaluateTemplate } from './placer.js';
 
 export const GRID_SIZE = 500; // 500mm per grid cell — single source of truth, imported by ag41/ag42
 const MAX_EXPANSION_ITERATIONS = 5000;
@@ -18,6 +23,7 @@ class Grid {
     this.height = height;
     this.grid = Array(height).fill(null).map(() => Array(width).fill(0)); // 0 for empty
     this.roomData = {}; // Stores cells occupied by each room
+    this.bboxes = {};   // Cache for getBoundingBox
   }
 
   clone() {
@@ -25,15 +31,22 @@ class Grid {
     // Deep copy the grid array
     newGrid.grid = this.grid.map(row => [...row]);
 
-    // Perform a robust, manual deep copy of the roomData object
+    // Perform a robust, manual deep copy of the roomData and bboxes
     const newRoomData = {};
     for (const roomId in this.roomData) {
-        if (Object.prototype.hasOwnProperty.call(this.roomData, roomId)) {
-            // Create a new array for the cells and a new object for each cell
-            newRoomData[roomId] = this.roomData[roomId].map(cell => ({ ...cell }));
-        }
+      if (Object.prototype.hasOwnProperty.call(this.roomData, roomId)) {
+        newRoomData[roomId] = this.roomData[roomId].map(cell => ({ ...cell }));
+      }
     }
     newGrid.roomData = newRoomData;
+    
+    const newBboxes = {};
+    for (const roomId in this.bboxes) {
+      if (Object.prototype.hasOwnProperty.call(this.bboxes, roomId)) {
+        newBboxes[roomId] = { ...this.bboxes[roomId] };
+      }
+    }
+    newGrid.bboxes = newBboxes;
 
     return newGrid;
   }
@@ -56,39 +69,46 @@ class Grid {
       this.roomData[roomId] = [];
     }
     this.roomData[roomId].push({x, y});
+    
+    // Incremental BBox update (O(1))
+    if (!this.bboxes[roomId]) {
+      this.bboxes[roomId] = { minX: x, minY: y, maxX: x, maxY: y };
+    } else {
+      const b = this.bboxes[roomId];
+      if (x < b.minX) b.minX = x;
+      if (y < b.minY) b.minY = y;
+      if (x > b.maxX) b.maxX = x;
+      if (y > b.maxY) b.maxY = y;
+    }
+    
     this.setCell(x, y, roomId);
   }
 
   getBoundingBox(roomId) {
-    const cells = this.roomData[roomId];
-    if (!cells || cells.length === 0) return null;
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const cell of cells) {
-      if (cell.x < minX) minX = cell.x;
-      if (cell.y < minY) minY = cell.y;
-      if (cell.x > maxX) maxX = cell.x;
-      if (cell.y > maxY) maxY = cell.y;
-    }
-    return { minX, minY, maxX, maxY };
+    return this.bboxes[roomId] || null;
   }
 }
 
-function createWeightMap(grid, rooms) {
-  const weightMap = new Grid(grid.width, grid.height);
-  for (let y = 0; y < grid.height; y++) {
-    for (let x = 0; x < grid.width; x++) {
-      let weight = 1;
-      if (x < 2 || x > grid.width - 3 || y < 2 || y > grid.height - 3) {
-        weight = 0.5;
+const weightMapCache = new Map();
+
+function createWeightMap(gridW, gridH) {
+  const cacheKey = `${gridW}x${gridH}`;
+  if (weightMapCache.has(cacheKey)) return weightMapCache.get(cacheKey);
+
+  const weightMap = Array(gridH).fill(null).map(() => Array(gridW).fill(1));
+  for (let y = 0; y < gridH; y++) {
+    for (let x = 0; x < gridW; x++) {
+      if (x < 2 || x > gridW - 3 || y < 2 || y > gridH - 3) {
+        weightMap[y][x] = 0.5;
       }
-      weightMap.setCell(x, y, weight);
     }
   }
+  weightMapCache.set(cacheKey, weightMap);
   return weightMap;
 }
 
 function placeRoomSeeds(grid, rooms, rng) {
-    const weightMap = createWeightMap(grid, rooms);
+    const weightMap = createWeightMap(grid.width, grid.height);
     const placedSeeds = {};
 
     for (const room of rooms) {
@@ -100,7 +120,7 @@ function placeRoomSeeds(grid, rooms, rng) {
             const y = Math.floor(rng() * grid.height);
 
             if (grid.getCell(x, y) === 0) {
-                const weight = weightMap.getCell(x, y);
+                const weight = weightMap[y][x];
                 if (weight > maxWeight) {
                     maxWeight = weight;
                     bestPos = { x, y };
@@ -145,7 +165,7 @@ function getRoomMinCrossWidth(grid, roomId) {
 
 const CORRIDOR_MIN_WIDTH_CELLS = 3; // 3 × 500mm = 1500mm
 
-function findBestRectangleExpansion(grid, roomId, preferElongated = false) {
+function findBestRectangleExpansion(grid, roomId, preferElongated = false, preferredDir = null) {
   const bbox = grid.getBoundingBox(roomId);
   if (!bbox) return null;
 
@@ -193,6 +213,13 @@ function findBestRectangleExpansion(grid, roomId, preferElongated = false) {
 
   if (potentialExpansions.length === 0) return null;
 
+  // If a preferred direction is set and has a valid expansion, return it immediately
+  // (accessibility goal overrides aspect-ratio optimisation)
+  if (preferredDir) {
+    const preferred = potentialExpansions.find(exp => exp.dir === preferredDir);
+    if (preferred) return preferred.cells;
+  }
+
   const currentW = bbox.maxX - bbox.minX + 1;
   const currentD = bbox.maxY - bbox.minY + 1;
 
@@ -218,7 +245,7 @@ function findBestRectangleExpansion(grid, roomId, preferElongated = false) {
   return potentialExpansions[0].cells;
 }
 
-function findBestFillExpansion(grid, roomId) {
+function findBestFillExpansion(grid, roomId, preferredDir = null) {
   const bbox = grid.getBoundingBox(roomId);
   if (!bbox) return null;
 
@@ -270,6 +297,12 @@ function findBestFillExpansion(grid, roomId) {
   });
 
   potentialExpansions.sort((a, b) => {
+    // Preferred direction always ranks before non-preferred directions
+    if (preferredDir) {
+      const aPref = a.dir === preferredDir ? 1 : 0;
+      const bPref = b.dir === preferredDir ? 1 : 0;
+      if (aPref !== bPref) return bPref - aPref;
+    }
     if (a.aspectScore < b.aspectScore) return -1;
     if (a.aspectScore > b.aspectScore) return 1;
     return b.size - a.size;
@@ -352,16 +385,374 @@ function countRoomVertices(grid, roomId) {
     return vertices;
 }
 
-function expandRooms(grid, rooms, rng, onRegularExpansionComplete = null, onRectExpansionComplete = null) {
+// ── Checkpoint A Relaxed Door-Access helpers ─────────────────────────────────
+
+/**
+ * BFS over empty cells (value === 0) to extract connected empty regions.
+ * Returns both metadata (id, cells) and a 2D grid of region IDs.
+ */
+function getConnectedEmptyRegions(grid) {
+  const regionIdGrid = Array(grid.height).fill(null).map(() => Array(grid.width).fill(-1));
+  const regions = []; 
+
+  for (let y = 0; y < grid.height; y++) {
+    for (let x = 0; x < grid.width; x++) {
+      if (grid.getCell(x, y) === 0 && regionIdGrid[y][x] === -1) {
+        const regionId = regions.length;
+        const regionCells = [];
+        const queue = [x, y];
+        regionIdGrid[y][x] = regionId;
+        let head = 0;
+
+        while (head < queue.length) {
+          const cx = queue[head++];
+          const cy = queue[head++];
+          regionCells.push({x: cx, y: cy});
+
+          for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const nx = cx + dx, ny = cy + dy;
+            if (nx >= 0 && nx < grid.width && ny >= 0 && ny < grid.height) {
+              if (grid.getCell(nx, ny) === 0 && regionIdGrid[ny][nx] === -1) {
+                regionIdGrid[ny][nx] = regionId;
+                queue.push(nx, ny);
+              }
+            }
+          }
+        }
+        regions.push({ id: regionId, cells: regionCells });
+      }
+    }
+  }
+  return { regions, regionIdGrid };
+}
+
+/**
+ * Traces the boundary of an empty region clockwise and returns the circular sequence
+ * of adjacent room IDs (or 'EXTERIOR').
+ */
+function getRegionBoundarySequence(grid, regionIdGrid, regionId) {
+  const cells = new Set();
+  let startX = Infinity, startY = Infinity;
+  
+  // Find all cells and the top-leftmost one to start
+  for (let y = 0; y < grid.height; y++) {
+    for (let x = 0; x < grid.width; x++) {
+      if (regionIdGrid[y][x] === regionId) {
+        cells.add(`${x},${y}`);
+        if (y < startY || (y === startY && x < startX)) {
+          startX = x; startY = y;
+        }
+      }
+    }
+  }
+  if (cells.size === 0) return [];
+
+  const sequence = [];
+  const visitedEdges = new Set();
+  
+  // Directions: 0:North, 1:East, 2:South, 3:West
+  const dx = [0, 1, 0, -1];
+  const dy = [-1, 0, 1, 0];
+
+  function getNeighborId(x, y, dir) {
+    const nx = x + dx[dir], ny = y + dy[dir];
+    if (nx < 0 || nx >= grid.width || ny < 0 || ny >= grid.height) {
+      return ny === grid.height ? -1 : 'EXTERIOR'; // South wall is not 'EXTERIOR' for access
+    }
+    const val = grid.getCell(nx, ny);
+    return val === 0 ? null : val; // null if it's another empty cell (shouldn't happen on boundary)
+  }
+
+  // Find the first external edge (North edge of top-left cell is guaranteed to be an edge)
+  let curX = startX, curY = startY, curDir = 0; 
+  const startEdge = `${curX},${curY},${curDir}`;
+
+  // Simple edge-following algorithm
+  let safety = 0;
+  while (safety++ < 2000) {
+    const edgeKey = `${curX},${curY},${curDir}`;
+    if (visitedEdges.has(edgeKey)) break;
+    visitedEdges.add(edgeKey);
+
+    const neighbor = getNeighborId(curX, curY, curDir);
+    if (neighbor && neighbor !== -1) {
+      sequence.push(neighbor);
+    }
+
+    // Try to turn "right" (clockwise)
+    const rightDir = (curDir + 1) % 4;
+    const rx = curX + dx[rightDir], ry = curY + dy[rightDir];
+    
+    if (cells.has(`${rx},${ry}`)) {
+      // Can move into the right cell, so turn right and move
+      curX = rx; curY = ry;
+      curDir = (curDir + 3) % 4; // Face "left" relative to new cell to continue boundary
+    } else {
+      // Cannot move right, so turn left and stay in current cell
+      curDir = (curDir + 3) % 4;
+    }
+  }
+
+  // Simplify: collapse consecutive duplicates, and handle circular wrap
+  const simplified = [];
+  for (const id of sequence) {
+    if (simplified.length === 0 || simplified[simplified.length - 1] !== id) {
+      simplified.push(id);
+    }
+  }
+  if (simplified.length > 1 && simplified[0] === simplified[simplified.length - 1]) {
+    simplified.pop();
+  }
+  return simplified;
+}
+
+/**
+ * Checks if a set of required connections (pairs) can be satisfied by non-crossing
+ * chords within a circular sequence of IDs.
+ */
+function canSatisfyNonCrossing(sequence, pairs) {
+  if (pairs.length === 0) return true;
+  
+  // Map each ID to its indices in the sequence
+  const idToIndices = {};
+  sequence.forEach((id, idx) => {
+    if (!idToIndices[id]) idToIndices[id] = [];
+    idToIndices[id].push(idx);
+  });
+
+  // Check if all needed IDs are even present
+  for (const [a, b] of pairs) {
+    if (!idToIndices[a] || !idToIndices[b]) return false;
+  }
+
+  const n = sequence.length;
+
+  function crosses(chord1, chord2) {
+    let [a, b] = chord1;
+    let [c, d] = chord2;
+    if (a > b) [a, b] = [b, a];
+    if (c > d) [c, d] = [d, c];
+    // Two chords (a,b) and (c,d) cross if one endpoint of (c,d) is inside (a,b) 
+    // and the other is outside.
+    const cIn = c > a && c < b;
+    const dIn = d > a && d < b;
+    return cIn !== dIn;
+  }
+
+  function solve(pairIdx, activeChords) {
+    if (pairIdx === pairs.length) return true;
+    
+    const [idA, idB] = pairs[pairIdx];
+    for (const i of idToIndices[idA]) {
+      for (const j of idToIndices[idB]) {
+        if (i === j) continue;
+        const newChord = [i, j];
+        
+        let valid = true;
+        for (const existing of activeChords) {
+          if (crosses(newChord, existing)) {
+            valid = false; break;
+          }
+        }
+        
+        if (valid) {
+          if (solve(pairIdx + 1, [...activeChords, newChord])) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  return solve(0, []);
+}
+
+/**
+ * Relaxed door-access check for Checkpoint A.
+ * Multiple rooms can share an empty region if their topological paths don't cross.
+ */
+function computeRelaxedDoorAccess(groundGrid, level1Grid) {
+  const { doorAccessPenalty } = SCORER_PARAMS;
+  const ids = [];
+  const bridgedIds = new Set();
+
+  function processFloor(grid, mustExt, extraPairs = []) {
+    const { regions, regionIdGrid } = getConnectedEmptyRegions(grid);
+    const unmet = [];
+    
+    // Initial strict check
+    for (const roomId of mustExt) {
+      if (!grid.roomData[roomId]) continue;
+      const p = bboxToPlacement(grid.getBoundingBox(roomId));
+      if (!touchesExteriorNonSouth(p, grid.width * GRID_SIZE, grid.height * GRID_SIZE)) {
+        unmet.push({ room: roomId, target: 'EXTERIOR' });
+      }
+    }
+    for (const [a, b] of extraPairs) {
+      if (!grid.roomData[a] || !grid.roomData[b]) continue;
+      const pA = bboxToPlacement(grid.getBoundingBox(a));
+      const pB = bboxToPlacement(grid.getBoundingBox(b));
+      const bW = grid.width * GRID_SIZE, bD = grid.height * GRID_SIZE;
+      const directlyAdjacent = adjacent(pA, pB);
+      const aExtOk = directlyAdjacent || touchesExteriorNonSouth(pA, bW, bD);
+      const bExtOk = directlyAdjacent || touchesExteriorNonSouth(pB, bW, bD);
+      if (!aExtOk) unmet.push({ room: a, target: b });
+      if (!bExtOk) unmet.push({ room: b, target: a });
+    }
+
+    if (unmet.length === 0) return;
+
+    // Try to satisfy unmet requirements through regions
+    const satisfiedInFloor = new Set();
+
+    for (const region of regions) {
+      const sequence = getRegionBoundarySequence(grid, regionIdGrid, region.id);
+      if (sequence.length === 0) continue;
+
+      // Find all remaining requirements that this region *could* satisfy
+      const possible = unmet.filter(req => !satisfiedInFloor.has(req.room) && 
+                                           sequence.includes(req.room) && 
+                                           sequence.includes(req.target));
+      
+      if (possible.length === 0) continue;
+
+      // Try to satisfy as many as possible (Topological Non-Crossing)
+      // Greedy approach: try largest subset, then smaller ones
+      for (let size = possible.length; size >= 1; size--) {
+        // Simple case: try all at once first
+        const subset = possible.slice(0, size);
+        const pairs = subset.map(r => [r.room, r.target]);
+        if (canSatisfyNonCrossing(sequence, pairs)) {
+          subset.forEach(s => {
+            satisfiedInFloor.add(s.room);
+            bridgedIds.add(s.room);
+          });
+          break;
+        }
+      }
+    }
+
+    // Add remaining truly unmet to global list
+    unmet.forEach(req => {
+      if (!satisfiedInFloor.has(req.room)) {
+        if (!ids.includes(req.room)) ids.push(req.room);
+      }
+    });
+  }
+
+  // Ground Floor: Exterior access for main rooms + Mutual access for parking/repair
+  processFloor(groundGrid, GROUND_MUST_EXT, [['parking', 'repair_zone']]);
+  
+  // Level 1: Corridor access
+  processFloor(level1Grid, [], LEVEL1_MUST_FACE_CORRIDOR.map(r => [r, 'corridor_l1']));
+
+  return { penalty: -doorAccessPenalty * ids.length, ids, bridgedIds };
+}
+
+// ── Phase 2 Accessibility helpers ────────────────────────────────────────────
+
+/** Convert grid bounding box (cell units) to mm-based placement object. */
+function bboxToPlacement(bbox) {
+  return {
+    x: bbox.minX * GRID_SIZE,
+    y: bbox.minY * GRID_SIZE,
+    w: (bbox.maxX - bbox.minX + 1) * GRID_SIZE,
+    d: (bbox.maxY - bbox.minY + 1) * GRID_SIZE
+  };
+}
+
+/**
+ * Check whether a room's accessibility requirement is already satisfied
+ * given the current grid state. Used by Phase 2 to determine growth priority.
+ */
+function isAccessibilityMet(roomId, grid, buildingW, buildingD) {
+  const bbox = grid.getBoundingBox(roomId);
+  if (!bbox) return true;
+  const p = bboxToPlacement(bbox);
+
+  if (GROUND_MUST_EXT.includes(roomId)) {
+    return touchesExteriorNonSouth(p, buildingW, buildingD);
+  }
+  if (LEVEL1_MUST_FACE_CORRIDOR.includes(roomId)) {
+    const corrBbox = grid.getBoundingBox('corridor_l1');
+    if (!corrBbox) return false;
+    return adjacent(p, bboxToPlacement(corrBbox));
+  }
+  if (roomId === 'repair_zone') {
+    const parkBbox = grid.getBoundingBox('parking');
+    if (!parkBbox) return false;
+    return adjacent(p, bboxToPlacement(parkBbox)) || touchesExteriorNonSouth(p, buildingW, buildingD);
+  }
+  return true;
+}
+
+/**
+ * Return the preferred expansion direction for a room that has not yet met
+ * its accessibility requirement. Returns 'W'|'E'|'N'|'S'|null.
+ */
+function getPreferredDirection(roomId, grid, buildingW, buildingD) {
+  const bbox = grid.getBoundingBox(roomId);
+  if (!bbox) return null;
+  const cx = (bbox.minX + bbox.maxX + 1) / 2 * GRID_SIZE;
+  const cy = (bbox.minY + bbox.maxY + 1) / 2 * GRID_SIZE;
+
+  if (GROUND_MUST_EXT.includes(roomId)) {
+    // Nearest of west / north / east exterior walls
+    const distW = cx;
+    const distN = cy;
+    const distE = buildingW - cx;
+    const minDist = Math.min(distW, distN, distE);
+    if (minDist === distW) return 'W';
+    if (minDist === distN) return 'N';
+    return 'E';
+  }
+  if (LEVEL1_MUST_FACE_CORRIDOR.includes(roomId)) {
+    const corrBbox = grid.getBoundingBox('corridor_l1');
+    if (!corrBbox) return null;
+    const corrCx = (corrBbox.minX + corrBbox.maxX + 1) / 2 * GRID_SIZE;
+    const corrCy = (corrBbox.minY + corrBbox.maxY + 1) / 2 * GRID_SIZE;
+    const dx = corrCx - cx;
+    const dy = corrCy - cy;
+    if (Math.abs(dx) >= Math.abs(dy)) return dx > 0 ? 'E' : 'W';
+    return dy > 0 ? 'S' : 'N';
+  }
+  if (roomId === 'repair_zone') {
+    const parkBbox = grid.getBoundingBox('parking');
+    if (!parkBbox) return null;
+    const parkCx = (parkBbox.minX + parkBbox.maxX + 1) / 2 * GRID_SIZE;
+    const parkCy = (parkBbox.minY + parkBbox.maxY + 1) / 2 * GRID_SIZE;
+    const dx = parkCx - cx;
+    const dy = parkCy - cy;
+    if (Math.abs(dx) >= Math.abs(dy)) return dx > 0 ? 'E' : 'W';
+    return dy > 0 ? 'S' : 'N';
+  }
+  return null;
+}
+
+function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionComplete = null, onRectExpansionComplete = null, stopAfterStage1 = false) {
     let iterations = 0;
     let stage = 1; // Stage 1: Rectangular only, Stage 2: All types allowed
     // currentArea is now in grid cell counts
-    let growingRooms = rooms.map(r => ({ ...r, currentArea: r.id in grid.roomData ? 1 : 0 }));
+    let growingRooms = rooms.map(r => ({ 
+      ...r, 
+      currentArea: grid.roomData[r.id] ? grid.roomData[r.id].length : 0 
+    }));
+    
+    let needsSort = true;
 
     while (iterations < MAX_EXPANSION_ITERATIONS) {
-        let activeRooms = growingRooms.filter(room => room.currentArea < room.targetGridCount);
-        
-        // If all rooms reached their target area
+        // Stage 2: also include rooms that haven't met accessibility, even if they've reached
+        // their area target — they need to keep growing toward the exterior wall / corridor.
+        let activeRooms;
+        if (stage === 2) {
+          activeRooms = growingRooms.filter(room =>
+            room.currentArea < room.targetGridCount ||
+            !isAccessibilityMet(room.id, grid, buildingW, buildingD)
+          );
+        } else {
+          activeRooms = growingRooms.filter(room => room.currentArea < room.targetGridCount);
+        }
+
+        // If all rooms reached their target area (and accessibility in Stage 2)
         if (activeRooms.length === 0) {
             if (stage === 1) {
                 // If we finished Stage 1 perfectly, take the rect snapshot before finishing
@@ -370,8 +761,22 @@ function expandRooms(grid, rooms, rng, onRegularExpansionComplete = null, onRect
             break;
         }
 
-        // Sort by completion ratio
-        activeRooms.sort((a, b) => (a.currentArea / a.targetGridCount) - (b.currentArea / b.targetGridCount));
+        // Sort rooms by priority:
+        // Stage 1: area completion ratio only (lower ratio = higher priority)
+        // Stage 2: accessibility-unmet rooms first, then by area completion ratio
+        if (needsSort) {
+          if (stage === 2) {
+            activeRooms.sort((a, b) => {
+              const aOk = isAccessibilityMet(a.id, grid, buildingW, buildingD);
+              const bOk = isAccessibilityMet(b.id, grid, buildingW, buildingD);
+              if (aOk !== bOk) return aOk ? 1 : -1; // unmet comes first
+              return (a.currentArea / a.targetGridCount) - (b.currentArea / b.targetGridCount);
+            });
+          } else {
+            activeRooms.sort((a, b) => (a.currentArea / a.targetGridCount) - (b.currentArea / b.targetGridCount));
+          }
+          needsSort = false;
+        }
 
         let growthHappenedThisCycle = false;
 
@@ -390,6 +795,7 @@ function expandRooms(grid, rooms, rng, onRegularExpansionComplete = null, onRect
                         roomToGrow.currentArea++;
                     }
                     growthHappenedThisCycle = true;
+                    needsSort = true;
                     break; // Only grow one room per cycle to re-evaluate sorting
                 }
             }
@@ -399,20 +805,31 @@ function expandRooms(grid, rooms, rng, onRegularExpansionComplete = null, onRect
                 if (onRectExpansionComplete) {
                     onRectExpansionComplete(grid); // Take snapshot AFTER all possible rect growths are done
                 }
-                stage = 2; // Proceed to L/U shape phase
-                continue; // Restart the while loop for Stage 2
+                // If stopAfterStage1 is enabled, stop here; otherwise proceed to Phase 2
+                if (!stopAfterStage1) {
+                    stage = 2; // Proceed to L/U shape phase
+                    continue; // Restart the while loop for Stage 2
+                } else {
+                    break; // Stop completely for Checkpoint A evaluation
+                }
             }
         } else if (stage === 2) {
             // Stage 2: Allow all types of expansion
             for (const roomToGrow of activeRooms) {
                 const isCorridor = roomToGrow.id === 'corridor_l1';
-                let expansionCells = findBestRectangleExpansion(grid, roomToGrow.id, isCorridor);
+
+                // Compute accessibility direction bias for rooms that haven't met their requirement
+                const accessOk = isAccessibilityMet(roomToGrow.id, grid, buildingW, buildingD);
+                const prefDir = accessOk ? null : getPreferredDirection(roomToGrow.id, grid, buildingW, buildingD);
+
+                let expansionCells = findBestRectangleExpansion(grid, roomToGrow.id, isCorridor, prefDir);
 
                 if (!expansionCells) {
-                    expansionCells = findBestFillExpansion(grid, roomToGrow.id);
+                    expansionCells = findBestFillExpansion(grid, roomToGrow.id, prefDir);
                 }
 
                 if (!expansionCells) {
+                    // findSmartLineExpansion: concave-fill logic is self-converging; no dir bias needed
                     expansionCells = findSmartLineExpansion(grid, roomToGrow.id);
                 }
 
@@ -455,6 +872,7 @@ function expandRooms(grid, rooms, rng, onRegularExpansionComplete = null, onRect
                         }
                     }
                     growthHappenedThisCycle = true;
+                    needsSort = true;
                     break;
                 }
             }
@@ -881,6 +1299,205 @@ function findAdjacentRoomIds(grid, roomId) {
   return [...adjacent]
 }
 
+
+// ── Phase 3b: Area-deviation driven space swap ──────────────────────────────
+
+/**
+ * Categorizes rooms into donors (oversized) and recipients (undersized) based on
+ * deviation from their target area.
+ * @returns {{donors: Array, recipients: Array, roomDataMap: Map<string, object>}}
+ */
+function categorizeRooms(grid, rooms) {
+  const roomDataMap = new Map();
+  const donors = [];
+  const recipients = [];
+
+  for (const room of rooms) {
+    const currentArea = grid.roomData[room.id]?.length || 0;
+    const targetArea = room.targetGridCount;
+    if (targetArea === 0) continue;
+
+    const deviation = (currentArea - targetArea) / targetArea;
+    const data = { id: room.id, currentArea, targetArea, deviation };
+    roomDataMap.set(room.id, data);
+
+    if (deviation > 0) {
+      donors.push(data);
+    } else if (deviation < 0) {
+      recipients.push(data);
+    }
+  }
+  return { donors, recipients, roomDataMap };
+}
+
+/**
+ * Finds geometrically significant chunks of cells on the boundary of a donor
+ * that could be transferred to a recipient.
+ * Implements "Boundary Push" and "Boundary Consolidation" strategies.
+ * @returns {Array<Array<object>>} A list of cell chunks, where each chunk is an array of cells.
+ */
+function findCandidateChunks(grid, donorId, recipientId) {
+    const chunks = [];
+
+    const boundaryCells = (grid.roomData[donorId] || []).filter(cell => {
+        return [[1,0],[-1,0],[0,1],[0,-1]].some(([dx, dy]) => grid.getCell(cell.x+dx, cell.y+dy) === recipientId);
+    });
+    if (boundaryCells.length === 0) return [];
+
+    const boundarySet = new Set(boundaryCells.map(c => `${c.x},${c.y}`));
+    const visited = new Set();
+
+    // Strategy A: Boundary Push (finds contiguous boundary segments)
+    for (const cell of boundaryCells) {
+        const key = `${cell.x},${cell.y}`;
+        if (visited.has(key)) continue;
+
+        // Find all connected cells in this boundary segment using BFS
+        const q = [cell];
+        const currentSegment = [];
+        visited.add(key);
+
+        while(q.length > 0) {
+            const current = q.shift();
+            currentSegment.push(current);
+
+            for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+                const neighborKey = `${current.x+dx},${current.y+dy}`;
+                if (boundarySet.has(neighborKey) && !visited.has(neighborKey)) {
+                    visited.add(neighborKey);
+                    q.push({x: current.x+dx, y: current.y+dy});
+                }
+            }
+        }
+
+        // From a contiguous segment, create all possible sub-segments up to max size
+        if (currentSegment.length > 0) {
+            for (let i = 0; i < currentSegment.length; i++) {
+                for (let j = i; j < currentSegment.length; j++) {
+                    const subChunk = currentSegment.slice(i, j + 1);
+                    if (subChunk.length > 0 && subChunk.length <= SWAP_MAX_CELLS) {
+                        chunks.push(subChunk);
+                    }
+                }
+            }
+        }
+    }
+
+    // Strategy B: Boundary Consolidation (single-cell protrusions)
+    const protrusions = boundaryCells.filter(cell => {
+      const recipientNeighbors = [[1,0],[-1,0],[0,1],[0,-1]].filter(([dx, dy]) => grid.getCell(cell.x+dx, cell.y+dy) === recipientId).length;
+      const donorNeighbors = [[1,0],[-1,0],[0,1],[-1,-1]].filter(([dx, dy]) => grid.getCell(cell.x+dx, cell.y+dy) === donorId).length;
+      return (recipientNeighbors - donorNeighbors) > 0; // Cell is more "in" the recipient
+    });
+
+    chunks.push(...protrusions.map(p => [p])); // Add all protrusions as single-cell chunks
+
+    // Deduplicate chunks to ensure we evaluate each unique chunk only once
+    const uniqueChunks = [];
+    const seenChunks = new Set();
+    for (const chunk of chunks) {
+        chunk.sort((a,b) => a.x - b.x || a.y - b.y);
+        const chunkKey = chunk.map(c => `${c.x},${c.y}`).join(';');
+        if (!seenChunks.has(chunkKey)) {
+            uniqueChunks.push(chunk);
+            seenChunks.add(chunkKey);
+        }
+    }
+
+    return uniqueChunks;
+}
+
+
+/**
+ * Evaluates all candidate chunks to find the one that maximizes quality improvement.
+ * @returns {object|null} The best transfer found, or null if no improvement is possible.
+ */
+function findBestTransfer(grid, donors, roomDataMap, roomMap) {
+  let bestTransfer = null;
+  let maxQualityImprovement = 1e-6; // Minimum improvement to proceed
+
+  for (const donor of donors) {
+    const adjacentRecipients = findAdjacentRoomIds(grid, donor.id)
+      .filter(id => roomDataMap.has(id) && roomDataMap.get(id).deviation < 0);
+
+    for (const recipientId of adjacentRecipients) {
+      const recipientRoom = roomMap.get(recipientId);
+      if (!recipientRoom) continue;
+      const donorRoom = roomMap.get(donor.id);
+
+      const candidateChunks = findCandidateChunks(grid, donor.id, recipientId);
+
+      for (const chunk of candidateChunks) {
+        if (chunk.length === 0) continue;
+
+        const qualityBefore = computeRoomQuality(grid, donorRoom) + computeRoomQuality(grid, recipientRoom);
+
+        // Simulate transfer in a cloned grid to be safe
+        const tempGrid = grid.clone();
+
+        const donorCells = tempGrid.roomData[donor.id] || [];
+        tempGrid.roomData[donor.id] = donorCells.filter(c => !chunk.some(t => t.x === c.x && t.y === c.y));
+        chunk.forEach(c => tempGrid.addRoomCell(recipientId, c.x, c.y));
+
+        if (isRoomConnected(tempGrid, donor.id)) {
+          const qualityAfter = computeRoomQuality(tempGrid, donorRoom) + computeRoomQuality(tempGrid, recipientRoom);
+          const improvement = qualityAfter - qualityBefore;
+
+          if (improvement > maxQualityImprovement) {
+            maxQualityImprovement = improvement;
+            bestTransfer = {
+              cells: chunk,
+              donorId: donor.id,
+              recipientId: recipientId,
+              qualityImprovement: improvement,
+            };
+          }
+        }
+      }
+    }
+  }
+  return bestTransfer;
+}
+
+/**
+ * Phase 3b: Area-deviation driven space swap.
+ * Iteratively transfers cell chunks from oversized rooms (donors) to
+ * adjacent undersized rooms (recipients) to maximize a composite quality score.
+ */
+function runAreaSwap(grid, rooms) {
+  const MAX_ITERATIONS = 50; // Fewer iterations as chunks are more impactful
+  const roomMap = new Map(rooms.map(r => [r.id, r]));
+
+  for (let i = 0; i < MAX_ITERATIONS; i++) {
+    const { donors, recipients, roomDataMap } = categorizeRooms(grid, rooms);
+
+    if (donors.length === 0 || recipients.length === 0) {
+      if (DEBUG_LAYOUT) console.log(`[AreaSwap] Terminating: no more donors or recipients.`);
+      break;
+    }
+
+    const bestTransfer = findBestTransfer(grid, donors, roomDataMap, roomMap);
+
+    if (bestTransfer && bestTransfer.qualityImprovement > 0) {
+      const { cells, donorId, recipientId } = bestTransfer;
+
+      // Perform the actual transfer on the main grid
+      grid.roomData[donorId] = grid.roomData[donorId].filter(c => !cells.some(t => t.x === c.x && t.y === c.y));
+      cells.forEach(c => {
+        grid.addRoomCell(recipientId, c.x, c.y);
+      });
+
+      if (DEBUG_LAYOUT) console.log(`[AreaSwap] Iter ${i}: Transferred chunk of ${cells.length} from ${donorId} -> ${recipientId}, quality gain ${bestTransfer.qualityImprovement.toFixed(2)}`);
+    } else {
+      if (DEBUG_LAYOUT) console.log(`[AreaSwap] Converged after ${i} iterations.`);
+      break;
+    }
+    if (i === MAX_ITERATIONS - 1) {
+        if (DEBUG_LAYOUT) console.log(`[AreaSwap] Reached max iterations.`);
+    }
+  }
+}
+
 /**
  * Phase 3b: 空间交换协商。
  * 对质量差或面积偏差大的候选房间，与相邻房间协商边界格子的转让。
@@ -1016,7 +1633,11 @@ export function buildPartialResult(groundGrid, level1Grid, buildingW, buildingD)
   }
 }
 
-export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId = 'CG', variantIdx = 1, prefix = 'R', initialSeeds = null) {
+
+
+
+export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParams = {}, groupId = 'CG', variantIdx = 1, prefix = 'R', initialSeeds = null) {
+  const { enableAreaSwap = false } = runParams;
   const rng = makeRng(seed);
 
   const gridW = Math.floor(bW / GRID_SIZE);
@@ -1071,20 +1692,6 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId 
     groundSeeds = placeRoomSeeds(groundGrid, groundRooms, rng);
   }
   groundGridAfterSeeds = groundGrid.clone();
-  expandRooms(groundGrid, groundRooms, rng, (gridState) => {
-    groundGridBeforeGaps = gridState.clone();
-  }, (gridState) => {
-    groundGridAfterRect = gridState.clone();
-  });
-  if (!groundGridAfterRect) groundGridAfterRect = groundGrid.clone();
-  if (!groundGridBeforeGaps) groundGridBeforeGaps = groundGrid.clone(); // Fallback if regular expansion never stalled
-
-  // ── Phase 3a: 无面积限制 L/U 生长 ──────────────────────────────────
-  runPhase3Growth(groundGrid, groundRooms, rng)
-  // ── Phase 3b: 空间交换协商 ─────────────────────────────────────────
-  //runSpaceSwap(groundGrid, groundRooms)
-  // ── Phase 3c: 边界清理与空隙填充 ──────────────────────────────────
-  fillGaps(groundGrid, groundRooms);
 
   let level1GridBeforeGaps, level1GridAfterRect;
   const level1Grid = new Grid(gridW, gridH);
@@ -1101,18 +1708,85 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId 
     level1Seeds = placeRoomSeeds(level1Grid, level1Rooms, rng);
   }
   level1GridAfterSeeds = level1Grid.clone();
-  expandRooms(level1Grid, level1Rooms, rng, (gridState) => {
+
+  // --- Checkpoint A (Phase 1 snapshot evaluation) ---
+
+  // 先用 stopAfterStage1=true 跑 Phase 1 来评估 Checkpoint A
+  expandRooms(groundGrid, groundRooms, rng, bW, bD, (gridState) => {
+    groundGridBeforeGaps = gridState.clone();
+  }, (gridState) => {
+    groundGridAfterRect = gridState.clone();
+  }, true); // stopAfterStage1 = true
+   if (!groundGridAfterRect) groundGridAfterRect = groundGrid.clone();
+   if (!groundGridBeforeGaps) groundGridBeforeGaps = groundGrid.clone();
+
+  expandRooms(level1Grid, level1Rooms, rng, bW, bD, (gridState) => {
     level1GridBeforeGaps = gridState.clone();
   }, (gridState) => {
     level1GridAfterRect = gridState.clone();
-  });
+  }, true); // stopAfterStage1 = true
   if (!level1GridAfterRect) level1GridAfterRect = level1Grid.clone();
-  if (!level1GridBeforeGaps) level1GridBeforeGaps = level1Grid.clone(); // Fallback
+  if (!level1GridBeforeGaps) level1GridBeforeGaps = level1Grid.clone();
+
+  const snapshot = buildPartialResult(groundGridAfterRect, level1GridAfterRect, bW, bD);
+  const evaluated = evaluateTemplate(snapshot, { skipDoors: true });
+  // Use relaxed door-access for Checkpoint A: rooms adjacent to an unclaimed empty region
+  // that bridges to the exterior wall / corridor are considered virtually connected.
+  // Strict door-access is still used in Checkpoint B and full scoring (Step 9).
+  const relaxedDoorAccess = computeRelaxedDoorAccess(groundGridAfterRect, level1GridAfterRect);
+  // Also filter out violations for rooms that passed via the bridging mechanism.
+  // (evaluateTemplate adds ext_access violations independently of doorAccess, causing
+  //  double-counting that would fail Checkpoint A even when doorAccess is relaxed.)
+  const relaxedEvaluated = relaxedDoorAccess.bridgedIds.size > 0
+    ? { ...evaluated, violations: evaluated.violations.filter(v => !relaxedDoorAccess.bridgedIds.has(v.room)) }
+    : evaluated;
+  const checkpointADiagnostic = evaluateCheckpointA(relaxedEvaluated, relaxedDoorAccess);
+
+  // If the layout fails Checkpoint A, skip expensive Phase 2/3 growth
+  if (!checkpointADiagnostic.passes) {
+    const groundLayout = finalizeLayout(groundGridAfterRect).ground;
+    const level1Layout = finalizeLayout(level1GridAfterRect).level1;
+    return {
+      id: `${prefix}-${groupId}-${variantIdx}`,
+      label: `约束生长法 (未通过红线)`,
+      desc: `建筑 ${(bW / 1000).toFixed(1)}m×${(bD / 1000).toFixed(1)}m`,
+      groundPlacements: groundLayout,
+      level1Placements: level1Layout,
+      buildingW: bW,
+      buildingD: bD,
+      groupId,
+      variantIdx,
+      _debug: {
+        roomTargets: allRooms,
+        ground: { seeds: groundSeeds, gridAfterSeeds: groundGridAfterSeeds, gridAfterRect: groundGridAfterRect, gridBeforeGaps: groundGridAfterRect, gridAfterGaps: groundGridAfterRect },
+        level1: { seeds: level1Seeds, gridAfterSeeds: level1GridAfterSeeds, gridAfterRect: level1GridAfterRect, gridBeforeGaps: level1GridAfterRect, gridAfterGaps: level1GridAfterRect },
+      },
+      checkpointADiagnostic,
+    };
+  }
+
+  // ── Phase 2: 对通过 Checkpoint A 的方案，继续跑 Phase 2（L/U 形扩展） ──────────────────
+  expandRooms(groundGrid, groundRooms, rng, bW, bD, (gridState) => {
+    groundGridBeforeGaps = gridState.clone();
+  }, null, false); // stopAfterStage1 = false，完整执行 Phase 2
+  if (!groundGridBeforeGaps) groundGridBeforeGaps = groundGrid.clone();
+
+  expandRooms(level1Grid, level1Rooms, rng, bW, bD, (gridState) => {
+    level1GridBeforeGaps = gridState.clone();
+  }, null, false); // stopAfterStage1 = false，完整执行 Phase 2
+  if (!level1GridBeforeGaps) level1GridBeforeGaps = level1Grid.clone();
+
+  // ── Phase 3a: 无面积限制 L/U 生长 ──────────────────────────────────
+  runPhase3Growth(groundGrid, groundRooms, rng)
+  // ── Phase 3b: 空间交换协商 ─────────────────────────────────────────
+  if (enableAreaSwap) runAreaSwap(groundGrid, groundRooms)
+  // ── Phase 3c: 边界清理与空隙填充 ──────────────────────────────────
+  fillGaps(groundGrid, groundRooms);
 
   // ── Phase 3a: 无面积限制 L/U 生长 ──────────────────────────────────
   runPhase3Growth(level1Grid, level1Rooms, rng)
   // ── Phase 3b: 空间交换协商 ─────────────────────────────────────────
-  //runSpaceSwap(level1Grid, level1Rooms)
+  if (enableAreaSwap) runAreaSwap(level1Grid, level1Rooms)
   // ── Phase 3c: 边界清理与空隙填充 ──────────────────────────────────
   fillGaps(level1Grid, level1Rooms);
 
@@ -1136,6 +1810,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId 
       roomTargets: allRooms,
       ground: { seeds: groundSeeds, gridAfterSeeds: groundGridAfterSeeds, gridAfterRect: groundGridAfterRect, gridBeforeGaps: groundGridBeforeGaps, gridAfterGaps: groundGrid },
       level1: { seeds: level1Seeds, gridAfterSeeds: level1GridAfterSeeds, gridAfterRect: level1GridAfterRect, gridBeforeGaps: level1GridBeforeGaps, gridAfterGaps: level1Grid },
-    }
+    },
+    checkpointADiagnostic,
   };
 }

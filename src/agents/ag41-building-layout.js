@@ -1,25 +1,10 @@
 import { generateConstrainedLayout, buildPartialResult, GRID_SIZE } from '../layout/layout-generator.js'
 import { getDefaultUserParams, getUserConfirmedParams } from '../layout/user-params.js'
 import { centerX, centerY, evaluateTemplate } from '../layout/placer.js'
-import { scoreHardRedlines, scoreSpatialQuality } from '../layout/scorer.js'
+import { scoreSpatialQuality } from '../layout/scorer.js'
 
 // 每生成一个方案后 yield，让浏览器处理积压的事件（点击等）
 const yieldToEventLoop = () => new Promise(resolve => setTimeout(resolve, 0))
-
-/**
- * 检查点 A：对矩形扩展阶段（Phase 1）结束后的快照进行硬性功能红线评价。
- * @returns {{ passes: boolean, missingRoomCount: number, doorAccessCount: number, violationCount: number }}
- */
-function checkCheckpointA(layout, buildingW, buildingD) {
-  const snapshot = buildPartialResult(
-    layout._debug.ground.gridAfterRect,
-    layout._debug.level1.gridAfterRect,
-    buildingW, buildingD
-  )
-  const evaluated = evaluateTemplate(snapshot)
-  const { passes, missingRoomCount, doorAccessCount, violationCount } = scoreHardRedlines(evaluated)
-  return { passes, missingRoomCount, doorAccessCount, violationCount }
-}
 
 /**
  * 检查点 B：对 L/U 形扩展阶段（Phase 2）结束后的快照进行第一+第二梯队评价，
@@ -58,12 +43,10 @@ export async function runAG41(existingVariants = [], isCancelled = () => false) 
   const sortedExisting = [...existingVariants].sort((a, b) => b.score - a.score);
   const numToGenerate = 9;
   const MAX_ATTEMPTS = 50; // 防止无限循环
-  const passing = []; // 通过检查点 A 的方案
+  const results = [];
   let pCount = 0;
   let rCount = 0;
   let attempts = 0;
-  let lastFailure = null;    // 最后一次检查点 A 失败的诊断信息
-  const failed = [];         // 收集未通过检查点 A 的方案，供前端降级展示
 
   // 优先尝试生成遗传算法方案（最多 2 个，防止第一名影响过大）
   // 组A: 第1名 + 第5名；组B: 第5名 + 第9名
@@ -74,50 +57,42 @@ export async function runAG41(existingVariants = [], isCancelled = () => false) 
       [sortedExisting[4], rank9],
     ];
 
-    for (let i = 0; i < 2 && passing.length < numToGenerate; i++) {
-      if (isCancelled()) return passing
+    for (let i = 0; i < 2 && results.length < numToGenerate; i++) {
+      if (isCancelled()) return results
       const [parentA, parentB] = parentPairs[i];
       const seed = Math.floor(Math.random() * 100000) + pCount;
       const t = generateHybridLayout(parentA, parentB, seed, buildingW, buildingD, roomTargetAreas, 'S', pCount + 1);
       attempts++;
-      const checkA = checkCheckpointA(t, buildingW, buildingD);
-      if (checkA.passes) {
-        passing.push(t);
-        pCount++;
-      } else {
-        lastFailure = checkA;
-        if (failed.length < numToGenerate) failed.push(t);
-      }
+
+      // 调用 evaluateTemplate 确保包含 violations、adjacency 等属性
+      const score = evaluateTemplate(t);
+      results.push(score);
+      pCount++;
       await yieldToEventLoop()
     }
   }
 
-  // 用纯随机方案补足至 9 个（含检查点 A 过滤）
-  while (passing.length < numToGenerate && attempts < MAX_ATTEMPTS) {
-    if (isCancelled()) return passing
+  // 用纯随机方案补足至 9 个
+  while (results.length < numToGenerate && attempts < MAX_ATTEMPTS) {
+    if (isCancelled()) return results
     const seed = Math.floor(Math.random() * 100000) + rCount;
-    const t = generateConstrainedLayout(seed, buildingW, buildingD, roomTargetAreas, 'S', rCount + 1, 'R');
+    const t = generateConstrainedLayout(seed, buildingW, buildingD, roomTargetAreas, { enableAreaSwap: true }, 'S', rCount + 1, 'R');
     attempts++;
-    const checkA = checkCheckpointA(t, buildingW, buildingD);
-    if (checkA.passes) {
-      passing.push(t);
-      rCount++;
-    } else {
-      lastFailure = checkA;
-      if (failed.length < numToGenerate) failed.push(t);
-    }
+
+    // 调用 evaluateTemplate 确保包含 violations、adjacency 等属性
+    const score = evaluateTemplate(t);
+    results.push(score);
+    rCount++;
     await yieldToEventLoop()
   }
 
-  // 将诊断信息与降级候选附加到返回数组，供调用方展示提示
-  passing._checkpointADiagnostic = lastFailure;
-  passing._attemptCount = attempts;
-  passing._failedCandidates = failed;
+  // 将尝试次数附加到返回数组，供调用方展示
+  results._attemptCount = attempts;
 
-  // 检查点 B：对 9 个通过方案按第一+第二梯队得分排序
-  applyCheckpointB(passing, buildingW, buildingD)
+  // 检查点 B：对所有方案按第一+第二梯队得分排序
+  applyCheckpointB(results, buildingW, buildingD)
 
-  return passing;
+  return results;
 }
 
 /**
@@ -174,5 +149,5 @@ function generateHybridLayout(parentA, parentB, seed, bW, bD, roomAreas, groupId
       }
   }
 
-  return generateConstrainedLayout(seed, bW, bD, roomAreas, groupId, variantIdx, 'P', childSeeds);
+  return generateConstrainedLayout(seed, bW, bD, roomAreas, { enableAreaSwap: true }, groupId, variantIdx, 'P', childSeeds);
 }

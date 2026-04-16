@@ -72,7 +72,8 @@ export const CONSTRAINT_CHECKS = {
  * Evaluate a template: check all constraints for all placed rooms.
  * Returns { feasible, placements, violations }.
  */
-export function evaluateTemplate(template) {
+export function evaluateTemplate(template, options = {}) {
+  const { skipDoors = false } = options;
   const allPlacements = { ...template.groundPlacements, ...template.level1Placements }
   const violations = []
 
@@ -96,8 +97,8 @@ export function evaluateTemplate(template) {
     }
   }
 
-  // Place doors
-  const doors = placeDoors(allPlacements);
+  // Place doors (skipped if requested for performance, e.g. at Checkpoint A)
+  const doors = skipDoors ? [] : placeDoors(allPlacements);
 
   const result = {
     ...template, // Spread the original template properties

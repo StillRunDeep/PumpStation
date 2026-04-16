@@ -97,14 +97,27 @@ export function renderScorerParamsPanel(params) {
 
 function renderComparisonTable(variants) {
   const rows = variants.map((v, i) => {
-    const mustSat = (v.adjacency?.satisfied  || []).filter(a => a.type === 'must').length
-    const mustTot = mustSat + (v.adjacency?.violated || []).filter(a => a.type === 'must').length
-    const violCell = v.violations.length === 0
+    const cp = v.checkpointADiagnostic || {}
+    // Prefer Checkpoint A (Phase 1 snapshot) values for table display
+    const mustSat = cp.mustAdjacency?.satisfied ?? (v.adjacency?.satisfied || []).filter(a => a.type === 'must').length
+    const mustTot = cp.mustAdjacency?.total ?? mustSat + (v.adjacency?.violated || []).filter(a => a.type === 'must').length
+    
+    // Hard Redline Violations (General) — Filtered to avoid overlap with Adjacency/Accessibility
+    const uniqueViolations = (v.violations || []).filter(err => 
+      err.constraint !== 'must_adjacent' && err.constraint !== 'ext_access'
+    )
+    const violCount = uniqueViolations.length
+    const violCell = violCount === 0
       ? `<span style="color:#27ae60">✓</span>`
-      : `<span style="color:#c0392b">⚠ ${v.violations.length}</span>`
-    const area = Math.round(v.buildingW * v.buildingD / 1e6)
-    const eff  = v.spaceEfficiency != null ? (v.spaceEfficiency * 100).toFixed(1) + '%' : '—'
-    const ar   = v.aspectRatio != null ? v.aspectRatio.toFixed(2) : '—'
+      : `<span style="color:#c0392b">⚠ ${violCount}</span>`
+
+    // Accessibility / Door Access Violations (Specific subset)
+    const daCount = cp.doorAccessCount ?? v.breakdown?.doorAccessCount ?? 0
+    const daCell = daCount === 0
+      ? `<span style="color:#27ae60">✓</span>`
+      : `<span style="color:#c0392b;font-weight:700">⚠ ${daCount}</span>`
+
+    const eff  = cp.spaceEfficiency != null ? (cp.spaceEfficiency * 100).toFixed(1) + '%' : (v.spaceEfficiency != null ? (v.spaceEfficiency * 100).toFixed(1) + '%' : '—')
 
     const rowBg = i % 2 === 0 ? '#f8fafc' : '#fff'
 
@@ -116,11 +129,10 @@ function renderComparisonTable(variants) {
             border-left:4px solid transparent;transition:border-color .15s">${i + 1}</td>
         <td style="padding:7px 8px"><strong>${v.id}</strong><br>
           <span style="font-size:11px;color:#555">${v.label}</span></td>
-        <td style="text-align:center;font-size:11px;padding:7px 8px">${ar}</td>
         <td style="text-align:right;font-weight:700;color:#1a5276;padding:7px 8px">${v.score}</td>
-        <td style="text-align:right;padding:7px 8px">${area}</td>
         <td style="text-align:right;padding:7px 8px">${eff}</td>
         <td style="text-align:center;padding:7px 8px">${mustSat} / ${mustTot}</td>
+        <td style="text-align:center;padding:7px 8px">${daCell}</td>
         <td style="text-align:center;padding:7px 8px">${violCell}</td>
       </tr>`
   }).join('')
@@ -130,14 +142,13 @@ function renderComparisonTable(variants) {
       <table style="width:100%;border-collapse:collapse;font-size:13px">
         <thead>
           <tr style="background:#1a3a5c;color:#fff;font-size:12px">
-            <th style="padding:7px 8px">排名</th>
-            <th style="padding:7px 8px;text-align:left">方案</th>
-            <th style="padding:7px 8px">长宽比</th>
-            <th style="padding:7px 8px;text-align:right">综合得分</th>
-            <th style="padding:7px 8px;text-align:right">占地 m²</th>
-            <th style="padding:7px 8px;text-align:right">空间有效率</th>
-            <th style="padding:7px 8px">必须临近</th>
-            <th style="padding:7px 8px">约束违反</th>
+            <th class="th-tip" data-tip="按综合得分降序排列" style="padding:7px 8px">排名</th>
+            <th class="th-tip" data-tip="方案编号与描述" style="padding:7px 8px;text-align:left">方案</th>
+            <th class="th-tip" data-tip="三梯队全量评分总分（越高越好）" style="padding:7px 8px;text-align:right">综合得分</th>
+            <th class="th-tip" data-tip="功能房间面积/楼层面积（Phase 1快照）" style="padding:7px 8px;text-align:right">空间有效率</th>
+            <th class="th-tip" data-tip="强邻近要求满足度 (Phase 1快照)" style="padding:7px 8px">强邻近</th>
+            <th class="th-tip" data-tip="未满足的可达性/门禁要求（Phase 1快照）" style="padding:7px 8px">可达性</th>
+            <th class="th-tip" data-tip="不含邻近与可达性的其他工程约束 (如吊装覆盖、特殊距离)" style="padding:7px 8px">工程约束</th>
           </tr>
         </thead>
         <tbody id="variant-tbody">
@@ -231,11 +242,12 @@ function insertDetailRow(idx) {
   const title = `方案 ${v.id}：${v.label}  —  ` +
     `${(v.buildingW / 1000).toFixed(1)} m × ${(v.buildingD / 1000).toFixed(1)} m  得分 ${v.score}`
 
+  const failed = !v.checkpointADiagnostic?.passes;
   const renderFloorRow = (floor) => {
     const debugData = v._debug?.[floor] ?? {};
     const finalView = `<svg viewBox="0 0 240 180" style="background:#f4f6f8">${renderLayoutSVG(v, floor, 240, 180, { showDims: false })}</svg>`;
-    const stage3 = debugData.gridAfterGaps ? renderDebugGrid({ grid: debugData.gridAfterGaps, seeds: debugData.seeds }, 200, 150) : '无数据';
-    const stage2 = debugData.gridBeforeGaps ? renderDebugGrid({ grid: debugData.gridBeforeGaps, seeds: debugData.seeds }, 200, 150) : '无数据';
+    const stage3 = failed ? '<span class="skipped-text">未通过红线，未执行</span>' : (debugData.gridAfterGaps ? renderDebugGrid({ grid: debugData.gridAfterGaps, seeds: debugData.seeds }, 200, 150) : '无数据');
+    const stage2 = failed ? '<span class="skipped-text">未通过红线，未执行</span>' : (debugData.gridBeforeGaps ? renderDebugGrid({ grid: debugData.gridBeforeGaps, seeds: debugData.seeds }, 200, 150) : '无数据');
     const stage1 = debugData.gridAfterRect ? renderDebugGrid({ grid: debugData.gridAfterRect, seeds: debugData.seeds }, 200, 150) : '无数据';
 
     return `
@@ -273,6 +285,7 @@ function insertDetailRow(idx) {
           .grid-header { font-size: 11px; font-weight: 600; color: #1a3a5c; background: #eaf2f8; text-align: center; padding: 4px; }
           .grid-cell.final-view { background: #f4f6f8; }
           .grid-cell.debug-view svg { width: 100%; height: 100%; }
+          .skipped-text { font-size: 11px; color: #95a5a6; font-style: italic; }
         </style>
       </td>
     </tr>`;
@@ -432,8 +445,16 @@ window._ag41UpdateParam = function(key, value) {
 
 /** Reset all params to defaults, save, rebuild full panel. */
 window._ag41ResetParams = function() {
+  // Clear existing keys and re-assign defaults to ensure a clean reset
+  Object.keys(SCORER_PARAMS).forEach(key => delete SCORER_PARAMS[key])
   Object.assign(SCORER_PARAMS, DEFAULT_SCORER_PARAMS)
   saveScorerParams(SCORER_PARAMS)
+
+  // Refresh the params panel UI if it exists (e.g., in a modal)
+  const modalWrap = document.getElementById('modal-scorer-wrap')
+  if (modalWrap) {
+    modalWrap.innerHTML = renderScorerParamsPanel(SCORER_PARAMS)
+  }
 
   const cmp = document.getElementById('layout-comparison')
   if (!cmp) return

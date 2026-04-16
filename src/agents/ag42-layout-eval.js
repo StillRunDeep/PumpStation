@@ -1,6 +1,7 @@
 import { scoreLayout } from '../layout/scorer.js'
 import { evaluateTemplate, centerX, centerY } from '../layout/placer.js'
 import { GRID_SIZE } from '../layout/layout-generator.js'
+import { SCORER_PARAMS } from '../layout/scorer-params.js'
 
 /**
  * Compute average centroid distance (in grid cells) between two layouts.
@@ -28,12 +29,11 @@ function computeLayoutSimilarity(varA, varB) {
  * Apply diversity penalty to a ranked list (mutates in place).
  * A variant is penalised if it is too similar (avg centroid dist < threshold)
  * to any higher-ranked variant already in the list.
- *
- * @param {Array}  variants        Already sorted best-first
- * @param {number} threshold       Min avg centroid dist (grid cells) to be "different"
- * @param {number} penaltyPts      Score deduction per similar variant
  */
-function applyDiversityPenalty(variants, threshold = 3.0, penaltyPts = 30) {
+function applyDiversityPenalty(variants) {
+  const threshold = SCORER_PARAMS.diversityThreshold ?? 5.0
+  const penaltyPts = SCORER_PARAMS.diversityPenalty ?? 200
+
   for (let i = 1; i < variants.length; i++) {
     for (let j = 0; j < i; j++) {
       if (computeLayoutSimilarity(variants[j], variants[i]) < threshold) {
@@ -69,25 +69,16 @@ function scoreVariant(template) {
 export function runAG42(rawVariants) {
   const evaluatedAndScored = rawVariants.map(scoreVariant)
 
-  // 筛选规则：优先保留 violations = 0 的方案，按 score 降序排列
-  const feasibleVariants   = evaluatedAndScored.filter(v => v.violations.length === 0)
-  const unfeasibleVariants = evaluatedAndScored.filter(v => v.violations.length > 0)
+  // Unified scoring: just sort by score descending
+  evaluatedAndScored.sort((a, b) => b.score - a.score)
 
-  feasibleVariants.sort((a, b) => b.score - a.score)
-  unfeasibleVariants.sort((a, b) => b.score - a.score)
+  // Apply diversity penalty to the pool
+  applyDiversityPenalty(evaluatedAndScored)
 
-  const targetCount = 9
-  const finalVariants = [...feasibleVariants]
+  // Re-sort after penalty to ensure final order is correct
+  evaluatedAndScored.sort((a, b) => b.score - a.score)
 
-  // 如果可行方案不足目标数量，补充得分最高的无效方案
-  if (finalVariants.length < targetCount) {
-    finalVariants.push(...unfeasibleVariants.slice(0, targetCount - finalVariants.length))
-  }
-
-  finalVariants.sort((a, b) => b.score - a.score)
-  applyDiversityPenalty(finalVariants)
-  finalVariants.sort((a, b) => b.score - a.score)
-  return finalVariants
+  return evaluatedAndScored.slice(0, 9)
 }
 
 /**
@@ -101,15 +92,20 @@ export function runAG42(rawVariants) {
 export function mergeVariants(existingVariants, newRawTemplates) {
   const newScored = newRawTemplates.map(t => ({ ...scoreVariant(t), _isNew: true }))
 
-  const combined   = [...existingVariants, ...newScored]
+  // Combine all candidates into one pool
+  const combined = [...existingVariants, ...newScored]
 
-  const feasible   = combined.filter(v => v.violations.length === 0).sort((a, b) => b.score - a.score)
-  const unfeasible = combined.filter(v => v.violations.length > 0).sort((a, b) => b.score - a.score)
+  // Unified ranking: no more feasible/unfeasible buckets
+  combined.sort((a, b) => b.score - a.score)
 
-  const top9 = [...feasible, ...unfeasible.slice(0, Math.max(0, 9 - feasible.length))].slice(0, 9)
-  top9.sort((a, b) => b.score - a.score)
-  applyDiversityPenalty(top9)
-  top9.sort((a, b) => b.score - a.score)
+  // Apply diversity penalty to a larger pool to ensure top 9 are diverse and the best
+  const poolSize = Math.min(combined.length, 18)
+  const topCandidates = combined.slice(0, poolSize)
+  applyDiversityPenalty(topCandidates)
+
+  // Final sort and select top 9
+  topCandidates.sort((a, b) => b.score - a.score)
+  const top9 = topCandidates.slice(0, 9)
 
   const improved = top9.some(v => v._isNew)
   top9.forEach(v => delete v._isNew)
