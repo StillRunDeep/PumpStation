@@ -97,13 +97,16 @@ export function renderScorerParamsPanel(params) {
 
 function renderComparisonTable(variants) {
   const rows = variants.map((v, i) => {
-    const mustSat = (v.adjacency?.satisfied  || []).filter(a => a.type === 'must').length
-    const mustTot = mustSat + (v.adjacency?.violated || []).filter(a => a.type === 'must').length
-    const violCell = v.violations.length === 0
+    const cp = v.checkpointADiagnostic || {}
+    // Prefer Checkpoint A (Phase 1 snapshot) values for table display
+    const mustSat = cp.mustAdjacency?.satisfied ?? (v.adjacency?.satisfied || []).filter(a => a.type === 'must').length
+    const mustTot = cp.mustAdjacency?.total ?? mustSat + (v.adjacency?.violated || []).filter(a => a.type === 'must').length
+    const violCount = cp.violationCount ?? v.violations?.length ?? 0
+    const violCell = violCount === 0
       ? `<span style="color:#27ae60">✓</span>`
-      : `<span style="color:#c0392b">⚠ ${v.violations.length}</span>`
+      : `<span style="color:#c0392b">⚠ ${violCount}</span>`
     const area = Math.round(v.buildingW * v.buildingD / 1e6)
-    const eff  = v.spaceEfficiency != null ? (v.spaceEfficiency * 100).toFixed(1) + '%' : '—'
+    const eff  = cp.spaceEfficiency != null ? (cp.spaceEfficiency * 100).toFixed(1) + '%' : (v.spaceEfficiency != null ? (v.spaceEfficiency * 100).toFixed(1) + '%' : '—')
     const ar   = v.aspectRatio != null ? v.aspectRatio.toFixed(2) : '—'
 
     const rowBg = i % 2 === 0 ? '#f8fafc' : '#fff'
@@ -130,14 +133,14 @@ function renderComparisonTable(variants) {
       <table style="width:100%;border-collapse:collapse;font-size:13px">
         <thead>
           <tr style="background:#1a3a5c;color:#fff;font-size:12px">
-            <th style="padding:7px 8px">排名</th>
-            <th style="padding:7px 8px;text-align:left">方案</th>
-            <th style="padding:7px 8px">长宽比</th>
-            <th style="padding:7px 8px;text-align:right">综合得分</th>
-            <th style="padding:7px 8px;text-align:right">占地 m²</th>
-            <th style="padding:7px 8px;text-align:right">空间有效率</th>
-            <th style="padding:7px 8px">必须临近</th>
-            <th style="padding:7px 8px">约束违反</th>
+            <th class="th-tip" data-tip="按综合得分降序排列" style="padding:7px 8px">排名</th>
+            <th class="th-tip" data-tip="方案编号与描述" style="padding:7px 8px;text-align:left">方案</th>
+            <th class="th-tip" data-tip="房间最大长宽比（越小越好）" style="padding:7px 8px">长宽比</th>
+            <th class="th-tip" data-tip="三梯队全量评分总分（越高越好）" style="padding:7px 8px;text-align:right">综合得分</th>
+            <th class="th-tip" data-tip="建筑实际占地面积" style="padding:7px 8px;text-align:right">占地 m²</th>
+            <th class="th-tip" data-tip="功能房间面积/楼层面积（Phase 1快照）" style="padding:7px 8px;text-align:right">空间有效率</th>
+            <th class="th-tip" data-tip="M-01: meter_main↔meter_sub, M-02: trafo1↔trafo2 (Phase 1快照)" style="padding:7px 8px">必须临近</th>
+            <th class="th-tip" data-tip="C-01: 外墙接触, C-02: 15t桥吊覆盖, C-03: 5t单轨吊覆盖, C-04/C-05: MUST邻接" style="padding:7px 8px">约束违反</th>
           </tr>
         </thead>
         <tbody id="variant-tbody">
@@ -231,11 +234,12 @@ function insertDetailRow(idx) {
   const title = `方案 ${v.id}：${v.label}  —  ` +
     `${(v.buildingW / 1000).toFixed(1)} m × ${(v.buildingD / 1000).toFixed(1)} m  得分 ${v.score}`
 
+  const failed = !v.checkpointADiagnostic?.passes;
   const renderFloorRow = (floor) => {
     const debugData = v._debug?.[floor] ?? {};
     const finalView = `<svg viewBox="0 0 240 180" style="background:#f4f6f8">${renderLayoutSVG(v, floor, 240, 180, { showDims: false })}</svg>`;
-    const stage3 = debugData.gridAfterGaps ? renderDebugGrid({ grid: debugData.gridAfterGaps, seeds: debugData.seeds }, 200, 150) : '无数据';
-    const stage2 = debugData.gridBeforeGaps ? renderDebugGrid({ grid: debugData.gridBeforeGaps, seeds: debugData.seeds }, 200, 150) : '无数据';
+    const stage3 = failed ? '<span class="skipped-text">未通过红线，未执行</span>' : (debugData.gridAfterGaps ? renderDebugGrid({ grid: debugData.gridAfterGaps, seeds: debugData.seeds }, 200, 150) : '无数据');
+    const stage2 = failed ? '<span class="skipped-text">未通过红线，未执行</span>' : (debugData.gridBeforeGaps ? renderDebugGrid({ grid: debugData.gridBeforeGaps, seeds: debugData.seeds }, 200, 150) : '无数据');
     const stage1 = debugData.gridAfterRect ? renderDebugGrid({ grid: debugData.gridAfterRect, seeds: debugData.seeds }, 200, 150) : '无数据';
 
     return `
@@ -273,6 +277,7 @@ function insertDetailRow(idx) {
           .grid-header { font-size: 11px; font-weight: 600; color: #1a3a5c; background: #eaf2f8; text-align: center; padding: 4px; }
           .grid-cell.final-view { background: #f4f6f8; }
           .grid-cell.debug-view svg { width: 100%; height: 100%; }
+          .skipped-text { font-size: 11px; color: #95a5a6; font-style: italic; }
         </style>
       </td>
     </tr>`;

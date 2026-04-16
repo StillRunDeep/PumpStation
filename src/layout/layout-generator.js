@@ -1,4 +1,9 @@
 import { ROOM_DEFS } from './room-defs.js';
+import { checkAdjacency } from './adjacency.js';
+import { placeDoors } from './door-placer.js';
+import { SCORER_PARAMS } from './scorer-params.js';
+import { evaluateCheckpointA } from './scorer.js';
+import { adjacent, centerX, centerY, touchesExteriorNonSouth, CONSTRAINT_CHECKS, evaluateTemplate } from './placer.js';
 
 export const GRID_SIZE = 500; // 500mm per grid cell — single source of truth, imported by ag41/ag42
 const MAX_EXPANSION_ITERATIONS = 5000;
@@ -881,6 +886,205 @@ function findAdjacentRoomIds(grid, roomId) {
   return [...adjacent]
 }
 
+
+// ── Phase 3b: Area-deviation driven space swap ──────────────────────────────
+
+/**
+ * Categorizes rooms into donors (oversized) and recipients (undersized) based on
+ * deviation from their target area.
+ * @returns {{donors: Array, recipients: Array, roomDataMap: Map<string, object>}}
+ */
+function categorizeRooms(grid, rooms) {
+  const roomDataMap = new Map();
+  const donors = [];
+  const recipients = [];
+
+  for (const room of rooms) {
+    const currentArea = grid.roomData[room.id]?.length || 0;
+    const targetArea = room.targetGridCount;
+    if (targetArea === 0) continue;
+
+    const deviation = (currentArea - targetArea) / targetArea;
+    const data = { id: room.id, currentArea, targetArea, deviation };
+    roomDataMap.set(room.id, data);
+
+    if (deviation > 0) {
+      donors.push(data);
+    } else if (deviation < 0) {
+      recipients.push(data);
+    }
+  }
+  return { donors, recipients, roomDataMap };
+}
+
+/**
+ * Finds geometrically significant chunks of cells on the boundary of a donor
+ * that could be transferred to a recipient.
+ * Implements "Boundary Push" and "Boundary Consolidation" strategies.
+ * @returns {Array<Array<object>>} A list of cell chunks, where each chunk is an array of cells.
+ */
+function findCandidateChunks(grid, donorId, recipientId) {
+    const chunks = [];
+
+    const boundaryCells = (grid.roomData[donorId] || []).filter(cell => {
+        return [[1,0],[-1,0],[0,1],[0,-1]].some(([dx, dy]) => grid.getCell(cell.x+dx, cell.y+dy) === recipientId);
+    });
+    if (boundaryCells.length === 0) return [];
+
+    const boundarySet = new Set(boundaryCells.map(c => `${c.x},${c.y}`));
+    const visited = new Set();
+
+    // Strategy A: Boundary Push (finds contiguous boundary segments)
+    for (const cell of boundaryCells) {
+        const key = `${cell.x},${cell.y}`;
+        if (visited.has(key)) continue;
+
+        // Find all connected cells in this boundary segment using BFS
+        const q = [cell];
+        const currentSegment = [];
+        visited.add(key);
+
+        while(q.length > 0) {
+            const current = q.shift();
+            currentSegment.push(current);
+
+            for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+                const neighborKey = `${current.x+dx},${current.y+dy}`;
+                if (boundarySet.has(neighborKey) && !visited.has(neighborKey)) {
+                    visited.add(neighborKey);
+                    q.push({x: current.x+dx, y: current.y+dy});
+                }
+            }
+        }
+
+        // From a contiguous segment, create all possible sub-segments up to max size
+        if (currentSegment.length > 0) {
+            for (let i = 0; i < currentSegment.length; i++) {
+                for (let j = i; j < currentSegment.length; j++) {
+                    const subChunk = currentSegment.slice(i, j + 1);
+                    if (subChunk.length > 0 && subChunk.length <= SWAP_MAX_CELLS) {
+                        chunks.push(subChunk);
+                    }
+                }
+            }
+        }
+    }
+
+    // Strategy B: Boundary Consolidation (single-cell protrusions)
+    const protrusions = boundaryCells.filter(cell => {
+      const recipientNeighbors = [[1,0],[-1,0],[0,1],[0,-1]].filter(([dx, dy]) => grid.getCell(cell.x+dx, cell.y+dy) === recipientId).length;
+      const donorNeighbors = [[1,0],[-1,0],[0,1],[-1,-1]].filter(([dx, dy]) => grid.getCell(cell.x+dx, cell.y+dy) === donorId).length;
+      return (recipientNeighbors - donorNeighbors) > 0; // Cell is more "in" the recipient
+    });
+
+    chunks.push(...protrusions.map(p => [p])); // Add all protrusions as single-cell chunks
+
+    // Deduplicate chunks to ensure we evaluate each unique chunk only once
+    const uniqueChunks = [];
+    const seenChunks = new Set();
+    for (const chunk of chunks) {
+        chunk.sort((a,b) => a.x - b.x || a.y - b.y);
+        const chunkKey = chunk.map(c => `${c.x},${c.y}`).join(';');
+        if (!seenChunks.has(chunkKey)) {
+            uniqueChunks.push(chunk);
+            seenChunks.add(chunkKey);
+        }
+    }
+
+    return uniqueChunks;
+}
+
+
+/**
+ * Evaluates all candidate chunks to find the one that maximizes quality improvement.
+ * @returns {object|null} The best transfer found, or null if no improvement is possible.
+ */
+function findBestTransfer(grid, donors, roomDataMap, roomMap) {
+  let bestTransfer = null;
+  let maxQualityImprovement = 1e-6; // Minimum improvement to proceed
+
+  for (const donor of donors) {
+    const adjacentRecipients = findAdjacentRoomIds(grid, donor.id)
+      .filter(id => roomDataMap.has(id) && roomDataMap.get(id).deviation < 0);
+
+    for (const recipientId of adjacentRecipients) {
+      const recipientRoom = roomMap.get(recipientId);
+      if (!recipientRoom) continue;
+      const donorRoom = roomMap.get(donor.id);
+
+      const candidateChunks = findCandidateChunks(grid, donor.id, recipientId);
+
+      for (const chunk of candidateChunks) {
+        if (chunk.length === 0) continue;
+
+        const qualityBefore = computeRoomQuality(grid, donorRoom) + computeRoomQuality(grid, recipientRoom);
+
+        // Simulate transfer in a cloned grid to be safe
+        const tempGrid = grid.clone();
+
+        const donorCells = tempGrid.roomData[donor.id] || [];
+        tempGrid.roomData[donor.id] = donorCells.filter(c => !chunk.some(t => t.x === c.x && t.y === c.y));
+        chunk.forEach(c => tempGrid.addRoomCell(recipientId, c.x, c.y));
+
+        if (isRoomConnected(tempGrid, donor.id)) {
+          const qualityAfter = computeRoomQuality(tempGrid, donorRoom) + computeRoomQuality(tempGrid, recipientRoom);
+          const improvement = qualityAfter - qualityBefore;
+
+          if (improvement > maxQualityImprovement) {
+            maxQualityImprovement = improvement;
+            bestTransfer = {
+              cells: chunk,
+              donorId: donor.id,
+              recipientId: recipientId,
+              qualityImprovement: improvement,
+            };
+          }
+        }
+      }
+    }
+  }
+  return bestTransfer;
+}
+
+/**
+ * Phase 3b: Area-deviation driven space swap.
+ * Iteratively transfers cell chunks from oversized rooms (donors) to
+ * adjacent undersized rooms (recipients) to maximize a composite quality score.
+ */
+function runAreaSwap(grid, rooms) {
+  const MAX_ITERATIONS = 50; // Fewer iterations as chunks are more impactful
+  const roomMap = new Map(rooms.map(r => [r.id, r]));
+
+  for (let i = 0; i < MAX_ITERATIONS; i++) {
+    const { donors, recipients, roomDataMap } = categorizeRooms(grid, rooms);
+
+    if (donors.length === 0 || recipients.length === 0) {
+      if (DEBUG_LAYOUT) console.log(`[AreaSwap] Terminating: no more donors or recipients.`);
+      break;
+    }
+
+    const bestTransfer = findBestTransfer(grid, donors, roomDataMap, roomMap);
+
+    if (bestTransfer && bestTransfer.qualityImprovement > 0) {
+      const { cells, donorId, recipientId } = bestTransfer;
+
+      // Perform the actual transfer on the main grid
+      grid.roomData[donorId] = grid.roomData[donorId].filter(c => !cells.some(t => t.x === c.x && t.y === c.y));
+      cells.forEach(c => {
+        grid.addRoomCell(recipientId, c.x, c.y);
+      });
+
+      if (DEBUG_LAYOUT) console.log(`[AreaSwap] Iter ${i}: Transferred chunk of ${cells.length} from ${donorId} -> ${recipientId}, quality gain ${bestTransfer.qualityImprovement.toFixed(2)}`);
+    } else {
+      if (DEBUG_LAYOUT) console.log(`[AreaSwap] Converged after ${i} iterations.`);
+      break;
+    }
+    if (i === MAX_ITERATIONS - 1) {
+        if (DEBUG_LAYOUT) console.log(`[AreaSwap] Reached max iterations.`);
+    }
+  }
+}
+
 /**
  * Phase 3b: 空间交换协商。
  * 对质量差或面积偏差大的候选房间，与相邻房间协商边界格子的转让。
@@ -1016,7 +1220,11 @@ export function buildPartialResult(groundGrid, level1Grid, buildingW, buildingD)
   }
 }
 
-export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId = 'CG', variantIdx = 1, prefix = 'R', initialSeeds = null) {
+
+
+
+export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParams = {}, groupId = 'CG', variantIdx = 1, prefix = 'R', initialSeeds = null) {
+  const { enableAreaSwap = false } = runParams;
   const rng = makeRng(seed);
 
   const gridW = Math.floor(bW / GRID_SIZE);
@@ -1071,20 +1279,6 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId 
     groundSeeds = placeRoomSeeds(groundGrid, groundRooms, rng);
   }
   groundGridAfterSeeds = groundGrid.clone();
-  expandRooms(groundGrid, groundRooms, rng, (gridState) => {
-    groundGridBeforeGaps = gridState.clone();
-  }, (gridState) => {
-    groundGridAfterRect = gridState.clone();
-  });
-  if (!groundGridAfterRect) groundGridAfterRect = groundGrid.clone();
-  if (!groundGridBeforeGaps) groundGridBeforeGaps = groundGrid.clone(); // Fallback if regular expansion never stalled
-
-  // ── Phase 3a: 无面积限制 L/U 生长 ──────────────────────────────────
-  runPhase3Growth(groundGrid, groundRooms, rng)
-  // ── Phase 3b: 空间交换协商 ─────────────────────────────────────────
-  //runSpaceSwap(groundGrid, groundRooms)
-  // ── Phase 3c: 边界清理与空隙填充 ──────────────────────────────────
-  fillGaps(groundGrid, groundRooms);
 
   let level1GridBeforeGaps, level1GridAfterRect;
   const level1Grid = new Grid(gridW, gridH);
@@ -1101,18 +1295,63 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId 
     level1Seeds = placeRoomSeeds(level1Grid, level1Rooms, rng);
   }
   level1GridAfterSeeds = level1Grid.clone();
+
+  // --- Checkpoint A (Phase 1 snapshot evaluation) ---
+
+  expandRooms(groundGrid, groundRooms, rng, (gridState) => {
+    groundGridBeforeGaps = gridState.clone();
+  }, (gridState) => {
+    groundGridAfterRect = gridState.clone();
+  });
+   if (!groundGridAfterRect) groundGridAfterRect = groundGrid.clone();
+   if (!groundGridBeforeGaps) groundGridBeforeGaps = groundGrid.clone();
+
   expandRooms(level1Grid, level1Rooms, rng, (gridState) => {
     level1GridBeforeGaps = gridState.clone();
   }, (gridState) => {
     level1GridAfterRect = gridState.clone();
   });
   if (!level1GridAfterRect) level1GridAfterRect = level1Grid.clone();
-  if (!level1GridBeforeGaps) level1GridBeforeGaps = level1Grid.clone(); // Fallback
+  if (!level1GridBeforeGaps) level1GridBeforeGaps = level1Grid.clone();
+
+  const snapshot = buildPartialResult(groundGridAfterRect, level1GridAfterRect, bW, bD);
+  const evaluated = evaluateTemplate(snapshot);
+  const checkpointADiagnostic = evaluateCheckpointA(evaluated);
+
+  // If the layout fails Checkpoint A, skip expensive Phase 2/3 growth
+  if (!checkpointADiagnostic.passes) {
+    const groundLayout = finalizeLayout(groundGridAfterRect).ground;
+    const level1Layout = finalizeLayout(level1GridAfterRect).level1;
+    return {
+      id: `${prefix}-${groupId}-${variantIdx}`,
+      label: `约束生长法 (未通过红线)`,
+      desc: `建筑 ${(bW / 1000).toFixed(1)}m×${(bD / 1000).toFixed(1)}m`,
+      groundPlacements: groundLayout,
+      level1Placements: level1Layout,
+      buildingW: bW,
+      buildingD: bD,
+      groupId,
+      variantIdx,
+      _debug: {
+        roomTargets: allRooms,
+        ground: { seeds: groundSeeds, gridAfterSeeds: groundGridAfterSeeds, gridAfterRect: groundGridAfterRect, gridBeforeGaps: groundGridAfterRect, gridAfterGaps: groundGridAfterRect },
+        level1: { seeds: level1Seeds, gridAfterSeeds: level1GridAfterSeeds, gridAfterRect: level1GridAfterRect, gridBeforeGaps: level1GridAfterRect, gridAfterGaps: level1GridAfterRect },
+      },
+      checkpointADiagnostic,
+    };
+  }
+
+  // ── Phase 3a: 无面积限制 L/U 生长 ──────────────────────────────────
+  runPhase3Growth(groundGrid, groundRooms, rng)
+  // ── Phase 3b: 空间交换协商 ─────────────────────────────────────────
+  if (enableAreaSwap) runAreaSwap(groundGrid, groundRooms)
+  // ── Phase 3c: 边界清理与空隙填充 ──────────────────────────────────
+  fillGaps(groundGrid, groundRooms);
 
   // ── Phase 3a: 无面积限制 L/U 生长 ──────────────────────────────────
   runPhase3Growth(level1Grid, level1Rooms, rng)
   // ── Phase 3b: 空间交换协商 ─────────────────────────────────────────
-  //runSpaceSwap(level1Grid, level1Rooms)
+  if (enableAreaSwap) runAreaSwap(level1Grid, level1Rooms)
   // ── Phase 3c: 边界清理与空隙填充 ──────────────────────────────────
   fillGaps(level1Grid, level1Rooms);
 
@@ -1136,6 +1375,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId 
       roomTargets: allRooms,
       ground: { seeds: groundSeeds, gridAfterSeeds: groundGridAfterSeeds, gridAfterRect: groundGridAfterRect, gridBeforeGaps: groundGridBeforeGaps, gridAfterGaps: groundGrid },
       level1: { seeds: level1Seeds, gridAfterSeeds: level1GridAfterSeeds, gridAfterRect: level1GridAfterRect, gridBeforeGaps: level1GridBeforeGaps, gridAfterGaps: level1Grid },
-    }
+    },
+    checkpointADiagnostic,
   };
 }

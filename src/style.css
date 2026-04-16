@@ -955,3 +955,31 @@ svg.section-drag-active [data-zoom-handle] {
 #modal-scorer-params {
   width: 960px;
 }
+
+/* ── Table Header Tooltip ── */
+.th-tip {
+  position: relative;
+}
+.th-tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  background: rgba(0, 0, 0, 0.85);
+  color: #fff;
+  font-size: 11px;
+  font-weight: normal;
+  line-height: 1.4;
+  padding: 4px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s, transform 0.15s;
+  z-index: 100;
+}
+.th-tip:hover::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}

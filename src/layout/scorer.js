@@ -8,15 +8,15 @@ const NON_FUNCTIONAL = new Set(['corridor_l1', 'dock1', 'dock2'])
 
 // Ground-floor rooms: single source for expected rooms & convenience scoring.
 // CONVENIENCE_ROOMS and EXPECTED_GROUND were previously duplicated identically.
-const GROUND_ROOMS = ['trafo1', 'trafo2', 'meter_main', 'meter_sub', 'fire_equip', 'parking', 'repair_zone']
+export const GROUND_ROOMS = ['trafo1', 'trafo2', 'meter_main', 'meter_sub', 'fire_equip', 'parking', 'repair_zone']
 
-const EXPECTED_LEVEL1 = ['fan_room', 'clean_pump', 'rainwater', 'lv_control', 'corridor_l1']
+export const EXPECTED_LEVEL1 = ['fan_room', 'clean_pump', 'rainwater', 'lv_control', 'corridor_l1']
 
 // Level-1 rooms that must be adjacent to corridor_l1 (§3.4 door-access check)
-const LEVEL1_MUST_FACE_CORRIDOR = ['fan_room', 'clean_pump', 'rainwater', 'lv_control']
+export const LEVEL1_MUST_FACE_CORRIDOR = ['fan_room', 'clean_pump', 'rainwater', 'lv_control']
 
 // Ground-floor rooms that must touch exterior wall (non-south) — §3.4
-const GROUND_MUST_EXT = ['trafo1', 'trafo2', 'meter_main', 'meter_sub', 'fire_equip']
+export const GROUND_MUST_EXT = ['trafo1', 'trafo2', 'meter_main', 'meter_sub', 'fire_equip']
 
 // ── Utility functions ────────────────────────────────────────────────────────
 
@@ -218,6 +218,28 @@ export function scoreHardRedlines(result) {
     doorAccessCount: doorAccessRes.ids.length,
     violations: violationsPenalty,
     violationCount,
+  }
+}
+
+/**
+ * Checkpoint A (enhanced) — Tier 1 plus UI-critical metrics.
+ * Evaluates hard redlines, plus space efficiency and must-adjacency counts
+ * needed for the comparison table. This ensures the UI always shows
+ * metrics computed at the same (Phase 1) snapshot.
+ */
+export function evaluateCheckpointA(result) {
+  const redlines = scoreHardRedlines(result)
+  const spaceEfficiency = computeSpaceEfficiency(result)
+  const mustSatisfied = result.adjacency?.satisfied?.filter(v => v.type === 'must').length || 0
+  const mustTotal = mustSatisfied + (result.adjacency?.violated?.filter(v => v.type === 'must').length || 0)
+
+  return {
+    ...redlines,
+    spaceEfficiency,
+    mustAdjacency: {
+      satisfied: mustSatisfied,
+      total: mustTotal,
+    },
   }
 }
 

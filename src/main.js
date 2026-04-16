@@ -13,8 +13,7 @@ import { mergeVariants } from './agents/ag42-layout-eval.js'
 
 /**
  * 统一的布局生成结果处理：
- * - 有通过检查点 A 的方案 → 正常评分展示，返回 { variants, improved, newScored }
- * - 全部未通过          → 用失败方案降级展示，返回 null，并弹出含具体原因的提示
+ * - 所有方案均参与评分展示，返回 { variants, improved, newScored }
  * @param {Array}  newRaw    runAG41() 的返回值
  * @param {Array}  existing  当前已有方案（首次传 []）
  * @param {boolean} isReset  true = 重置/初次，不显示"更优/未更优"提示
@@ -37,23 +36,7 @@ function applyLayoutResult(newRaw, existing, isReset = false) {
     return { variants, improved, newScored }
   }
 
-  // 全部未通过检查点 A：降级展示失败方案
-  const failedCandidates = newRaw._failedCandidates || []
-  if (failedCandidates.length > 0) {
-    const { variants: failedDisplay } = mergeVariants(existing, failedCandidates)
-    renderLayoutPanel(failedDisplay)
-  }
-  const diag  = newRaw._checkpointADiagnostic
-  const parts = []
-  if (diag) {
-    if (diag.missingRoomCount > 0) parts.push(`${diag.missingRoomCount} 间房间缺失`)
-    if (diag.doorAccessCount  > 0) parts.push(`${diag.doorAccessCount} 间可达性违规`)
-    if (diag.violationCount   > 0) parts.push(`${diag.violationCount} 项 MUST 约束未满足`)
-  }
-  const detail = parts.length ? `：${parts.join('、')}` : ''
-  const suffix = isReset ? '，建议点击"生成更多方案"继续尝试' : '，继续尝试…'
-  showAg41Notify(`本轮 ${newRaw._attemptCount ?? 50} 次尝试均未通过硬性红线检查${detail}${suffix}`, false)
-  return null
+  return { variants, improved, newScored }
 }
 import { renderAG00, renderAG01, renderPoolDepth, renderPipeSizing, renderMaintenanceRoom, renderPumpSpec, renderRainfallCard, renderSchemeOptions } from './ui/results-panel.js'
 import { renderLayoutPanel, getVariants, showAg41Notify, renderScorerParamsPanel, rescoreAndRerender } from './ui/layout-panel.js'
