@@ -389,17 +389,17 @@ function countRoomVertices(grid, roomId) {
 
 /**
  * BFS over empty cells (value === 0) to extract connected empty regions.
- * Returns both metadata (id, touchesExterior) and a 2D grid of region IDs.
+ * Returns both metadata (id, cells) and a 2D grid of region IDs.
  */
 function getConnectedEmptyRegions(grid) {
   const regionIdGrid = Array(grid.height).fill(null).map(() => Array(grid.width).fill(-1));
-  const regions = []; // array of { id, touchesExterior }
+  const regions = []; 
 
   for (let y = 0; y < grid.height; y++) {
     for (let x = 0; x < grid.width; x++) {
       if (grid.getCell(x, y) === 0 && regionIdGrid[y][x] === -1) {
         const regionId = regions.length;
-        let touchesExterior = false;
+        const regionCells = [];
         const queue = [x, y];
         regionIdGrid[y][x] = regionId;
         let head = 0;
@@ -407,11 +407,7 @@ function getConnectedEmptyRegions(grid) {
         while (head < queue.length) {
           const cx = queue[head++];
           const cy = queue[head++];
-
-          // Check if region touches exterior non-south boundary
-          if (cx === 0 || cy === 0 || cx === grid.width - 1) {
-            touchesExterior = true;
-          }
+          regionCells.push({x: cx, y: cy});
 
           for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
             const nx = cx + dx, ny = cy + dy;
@@ -423,7 +419,7 @@ function getConnectedEmptyRegions(grid) {
             }
           }
         }
-        regions.push({ id: regionId, touchesExterior });
+        regions.push({ id: regionId, cells: regionCells });
       }
     }
   }
@@ -431,132 +427,223 @@ function getConnectedEmptyRegions(grid) {
 }
 
 /**
- * Returns a Set of region IDs that are adjacent to the given room.
- * Optimized for rectangular rooms by only scanning the bounding box perimeter.
+ * Traces the boundary of an empty region clockwise and returns the circular sequence
+ * of adjacent room IDs (or 'EXTERIOR').
  */
-function getAdjacentRegionIds(grid, roomId, regionIdGrid) {
-  const bbox = grid.getBoundingBox(roomId);
-  if (!bbox) return new Set();
-  const adjacentIds = new Set();
-
-  const checkCell = (x, y) => {
-    if (x >= 0 && x < grid.width && y >= 0 && y < grid.height) {
-      const rId = regionIdGrid[y][x];
-      if (rId !== -1) adjacentIds.add(rId);
+function getRegionBoundarySequence(grid, regionIdGrid, regionId) {
+  const cells = new Set();
+  let startX = Infinity, startY = Infinity;
+  
+  // Find all cells and the top-leftmost one to start
+  for (let y = 0; y < grid.height; y++) {
+    for (let x = 0; x < grid.width; x++) {
+      if (regionIdGrid[y][x] === regionId) {
+        cells.add(`${x},${y}`);
+        if (y < startY || (y === startY && x < startX)) {
+          startX = x; startY = y;
+        }
+      }
     }
-  };
-
-  for (let x = bbox.minX; x <= bbox.maxX; x++) {
-    checkCell(x, bbox.minY - 1); // North edge
-    checkCell(x, bbox.maxY + 1); // South edge
   }
-  for (let y = bbox.minY; y <= bbox.maxY; y++) {
-    checkCell(bbox.minX - 1, y); // West edge
-    checkCell(bbox.maxX + 1, y); // East edge
+  if (cells.size === 0) return [];
+
+  const sequence = [];
+  const visitedEdges = new Set();
+  
+  // Directions: 0:North, 1:East, 2:South, 3:West
+  const dx = [0, 1, 0, -1];
+  const dy = [-1, 0, 1, 0];
+
+  function getNeighborId(x, y, dir) {
+    const nx = x + dx[dir], ny = y + dy[dir];
+    if (nx < 0 || nx >= grid.width || ny < 0 || ny >= grid.height) {
+      return ny === grid.height ? -1 : 'EXTERIOR'; // South wall is not 'EXTERIOR' for access
+    }
+    const val = grid.getCell(nx, ny);
+    return val === 0 ? null : val; // null if it's another empty cell (shouldn't happen on boundary)
   }
 
-  return adjacentIds;
+  // Find the first external edge (North edge of top-left cell is guaranteed to be an edge)
+  let curX = startX, curY = startY, curDir = 0; 
+  const startEdge = `${curX},${curY},${curDir}`;
+
+  // Simple edge-following algorithm
+  let safety = 0;
+  while (safety++ < 2000) {
+    const edgeKey = `${curX},${curY},${curDir}`;
+    if (visitedEdges.has(edgeKey)) break;
+    visitedEdges.add(edgeKey);
+
+    const neighbor = getNeighborId(curX, curY, curDir);
+    if (neighbor && neighbor !== -1) {
+      sequence.push(neighbor);
+    }
+
+    // Try to turn "right" (clockwise)
+    const rightDir = (curDir + 1) % 4;
+    const rx = curX + dx[rightDir], ry = curY + dy[rightDir];
+    
+    if (cells.has(`${rx},${ry}`)) {
+      // Can move into the right cell, so turn right and move
+      curX = rx; curY = ry;
+      curDir = (curDir + 3) % 4; // Face "left" relative to new cell to continue boundary
+    } else {
+      // Cannot move right, so turn left and stay in current cell
+      curDir = (curDir + 3) % 4;
+    }
+  }
+
+  // Simplify: collapse consecutive duplicates, and handle circular wrap
+  const simplified = [];
+  for (const id of sequence) {
+    if (simplified.length === 0 || simplified[simplified.length - 1] !== id) {
+      simplified.push(id);
+    }
+  }
+  if (simplified.length > 1 && simplified[0] === simplified[simplified.length - 1]) {
+    simplified.pop();
+  }
+  return simplified;
+}
+
+/**
+ * Checks if a set of required connections (pairs) can be satisfied by non-crossing
+ * chords within a circular sequence of IDs.
+ */
+function canSatisfyNonCrossing(sequence, pairs) {
+  if (pairs.length === 0) return true;
+  
+  // Map each ID to its indices in the sequence
+  const idToIndices = {};
+  sequence.forEach((id, idx) => {
+    if (!idToIndices[id]) idToIndices[id] = [];
+    idToIndices[id].push(idx);
+  });
+
+  // Check if all needed IDs are even present
+  for (const [a, b] of pairs) {
+    if (!idToIndices[a] || !idToIndices[b]) return false;
+  }
+
+  const n = sequence.length;
+
+  function crosses(chord1, chord2) {
+    let [a, b] = chord1;
+    let [c, d] = chord2;
+    if (a > b) [a, b] = [b, a];
+    if (c > d) [c, d] = [d, c];
+    // Two chords (a,b) and (c,d) cross if one endpoint of (c,d) is inside (a,b) 
+    // and the other is outside.
+    const cIn = c > a && c < b;
+    const dIn = d > a && d < b;
+    return cIn !== dIn;
+  }
+
+  function solve(pairIdx, activeChords) {
+    if (pairIdx === pairs.length) return true;
+    
+    const [idA, idB] = pairs[pairIdx];
+    for (const i of idToIndices[idA]) {
+      for (const j of idToIndices[idB]) {
+        if (i === j) continue;
+        const newChord = [i, j];
+        
+        let valid = true;
+        for (const existing of activeChords) {
+          if (crosses(newChord, existing)) {
+            valid = false; break;
+          }
+        }
+        
+        if (valid) {
+          if (solve(pairIdx + 1, [...activeChords, newChord])) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  return solve(0, []);
 }
 
 /**
  * Relaxed door-access check for Checkpoint A.
- * Allows a room to be considered "accessible" if an unclaimed empty region
- * bridges the gap to its target (exterior wall or another required room).
+ * Multiple rooms can share an empty region if their topological paths don't cross.
  */
 function computeRelaxedDoorAccess(groundGrid, level1Grid) {
   const { doorAccessPenalty } = SCORER_PARAMS;
   const ids = [];
   const bridgedIds = new Set();
 
-  // ── Ground floor ─────────────────────────────────────────────────────────
-  const { regions: groundRegions, regionIdGrid: groundRegionIdGrid } = getConnectedEmptyRegions(groundGrid);
-  const claimedGround = new Set();
-
-  // Helper: find and claim an unclaimed region satisfying a predicate.
-  function claimRegion(adjacentIds, predicate) {
-    for (const rId of adjacentIds) {
-      if (!claimedGround.has(rId) && predicate(groundRegions[rId])) {
-        claimedGround.add(rId);
-        return true;
+  function processFloor(grid, mustExt, extraPairs = []) {
+    const { regions, regionIdGrid } = getConnectedEmptyRegions(grid);
+    const unmet = [];
+    
+    // Initial strict check
+    for (const roomId of mustExt) {
+      if (!grid.roomData[roomId]) continue;
+      const p = bboxToPlacement(grid.getBoundingBox(roomId));
+      if (!touchesExteriorNonSouth(p, grid.width * GRID_SIZE, grid.height * GRID_SIZE)) {
+        unmet.push({ room: roomId, target: 'EXTERIOR' });
       }
     }
-    return false;
-  }
-
-  // GROUND_MUST_EXT: rooms that must touch exterior wall (non-south)
-  for (const roomId of GROUND_MUST_EXT) {
-    if (!groundGrid.roomData[roomId]) continue;
-    const bbox = groundGrid.getBoundingBox(roomId);
-    const p = bboxToPlacement(bbox);
-    if (touchesExteriorNonSouth(p, groundGrid.width * GRID_SIZE, groundGrid.height * GRID_SIZE)) continue;
-
-    const adjIds = getAdjacentRegionIds(groundGrid, roomId, groundRegionIdGrid);
-    if (claimRegion(adjIds, r => r.touchesExterior)) {
-      bridgedIds.add(roomId);
-    } else {
-      ids.push(roomId);
+    for (const [a, b] of extraPairs) {
+      if (!grid.roomData[a] || !grid.roomData[b]) continue;
+      const pA = bboxToPlacement(grid.getBoundingBox(a));
+      const pB = bboxToPlacement(grid.getBoundingBox(b));
+      const bW = grid.width * GRID_SIZE, bD = grid.height * GRID_SIZE;
+      const directlyAdjacent = adjacent(pA, pB);
+      const aExtOk = directlyAdjacent || touchesExteriorNonSouth(pA, bW, bD);
+      const bExtOk = directlyAdjacent || touchesExteriorNonSouth(pB, bW, bD);
+      if (!aExtOk) unmet.push({ room: a, target: b });
+      if (!bExtOk) unmet.push({ room: b, target: a });
     }
-  }
 
-  // repair_zone ↔ parking: adjacent or each touches exterior
-  const hasParking    = !!groundGrid.roomData['parking'];
-  const hasRepairZone = !!groundGrid.roomData['repair_zone'];
-  if (hasParking && hasRepairZone) {
-    const parkBbox   = groundGrid.getBoundingBox('parking');
-    const repairBbox = groundGrid.getBoundingBox('repair_zone');
-    const pP = bboxToPlacement(parkBbox);
-    const pR = bboxToPlacement(repairBbox);
-    const bW = groundGrid.width * GRID_SIZE, bD = groundGrid.height * GRID_SIZE;
-    const directlyAdjacent = adjacent(pP, pR);
-    const parkingExtOk  = directlyAdjacent || touchesExteriorNonSouth(pP, bW, bD);
-    const repairExtOk   = directlyAdjacent || touchesExteriorNonSouth(pR, bW, bD);
+    if (unmet.length === 0) return;
 
-    if (!parkingExtOk || !repairExtOk) {
-      const pAdjIds = getAdjacentRegionIds(groundGrid, 'parking', groundRegionIdGrid);
-      const rAdjIds = getAdjacentRegionIds(groundGrid, 'repair_zone', groundRegionIdGrid);
-      // Find intersection: unclaimed region adjacent to both
-      let bridged = false;
-      for (const rId of pAdjIds) {
-        if (rAdjIds.has(rId) && !claimedGround.has(rId)) {
-          claimedGround.add(rId);
-          bridged = true; break;
+    // Try to satisfy unmet requirements through regions
+    const satisfiedInFloor = new Set();
+
+    for (const region of regions) {
+      const sequence = getRegionBoundarySequence(grid, regionIdGrid, region.id);
+      if (sequence.length === 0) continue;
+
+      // Find all remaining requirements that this region *could* satisfy
+      const possible = unmet.filter(req => !satisfiedInFloor.has(req.room) && 
+                                           sequence.includes(req.room) && 
+                                           sequence.includes(req.target));
+      
+      if (possible.length === 0) continue;
+
+      // Try to satisfy as many as possible (Topological Non-Crossing)
+      // Greedy approach: try largest subset, then smaller ones
+      for (let size = possible.length; size >= 1; size--) {
+        // Simple case: try all at once first
+        const subset = possible.slice(0, size);
+        const pairs = subset.map(r => [r.room, r.target]);
+        if (canSatisfyNonCrossing(sequence, pairs)) {
+          subset.forEach(s => {
+            satisfiedInFloor.add(s.room);
+            bridgedIds.add(s.room);
+          });
+          break;
         }
       }
-      if (bridged) {
-        if (!parkingExtOk) bridgedIds.add('parking');
-        if (!repairExtOk)  bridgedIds.add('repair_zone');
-      } else {
-        if (!parkingExtOk) ids.push('parking');
-        if (!repairExtOk)  ids.push('repair_zone');
-      }
     }
+
+    // Add remaining truly unmet to global list
+    unmet.forEach(req => {
+      if (!satisfiedInFloor.has(req.room)) {
+        if (!ids.includes(req.room)) ids.push(req.room);
+      }
+    });
   }
 
-  // ── Level-1 floor ─────────────────────────────────────────────────────────
-  const { regions: l1Regions, regionIdGrid: l1RegionIdGrid } = getConnectedEmptyRegions(level1Grid);
-  const claimedLevel1 = new Set();
-  const corridorExists = !!level1Grid.roomData['corridor_l1'];
-  const cAdjIds = corridorExists ? getAdjacentRegionIds(level1Grid, 'corridor_l1', l1RegionIdGrid) : new Set();
-
-  for (const roomId of LEVEL1_MUST_FACE_CORRIDOR) {
-    if (!level1Grid.roomData[roomId]) continue;
-    if (!corridorExists) { ids.push(roomId); continue; }
-
-    const rBbox = level1Grid.getBoundingBox(roomId);
-    const cBbox = level1Grid.getBoundingBox('corridor_l1');
-    if (adjacent(bboxToPlacement(rBbox), bboxToPlacement(cBbox))) continue;
-
-    const rAdjIds = getAdjacentRegionIds(level1Grid, roomId, l1RegionIdGrid);
-    let bridged = false;
-    for (const rId of rAdjIds) {
-      if (cAdjIds.has(rId) && !claimedLevel1.has(rId)) {
-        claimedLevel1.add(rId);
-        bridged = true; break;
-      }
-    }
-    if (bridged) bridgedIds.add(roomId);
-    else ids.push(roomId);
-  }
+  // Ground Floor: Exterior access for main rooms + Mutual access for parking/repair
+  processFloor(groundGrid, GROUND_MUST_EXT, [['parking', 'repair_zone']]);
+  
+  // Level 1: Corridor access
+  processFloor(level1Grid, [], LEVEL1_MUST_FACE_CORRIDOR.map(r => [r, 'corridor_l1']));
 
   return { penalty: -doorAccessPenalty * ids.length, ids, bridgedIds };
 }
