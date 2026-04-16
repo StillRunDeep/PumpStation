@@ -2,7 +2,7 @@ import { fmt } from '../utils.js'
 import {
   _r, _l, _t, _poly, _dh, _dv,
   _elbow, _checkValve, _gateValve, _flowmeter, _tee, _leader,
-  _sectionLineBS,
+  _reducer,
 } from '../render/svg-helpers.js'
 import { initSvgZoomPan } from '../render/zoom-pan.js'
 import {
@@ -20,571 +20,722 @@ import {
  * @param {Object|null} topology - AG0-1 拓扑
  * @param {Object} extraInfo - 扩展信息 { Q_single, H_design, P_motor, catalogPump, Z_sump }
  */
-export function runDrawing(N, ag21, params, S, topology, extraInfo = {}) {
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── 1. 输入参数解析 ─────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+function parseInputs(N, ag21, params, S, _topology, extraInfo) {
   const {
     L, W, d_spacing = 1.0, e_wall = 0.8, w_pump, d_pump, N_total, h_room,
-    hasCatalogDims, DN_branch = 150, DN_main = 300,
+    hasCatalogDims, DN_branch = 150, DN_main = 300, DN_label = DN_main,
     c_wall_m = 0, L_elbow_m = 0,
+    valvesAfterJunction = [],
   } = ag21
   const { h_pool, h_active, Z_stop: stopLevel, Z_start1: startLevel, Z_start2, Z_alarm_high: alarmLevel, Z_alarm_low, Z_max } = params
   const { Q_single, H_design, P_motor, catalogPump, Z_sump } = extraInfo
 
   const L_pool = Math.max(L, Math.sqrt(S * 1.5))
   const D_pool = S / L_pool
-  // 使用 AG2-1 计算的 h_room，替代旧启发式公式
   const room_H = h_room || Math.max(3.5, d_pump + 2.0)
 
-  const VW = 1080, VH = 580
+  // Z_top = 顶板标高 = 停泵水位 + 池深
+  const Z_top = stopLevel + h_pool
+
+  return {
+    N, L, W, d_spacing, e_wall, w_pump, d_pump, N_total, h_room,
+    hasCatalogDims, DN_branch, DN_main, DN_label, c_wall_m, L_elbow_m,
+    valvesAfterJunction,
+    h_pool, h_active, stopLevel, startLevel, Z_start2, alarmLevel, Z_alarm_low, Z_max,
+    Q_single, H_design, P_motor, catalogPump, Z_sump,
+    L_pool, D_pool, room_H, Z_top,
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── 2. 几何计算（SCALE 系统）────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * @typedef {Object} Geo
+ * @property {number} SCALE_MAIN  - 主平面图比例（像素/米）
+ * @property {number} SCALE_MINI  - 鹰眼缩略图比例（像素/米）
+ * @property {number} PW          - 平面图宽度
+ * @property {number} PH          - 平面图高度
+ * @property {number} pool_ox     - 集水池左上角 X
+ * @property {number} pool_oy     - 集水池左上角 Y
+ * @property {number} pool_x2     - 集水池右下角 X
+ * @property {number} pool_y2     - 集水池右下角 Y
+ * @property {number} room_ox    - 机房左上角 X
+ * @property {number} room_oy    - 机房左上角 Y
+ * @property {number} room_x2    - 机房右下角 X
+ * @property {number} room_y2    - 机房右下角 Y
+ * @property {number} hdr_y      - 主管（梳脊）Y 坐标
+ * @property {number} SX0        - 剖面图起始 X
+ * @property {number} SW          - 剖面图宽度
+ * @property {number} sec_cx     - 剖面图中心 X
+ * @property {number} Z_top_px - 池顶 Y（剖面图）
+ * @property {number} pool_bot_y - 池底 Y（剖面图）
+ * @property {number} ss         - 剖面图比例（像素/米）
+ * @property {number} SCALE_SEC    - 维护间比例（像素/米）
+ * @property {number} Z_top_px   - Z_top 对应的像素 Y
+ */
+
+/**
+ * @param {Object} inputs
+ * @returns {Geo}
+ */
+function computeGeometry(inputs) {
+  const { L, W, D_pool, L_pool, h_pool, room_H, Z_top, stopLevel } = inputs
+
+  // ─── 主平面图尺寸与比例尺 ───
+  const PW = 500, PH = 560
+  const PML = 50, PMR = 30, PMT = 60, PMB = 40
+
+  // SCALE_MAIN：只聚焦机房(L,W)，加 1m 余量防止贴边
+  const SCALE_MAIN = Math.min((PW - PML - PMR) / (L + 1), (PH - PMT - PMB) / (W + 1))
+
+  // 机房坐标（居中对齐）
+  const room_ox = PML + (PW - PML - PMR - L * SCALE_MAIN) / 2
+  const room_oy = PMT
+  const room_x2 = room_ox + L * SCALE_MAIN
+  const room_y2 = room_oy + W * SCALE_MAIN
+
+  // 梳脊（主管）Y 坐标：画在机房内部，靠近顶部，预留 0.8m 物理距离
+  const hdr_y = room_oy + (0.8 * SCALE_MAIN)
+
+  // 集水池坐标（水池在机房下方 Y 轴正方向相接）
+  const pool_ox = room_ox - (L_pool - L) / 2 * SCALE_MAIN
+  const pool_oy = room_y2
+  const pool_x2 = pool_ox + L_pool * SCALE_MAIN
+  const pool_y2 = pool_oy + D_pool * SCALE_MAIN
+
+  // ─── 鹰眼缩略图比例尺 ───
+  const MINI_SIZE = 150
+  const MINI_MARGIN = 10
+  const max_physical_width = Math.max(L, L_pool)
+  const total_physical_depth = W + D_pool
+  const SCALE_MINI = Math.min(
+    (MINI_SIZE - 2 * MINI_MARGIN) / max_physical_width,
+    (MINI_SIZE - 2 * MINI_MARGIN) / total_physical_depth
+  )
+
+  // ─── 剖面图（Z 轴统一比例尺）───
+  const SX0 = 540, SW = 450
+  const SML = 50, SMR = 40, SMT = 40, SMB = 50
+  const sec_cx = SX0 + SML + (SW - SML - SMR) / 2
+
+  // 物理总高度 = 地上机房净高 + 地下池深
+  const total_physical_height = room_H + h_pool
+  const available_screen_height = PH - SMT - SMB
+  const SCALE_SEC = available_screen_height / (total_physical_height + 1)
+
+  // Z_top 基准线像素坐标（屏幕 Y 轴朝下，所以 Z-top 线 = 顶部留白 + 机房高度）
+  const Z_top_px = SMT + (room_H * SCALE_SEC)
+
+  // 池底像素坐标 = Z_top 基准线向下走（地下深度 × 比例尺）
+  const pool_bot_y = Z_top_px + (h_pool * SCALE_SEC)
+
+  // 剖面图水平范围（独立坐标系，不复用平面图 room_ox/room_x2）
+  // 使用与 Z 轴一致的比例尺，限定在可用宽度内
+  const sec_avail_w = SW - SML - SMR  // 可用水平像素 ≈ 360
+  const sec_pool_w_px = Math.min(L * SCALE_SEC, sec_avail_w)
+  const sec_left = sec_cx - sec_pool_w_px / 2
+  const sec_right = sec_cx + sec_pool_w_px / 2
+
+  return {
+    SCALE_MAIN, SCALE_MINI, SCALE_SEC, PW, PH,
+    pool_ox, pool_oy, pool_x2, pool_y2,
+    room_ox, room_oy, room_x2, room_y2,
+    hdr_y, MINI_SIZE, MINI_MARGIN,
+    SX0, SW, sec_cx, Z_top_px, pool_bot_y,
+    Z_top, stopLevel,
+    sec_left, sec_right,
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── 3. 鹰眼缩略图 (完美空间对齐版) ────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * @param {Object} inputs
+ * @param {Geo} geo
+ * @returns {string} SVG string
+ */
+function buildMinimap(inputs, geo) {
+  const { L, W, D_pool, L_pool } = inputs;
+  const { SCALE_MINI, MINI_SIZE, MINI_MARGIN } = geo;
+
+  let s = '';
+
+  // 缩略图容器起点（左上角）
+  const mini_ox = MINI_MARGIN;
+  const mini_oy = MINI_MARGIN;
+
+  // 1. 转换所有组件的微缩物理尺寸
+  const mini_room_w = L * SCALE_MINI;
+  const mini_room_h = W * SCALE_MINI;
+  const mini_pool_w = L_pool * SCALE_MINI;
+  const mini_pool_h = D_pool * SCALE_MINI;
+
+  // 2. 计算整个建筑群（机房+水池）的总包络盒尺寸
+  // 宽度取机房和水池中最宽的一个，高度是两者上下拼接之和
+  const total_w = Math.max(mini_room_w, mini_pool_w);
+  const total_h = mini_room_h + mini_pool_h; 
+
+  // 3. 将【总包络盒】在 150x150 的缩略图容器内绝对居中
+  const start_x = MINI_MARGIN + (MINI_SIZE - 2 * MINI_MARGIN - total_w) / 2;
+  const start_y = MINI_MARGIN + (MINI_SIZE - 2 * MINI_MARGIN - total_h) / 2;
+
+  // 4. 根据总包络盒的起点，计算各自的绝对坐标 (保持 X轴居中对齐，Y轴上下拼接)
+  const mini_room_x = start_x + (total_w - mini_room_w) / 2;
+  const mini_room_y = start_y; // 机房在上方
+
+  const mini_pool_x = start_x + (total_w - mini_pool_w) / 2;
+  const mini_pool_y = start_y + mini_room_h; // 水池紧贴在机房正下方
+
+  // 5. 绘制图形
+  // 白色实心底板（防止被下方管线穿透干扰）
+  s += _r(mini_ox - 2, mini_oy - 2, MINI_SIZE + 4, MINI_SIZE + 4, '#fff', '#ccc', 0.5);
+
+  // 画水池 (浅蓝色填充)
+  s += _r(mini_pool_x, mini_pool_y, mini_pool_w, mini_pool_h, '#f8fbff', '#2980b9', 1);
+  // 画机房 (透明底，深色虚线框，避免挡住重叠部分)
+  s += _r(mini_room_x, mini_room_y, mini_room_w, mini_room_h, 'rgba(255,255,255,0.7)', '#2471a3', 1.5, 'stroke-dasharray="3,2"');
+
+  // 6. 极简文字标注 (字号调小，颜色调淡，避免喧宾夺主)
+  // 水池标注
+  const pool_center_x = mini_pool_x + mini_pool_w / 2;
+  const pool_center_y = mini_pool_y + mini_pool_h / 2;
+  s += _t(pool_center_x, pool_center_y, '集水池', 10, '#2980b9', 'middle', 'bold');
+  s += _t(pool_center_x, mini_pool_y + mini_pool_h + 10, `${fmt(L_pool, 1)} x ${fmt(D_pool, 1)}m`, 8, '#7f8c8d', 'middle');
+
+  // 机房标注 (如果机房太小就不写字了，防重叠)
+  if (mini_room_h > 15) {
+    const room_center_x = mini_room_x + mini_room_w / 2;
+    const room_center_y = mini_room_y + mini_room_h / 2;
+    s += _t(room_center_x, room_center_y + 3, '机房', 9, '#2471a3', 'middle');
+  }
+
+  return s;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── 4. 拓扑驱动的梳齿布局 ────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * @param {Object} topology
+ * @param {Geo} geo
+ * @param {Object} inputs
+ * @returns {Object|null} layoutMap
+ */
+function buildLayoutMap(topology, geo, inputs) {
+  if (!topology) return null
+
+  const { devices, nodes, pipes } = topology
+  const { SCALE_MAIN, room_ox, room_x2, room_y2, hdr_y } = geo
+  const { DN_branch, DN_main, e_wall, w_pump, d_spacing, N_total } = inputs
+
+  // 建立邻接表
+  const adj = {}
+  for (const n of nodes) adj[n.id] = []
+  for (const p of pipes) {
+    adj[p.node1]?.push(p.node2)
+    adj[p.node2]?.push(p.node1)
+  }
+
+  // 找关键设备
+  const pumps = devices.filter(d => d.type === 'pump' && d.roomId === 'wet_well')
+    .sort((a, b) => (a.canvasX || 0) - (b.canvasX || 0))
+
+  const junction = devices.find(d => d.type === 'junction')
+  const sourceNode = nodes.find(n => n.label === '进水')
+  const sinkNode = nodes.find(n => n.label === '出水')
+
+  // 水泵 X 坐标（沿 X 轴等距排列）
+  const firstPumpX = room_ox + e_wall * SCALE_MAIN + w_pump * SCALE_MAIN / 2
+  const pumpXs = pumps.map((_, i) => firstPumpX + i * (w_pump + d_spacing) * SCALE_MAIN)
+
+  // 最小直管段
+  const minStr_px = Math.max(2 * DN_branch, 300) / 1000 * SCALE_MAIN
+
+  // ── 主分支（每泵一个梳齿）──────────────────────────────────────────
+  const branches = pumps.map((pump, i) => {
+    const pumpOutNodeId = pump.nodeIds?.[0]
+    const junctionInNodeId = junction?.nodeIds?.[0]
+
+    // BFS 找到从泵出口到汇流点入口的路径 (顺序: 止回阀 -> 闸阀)
+    const path = tracePath(pumpOutNodeId, [junctionInNodeId], adj)
+    const chainDevices = path
+      .map(nodeId => devices.find(d => d.nodeIds?.includes(nodeId)))
+      .filter(Boolean)
+
+    const items = []
+    
+    // 【核心修复】：从穿楼板处(底部)开始，向梳脊(上方)逆推 Y 坐标！
+    let curY = room_y2 
+    
+    // 弯头（水泵穿上来后的第一个转向件）
+    const elbow_r = elbowCTF(DN_branch) / 1000 * SCALE_MAIN * 0.5
+    curY -= elbow_r * 2  // 向上移动，越过弯头占据的空间
+
+    chainDevices.forEach(dev => {
+      const hl = deviceHalfLen(dev, DN_branch, SCALE_MAIN)
+      curY -= minStr_px + hl // 向上移动：跨过直管段和阀门的下半部分
+      items.push({ device: dev, planX: pumpXs[i], planY: curY, halfLen: hl })
+      curY -= hl // 向上移动：跨过阀门的上半部分，准备迎接下一个设备
+    })
+
+    // 泵本身依然记在坑底
+    const pump_y = room_y2 + 10
+    items.push({ device: pump, planX: pumpXs[i], planY: pump_y, halfLen: 0, isPump: true })
+
+    return items
+  })
+
+  // ── 旁通分支 ─────────────────────────────────────────────────────────
+  const bypass_y = hdr_y + 40  // 旁通管在主梳脊下方
+  const junctionInNodeId = junction?.nodeIds?.[0]
+  const bypassPath = sourceNode ? tracePath(sourceNode.id, [junctionInNodeId], adj) : []
+  const bypassDevices = bypassPath
+    .map(nodeId => devices.find(d => d.nodeIds?.includes(nodeId)))
+    .filter(Boolean)
+
+  let bypass_x = room_ox + e_wall * SCALE_MAIN
+  const bypassChain = bypassDevices.map(dev => {
+    const hl = deviceHalfLen(dev, DN_branch, SCALE_MAIN)
+    bypass_x += minStr_px + hl
+    const item = { device: dev, planX: bypass_x, planY: bypass_y, halfLen: hl }
+    bypass_x += hl
+    return item
+  })
+
+  // ── 主管阀门链（汇流点出口 → 出水口）─────────────────────────────────
+  const junctionOutNodeId = junction?.nodeIds?.[junction.nodeIds.length - 1]
+  const mainPath = sinkNode ? tracePath(junctionOutNodeId, [sinkNode.id], adj) : []
+  const mainDevices = mainPath
+    .map(nodeId => devices.find(d => d.nodeIds?.includes(nodeId)))
+    .filter(Boolean)
+
+  const minStr_main = Math.max(2 * DN_main, 300) / 1000 * SCALE_MAIN
+  const mainStartX = Math.max(...pumpXs) + w_pump * SCALE_MAIN / 2 + e_wall * SCALE_MAIN
+  let mainCurX = mainStartX
+  const mainChain = mainDevices.map(dev => {
+    const hl = deviceHalfLen(dev, DN_main, SCALE_MAIN)
+    mainCurX += minStr_main + hl
+    const item = { device: dev, planX: mainCurX, planY: hdr_y, halfLen: hl }
+    mainCurX += hl
+    return item
+  })
+
+  return { branches, bypassChain, mainChain, pumpXs, hdr_y, bypass_y }
+}
+
+/**
+ * BFS 路径追踪
+ */
+function tracePath(startNodeId, endNodeIds, adj) {
+  if (!startNodeId) return []
+  const endSet = new Set(endNodeIds?.filter(Boolean) || [])
+  if (endSet.size === 0) return []
+
+  const visited = new Set()
+  const queue = [[startNodeId, []]]
+
+  while (queue.length) {
+    const [cur, path] = queue.shift()
+    if (visited.has(cur)) continue
+    visited.add(cur)
+
+    if (endSet.has(cur)) return path
+
+    for (const next of (adj[cur] || [])) {
+      if (!visited.has(next)) queue.push([next, [...path, next]])
+    }
+  }
+  return []
+}
+
+/**
+ * 计算设备半长（像素）
+ */
+function deviceHalfLen(device, dn, scale) {
+  if (!device) return 0
+  if (device.type === 'check_valve') return lookupFF(CHECK_VALVE_FF, dn) / 1000 * scale / 2
+  if (device.type === 'gate_valve') return lookupFF(GATE_VALVE_FF, dn) / 1000 * scale / 2
+  if (device.type === 'flowmeter') return flowmeterBodyL(dn) / 1000 * scale / 2
+  if (device.type === 'pump') return 0
+  if (device.type === 'junction') return 0
+  return 0
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ── 5. 主平面图 ────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * @param {Object} inputs
+ * @param {Geo} geo
+ * @param {Object|null} layoutMap
+ * @returns {{ s: string }}
+ */
+function buildPlanView(inputs, geo, layoutMap) {
+  const {
+    L, W, d_spacing, e_wall, w_pump, d_pump, N_total,
+    hasCatalogDims, DN_branch, DN_label,
+    L_pool, D_pool,
+    Q_single, H_design, P_motor,
+    pumpsInOrder,
+  } = inputs
+
+  const { SCALE_MAIN, PW, PH, pool_ox, pool_x2, pool_oy, pool_y2,
+          room_ox, room_oy, room_x2, room_y2, hdr_y } = geo
+  // bypass_y 来自 layoutMap（不在 geo 中）
+  const bypass_y = layoutMap?.bypass_y ?? (hdr_y + 40)
+
   let s = ''
 
-  s += _r(0, 0, VW, VH, '#fafafa', 'none')
-  s += _l(572, 15, 572, VH - 15, '#e8e8e8', 1, '5,3')
+  // 背景
+  s += _r(0, 0, PW, PH, '#fafafa', 'none')
 
-  // ── Plan view (left) ──────────────────────────────────────────────────────────
-  const PML = 78, PMR = 48, PMT = 55, PMB = 62
-  const PW = 572, PH = VH
-  const pavw = PW - PML - PMR, pavh = PH - PMT - PMB
-  const ps = Math.min(pavw / L_pool, pavh / (W + D_pool))
-  const pool_ox = PML + (pavw - L_pool * ps) / 2
-  const room_ox = pool_ox + (L_pool - L) / 2 * ps
-  const room_oy = PMT + (pavh - (W + D_pool) * ps) / 2
-  const room_x2 = room_ox + L * ps
-  const room_y2 = room_oy + W * ps
-  const pool_x2 = pool_ox + L_pool * ps
-  const pool_y2 = room_y2 + D_pool * ps
-  const hdr_y   = room_oy + Math.max(14, 0.2 * ps)
+  // 标题
+  s += _t(PW / 2, 25, '平 面 图', 12, '#1a5276', 'middle', 'bold')
 
-  s += _t(PW / 2, PMT - 14, '平 面 图（俯 视）', 13, '#1a5276', 'middle', 'bold')
+  // ── 集水池 ──────────────────────────────────────────────────────────
+  s += _r(pool_ox, pool_oy, L_pool * SCALE_MAIN, D_pool * SCALE_MAIN, '#f8fbff', '#2980b9', 2)
+  const pcx = (pool_ox + pool_x2) / 2
+  const pcy = pool_oy + D_pool * SCALE_MAIN / 2
+  s += _t(pcx, pcy, '集水池', 11, '#2980b9', 'middle', 'bold')
 
-  s += _r(pool_ox, room_y2, L_pool * ps, D_pool * ps, '#f8fbff', '#2980b9', 2)
-  const pcx = (pool_ox + pool_x2) / 2, pcy = room_y2 + D_pool * ps / 2
-  s += _t(pcx, pcy - 8, '集 水 池', 13, '#2980b9', 'middle', 'bold')
-  s += _t(pcx, pcy + 8, `S=${fmt(S, 1)}m²  h=${fmt(h_pool, 1)}m`, 10, '#2980b9')
-  s += _t(pcx, pcy + 21, '水位见右侧剖面图', 9, '#888')
-  s += _l(room_ox, room_y2, room_x2, room_y2, '#2980b9', 1.5, '4,3')
+  // ── 集水坑（坑口范围示意）─────────────────────────────────────────────
+  // 平面图中只标注机房正下方的坑口轮廓，高度约为水泵深度 + 1m 余量，不覆盖整个集水池
+  const sump_h = Math.max(d_pump + 1.0, 3.0) * SCALE_MAIN
+  s += _r(room_ox, room_y2, room_x2 - room_ox, sump_h, '#dbeeff', '#2471a3', 1.5, 'stroke-dasharray="4,2"')
+  const scx = (room_ox + room_x2) / 2
+  s += _t(scx, room_y2 + sump_h / 2 + 3, '集水坑', 9, '#2471a3', 'middle')
 
-  s += _r(room_ox, room_oy, L * ps, W * ps, '#f8fbff', '#2980b9', 2.5)
+  // ── 机房虚线框 ──────────────────────────────────────────────────────
+  s += _r(room_ox, room_oy, L * SCALE_MAIN, W * SCALE_MAIN, 'none', '#2980b9', 1.5, 'stroke-dasharray="6,3"')
 
-  // 总管（DN_main，2.5px 粗线）
-  s += _l(room_ox + e_wall * ps, hdr_y, room_x2 - e_wall * ps, hdr_y, '#2980b9', 2.5)
-  s += _t(room_ox + e_wall * ps + 3, hdr_y - 6, 'DN' + ag21.DN_label + ' 出水总管', 10, '#2980b9', 'start')
+  // ── 梳脊（主管）────────────────────────────────────────────────────
+  s += _l(room_ox + e_wall * SCALE_MAIN, hdr_y, room_x2 - e_wall * SCALE_MAIN, hdr_y, '#2980b9', 2.5)
+  s += _t(room_ox + e_wall * SCALE_MAIN + 5, hdr_y - 5, `DN${DN_label} 出水总管`, 9, '#2980b9', 'start')
 
-  // ── DN 换算 px ──────────────────────────────────────────────────
-  const L_cv_px  = lookupFF(CHECK_VALVE_FF, DN_branch) / 1000 * ps
-  const L_gv_px  = lookupFF(GATE_VALVE_FF, DN_branch) / 1000 * ps
-  const L_str_px = Math.max(2 * DN_branch, 300) / 1000 * ps
-  const L_elb_px = elbowCTF(DN_branch) / 1000 * ps
-  const c_wall_px = c_wall_m * ps
-
-  // DN 标注辅助函数（空间不足用引线）
-  const dnLabel = (x, y, dn, horiz = true) => {
-    const label = `DN${dn}`
-    if (horiz) {
-      if (y > 15) return _t(x, y - 10, label, 9, '#555', 'middle')
-      return _leader(x, y + 8, x, y + 28, label, 9, '#555')
-    } else {
-      if (x > 15) return _t(x - 10, y, label, 9, '#555', 'end', 'normal')
-      return _leader(x + 8, y, x + 28, y, label, 9, '#555')
+  // ── 主管阀门（汇流点右侧）──────────────────────────────────────────
+  if (layoutMap?.mainChain?.length) {
+    for (const { device, planX, planY, halfLen } of layoutMap.mainChain) {
+      const hl = halfLen
+      if (device.type === 'gate_valve') {
+        s += `<g class="valve-group" data-type="总闸阀" data-dn="${DN_branch}">`
+        s += _gateValve(planX, planY, hl, true, '#c0392b')
+        s += '</g>'
+      } else if (device.type === 'check_valve') {
+        s += `<g class="valve-group" data-type="总止回阀" data-dn="${DN_branch}">`
+        s += _checkValve(planX, planY, hl, true, '#c0392b')
+        s += '</g>'
+      } else if (device.type === 'flowmeter') {
+        const r_main = DN_main / 1000 * SCALE_MAIN
+        s += `<g class="valve-group" data-type="流量计" data-dn="${DN_branch}">`
+        s += _flowmeter(planX, planY, hl, r_main / 2, true, '#c0392b')
+        s += '</g>'
+      }
     }
   }
 
-  // ── 潜污泵（集水坑内，靠维护间一侧/集水坑墙）───────────────
-  const pumpsInOrder = null
-  const pumpXPositions = []  // 记录每台泵的 X 坐标（用于竖向管道）
-
-  // Bug B 修复：泵位置应靠集水坑墙（room_y2 侧）
-  const firstX = room_ox + e_wall * ps + w_pump * ps / 2
+  // ── 梳齿（分支管路）─────────────────────────────────────────────────
+  const L_elb_px = elbowCTF(DN_branch) / 1000 * SCALE_MAIN
 
   for (let i = 0; i < N_total; i++) {
-    const topoP     = pumpsInOrder ? pumpsInOrder[i] : null
-    const isSpare   = topoP ? !!topoP.isSpare : (i === N_total - 1)
-    const label      = topoP ? topoP.label : (isSpare ? '备' : 'P' + (i + 1))
+    const topoP = pumpsInOrder?.[i]
+    const isSpare = topoP ? !!topoP.isSpare : (i === N_total - 1)
+    const label = topoP ? topoP.label : (isSpare ? '备' : 'P' + (i + 1))
 
-    // 泵外形：用 catalog 尺寸或默认值
+    // 水泵
     const pw = (hasCatalogDims && topoP
       ? (topoP.pump?.dimensions_mm?.b || w_pump) / 1000
-      : w_pump) * ps
+      : w_pump) * SCALE_MAIN
     const ph = (hasCatalogDims && topoP
       ? (topoP.pump?.dimensions_mm?.a || d_pump) / 1000
-      : d_pump) * ps
-    const pumpFill   = '#2471a3'  // 泵统一颜色
-    const pumpStroke = '#1a5276'
+      : d_pump) * SCALE_MAIN
 
-    // Bug B 修复：泵位置靠集水坑墙（room_y2 + 偏移）
-    const wx = firstX + i * (w_pump + d_spacing) * ps
-    const wy = room_y2 + d_pump * ps / 2 + 6  // 靠共享墙
-    pumpXPositions.push(wx)
+    const pumpX = layoutMap?.pumpXs?.[i] || (room_ox + e_wall * SCALE_MAIN + w_pump * SCALE_MAIN / 2 + i * (w_pump + d_spacing) * SCALE_MAIN)
+    const pumpY = room_y2 + ph / 2 + 6
 
-    // 泵矩形（hover 用 data-* 属性）
-    const pumpModel = catalogPump?.pump?.model || ''
-    s += `<g class="pump-group"
-        data-pump="${label}"
-        data-q="${Q_single || ''}"
-        data-h="${H_design || ''}"
-        data-kw="${P_motor || ''}"
-        data-model="${pumpModel}">`
-    s += _r(wx - pw / 2, wy - ph / 2, pw, ph, pumpFill, pumpStroke, 1.5)
-    const fsz = Math.max(9, Math.min(12, pw * 0.4))
-    s += _t(wx, wy + 4, label, fsz, '#fff', 'middle', 'bold')
+    s += `<g class="pump-group" data-pump="${label}" data-q="${Q_single || ''}" data-h="${H_design || ''}" data-kw="${P_motor || ''}">`
+    s += _r(pumpX - pw / 2, pumpY - ph / 2, pw, ph, '#2471a3', '#1a5276', 1.5)
+    s += _t(pumpX, pumpY + 3, label, Math.max(8, pw * 0.4), '#fff', 'middle', 'bold')
     s += '</g>'
 
-    // Q 标注（泵上方）
-    if (Q_single) {
-      s += _t(wx, wy - ph / 2 - 8, `Q=${fmt(Q_single, 0)} m³/h`, 9, '#444', 'middle')
+    // 穿层孔洞
+    s += `<circle cx="${pumpX.toFixed(1)}" cy="${room_y2.toFixed(1)}" r="5" fill="none" stroke="#2980b9" stroke-width="1.5" stroke-dasharray="3,2"/>`
+
+    // 支管（如果 layoutMap 有数据，用动态布局）
+    const branch = layoutMap?.branches?.[i]
+    if (branch && branch.length > 0) {
+      // 从楼板孔洞开始画
+      let lastY = room_y2
+
+      // 画第一个弯头（90°转向）
+      const elbow_r = L_elb_px * 0.5
+      s += _elbow(pumpX, lastY, elbow_r, 'bottom', 'right', '#2980b9', 1.5)
+      lastY -= elbow_r * 2 // 更新画笔位置到了弯头上边缘
+
+      for (const { device, planX, planY, halfLen } of branch) {
+        if (device.isPump) continue  // 泵已在上方绘制
+
+        // 画连接上一个点到当前阀门中心的直线
+        s += _l(planX, lastY, planX, planY, '#2980b9', 1.5)
+
+        // 画阀门符号
+        if (device.type === 'check_valve') {
+          s += `<g class="valve-group" data-type="止回阀" data-dn="${DN_branch}">`
+          s += _checkValve(planX, planY, halfLen, false, '#c0392b')
+          s += '</g>'
+        } else if (device.type === 'gate_valve') {
+          s += `<g class="valve-group" data-type="闸阀" data-dn="${DN_branch}">`
+          s += _gateValve(planX, planY, halfLen, false, '#c0392b')
+          s += '</g>'
+        }
+
+        // 更新画笔位置为当前阀门的中心（下一条线会从这里继续往上画）
+        lastY = planY
+      }
+
+      // 所有的阀门画完后，把最后一点线头连到上方的梳脊总管
+      s += _l(pumpX, lastY, pumpX, hdr_y, '#2980b9', 1.5)
     }
-
-    // ── 压水管（竖向穿楼板）────────────────────────────
-    // 穿楼板孔（圆形）
-    const floorHoleX = wx
-    const floorHoleY = room_y2
-    s += `<circle cx="${floorHoleX.toFixed(1)}" cy="${floorHoleY.toFixed(1)}" r="6" fill="none" stroke="#2980b9" stroke-width="1.5" stroke-dasharray="3,2"/>`
-
-    // 压水管竖向段（集水坑内 → 穿楼板孔）
-    s += _l(floorHoleX, wy + ph / 2, floorHoleX, floorHoleY, '#2980b9', 1.5)
-
-    // ── 分支管路（Y 方向梳齿状竖支管）────────────────────────────
-    // 每台泵一条独立竖支管：楼板穿孔 → 90°弯头 → 水平管 → CV → 直管 → GV → T接总管
-    // Y 方向延伸（从 floorHoleY 向 hdr_y 方向，即负 Y 方向）
-    const cv_cy = room_y2 - (L_elb_px + L_str_px + L_cv_px / 2)  // 止回阀中心 Y
-    const gv_cy = room_y2 - (L_elb_px + L_str_px + L_cv_px + L_str_px + L_gv_px / 2)  // 闸阀中心 Y
-    const horizEndY = room_y2 - (L_elb_px + L_str_px + L_cv_px + L_str_px + L_gv_px)  // 水平管末端 Y
-
-    // 弯头（90°）：从竖向转为水平
-    const elbow_r = L_elb_px * 0.5
-    s += _elbow(floorHoleX + elbow_r, floorHoleY, elbow_r, 'top', 'right', '#2980b9', 1.5)
-
-    // 水平支管段（从弯头到 T 接总管，Y 方向）
-    s += _l(floorHoleX, horizEndY, floorHoleX, cv_cy, '#2980b9', 1.5)
-    s += _l(floorHoleX, cv_cy, floorHoleX, gv_cy, '#2980b9', 1.5)
-    s += _l(floorHoleX, gv_cy, floorHoleX, hdr_y, '#2980b9', 1.5)
-
-    // DN 标注（垂直引线）
-    const dnMidY = (horizEndY + hdr_y) / 2
-    s += _leader(floorHoleX + 8, dnMidY, floorHoleX + 28, dnMidY, `DN${DN_branch}`, 9, '#555')
-
-    // 止回阀（竖向 horiz=false）
-    s += `<g class="valve-group" data-type="止回阀" data-dn="${DN_branch}" data-ff="${lookupFF(CHECK_VALVE_FF, DN_branch)}" data-std="GB/T 12221">`
-    s += _checkValve(floorHoleX, cv_cy, L_cv_px / 2, false, '#c0392b')
-    s += '</g>'
-
-    // 闸阀（竖向 horiz=false）
-    s += `<g class="valve-group" data-type="闸阀" data-dn="${DN_branch}" data-ff="${lookupFF(GATE_VALVE_FF, DN_branch)}" data-std="GB/T 12221">`
-    s += _gateValve(floorHoleX, gv_cy, L_gv_px / 2, false, '#c0392b')
-    s += '</g>'
   }
 
-  // ── BS EN ISO 128 剖面切割线（沿L方向切割，显示侧面）─────────
-  // 切割线沿L方向（垂直于泵排列方向），可拖动调整位置
-  const aaDragX = room_ox + L * ps / 2  // 初始在维护间X方向中间
-  // 包在 section-block 组内，透明 rect 作为点击区域
-  s += `<g id="section-block" class="section-block">`
-  // 透明点击区（覆盖维护间水平范围，上方+下方延伸部分）
-  s += _r(room_ox - 20, 0, room_x2 - room_ox + 40, room_oy - 4, 'transparent', 'none')
-  s += _r(room_ox - 20, room_y2 + 4, room_x2 - room_ox + 40, PH - room_y2 - 4, 'transparent', 'none')
-  // 切割线本身（垂直线，沿L方向）
-  s += _sectionLineBS(aaDragX, room_oy - 6, 4, 'A', '#555')
-  s += _sectionLineBS(aaDragX, room_y2 + 6, PW - 4, 'A', '#555')
-  s += `</g>`
+  // ── 旁通管 ──────────────────────────────────────────────────────────
+  if (layoutMap?.bypassChain?.length) {
+    const bp_left = room_ox + e_wall * SCALE_MAIN
+    const bp_right = room_x2 - e_wall * SCALE_MAIN
+    s += _l(bp_left, bypass_y, bp_right, bypass_y, '#2980b9', 1.5)
+    s += _l(bp_right, hdr_y, bp_right, bypass_y, '#2980b9', 1.5)
+    s += _l(bp_left, hdr_y, bp_left, bypass_y, '#2980b9', 1.5)
+    s += _t((bp_left + bp_right) / 2, bypass_y - 6, '旁通管', 9, '#2980b9', 'middle')
 
-  // ── 尺寸标注 ─────────────────────────────────────────────────
-  const dim_by = pool_y2 + 28
+    for (const { device, planX, planY, halfLen } of layoutMap.bypassChain) {
+      if (device.type === 'gate_valve') {
+        s += `<g class="valve-group" data-type="旁通闸阀" data-dn="${DN_branch}">`
+        s += _gateValve(planX, planY, halfLen, true, '#c0392b')
+        s += '</g>'
+      } else if (device.type === 'check_valve') {
+        s += `<g class="valve-group" data-type="旁通止回阀" data-dn="${DN_branch}">`
+        s += _checkValve(planX, planY, halfLen, true, '#c0392b')
+        s += '</g>'
+      }
+    }
+  }
+
+  // ── 尺寸标注 ────────────────────────────────────────────────────────
+  const dim_by = pool_y2 + 20
   s += _dh(room_ox, room_x2, dim_by, 'L=' + fmt(L, 1) + 'm', '#1a3a5c')
-  if (Math.abs(L_pool - L) > 0.05)
-    s += _dh(pool_ox, pool_x2, dim_by + 22, 'L_pool=' + fmt(L_pool, 1) + 'm', '#2471a3')
-  const dim_rx = pool_x2 + 32
+  if (Math.abs(L_pool - L) > 0.05) {
+    s += _dh(pool_ox, pool_x2, dim_by + 18, 'L_pool=' + fmt(L_pool, 1) + 'm', '#2471a3')
+  }
+  const dim_rx = pool_x2 + 20
   s += _dv(dim_rx, room_oy, room_y2, 'W=' + fmt(W, 1) + 'm', '#1a3a5c')
-  s += _dv(dim_rx, room_y2, pool_y2, 'D=' + fmt(D_pool, 2) + 'm', '#2471a3')
-  if (N >= 2) {
-    const p0x = room_ox + (e_wall + w_pump) * ps, p1x = p0x + d_spacing * ps
-    const sp_y = room_y2 - d_pump * ps * 0.5
-    s += _dh(p0x, p1x, sp_y, 'd=' + fmt(d_spacing, 1) + 'm', '#27ae60')
+
+  // ── 图例（左下角，左上角留给鹰眼缩略图）──────────────────────────────────
+  const legItems = [['#2471a3', '水泵'], ['#2980b9', '管道'], ['#c0392b', '阀门'], ['#f8fbff', '集水池']]
+  const legX = 8, legY = PH - 80
+  s += _r(legX, legY, 90, legItems.length * 14 + 6, '#fff', '#ccc', 0.8, 'rx="3" opacity="0.9"')
+  let lyi = legY + 4
+  for (const [c, lbl] of legItems) {
+    s += _r(legX + 4, lyi, 8, 8, c, '#666', 0.5)
+    s += _t(legX + 15, lyi + 7, lbl, 8, '#333', 'start')
+    lyi += 14
   }
-  s += _dh(room_ox, room_ox + e_wall * ps, room_oy + 18, 'e=' + fmt(e_wall, 1) + 'm', '#8e44ad')
 
-  // ── 图例（左上角，简化颜色）────────────────────────
-  // 颜色方案：泵 #2471a3，管道 #2980b9，阀门 #c0392b
-  const legItems = [
-    ['#2471a3', '水泵'],
-    ['#2980b9', '管道'],
-    ['#c0392b', '阀门'],
-    ['#f8fbff', '集水池'],
-  ]
-  const legX = 10, legY = PMT
-  s += _r(legX, legY, 100, legItems.length * 15 + 8, '#fff', '#ccc', 0.8, 'rx="3" opacity="0.92"')
-  let lyi = legY + 6
-  legItems.forEach(([c, lbl]) => {
-    s += _r(legX + 6, lyi, 10, 10, c, '#666', 0.5)
-    s += _t(legX + 19, lyi + 8, lbl, 9, '#333', 'start')
-    lyi += 15
-  })
-
-  const bar_len = ps, bx = room_ox, by_bar = pool_y2 + 10
+  // 比例尺
+  const bar_len = SCALE_MAIN
+  const bx = room_ox
+  const by_bar = pool_y2 + 8
   s += _l(bx, by_bar, bx + bar_len, by_bar, '#333', 2)
-  s += _l(bx, by_bar - 4, bx, by_bar + 4, '#333', 1.5)
-  s += _l(bx + bar_len, by_bar - 4, bx + bar_len, by_bar + 4, '#333', 1.5)
-  s += _t(bx + bar_len / 2, by_bar - 6, '1 m', 10, '#333')
+  s += _l(bx, by_bar - 3, bx, by_bar + 3, '#333', 1.5)
+  s += _l(bx + bar_len, by_bar - 3, bx + bar_len, by_bar + 3, '#333', 1.5)
+  s += _t(bx + bar_len / 2, by_bar - 5, '1m', 9, '#333')
 
-  // ── Section view (right) —包裹在可拖动组内──────────────────────────────
-  const SX0 = 580, SW = VW - SX0
-  const SML = 65, SMR = 80, SMT = 55, SMB = 55
-  const savw = SW - SML - SMR, savh = VH - SMT - SMB
-  // 池深16m在可见范围内；room在±0.00上方，窄长条；两者分开定比例尺
-  // 为room预留空间：room_H*ss_room ≈ room_H * ((SMT-10)/room_H) = SMT-10 ≈ 45px
-  const ss_pool = (savh - (SMT - 10) - 30) / h_pool   // 减去room高度和边距（pool_bot_y调整后）
-  const ss_room = (SMT - 10) / room_H        // room只占顶部一小段
+  return { s, SCALE_MAIN, PW, PH }
+}
 
-  const sec_cx = SX0 + SML + savw / 2
+// ═══════════════════════════════════════════════════════════════════════════
+// ── 6. 剖面图 ────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
 
-  // 剖面图沿L方向（泵排列方向）切割，显示维护间侧面
-  // 剖面图宽度用 L（维护间长度）
-  const sec_wx = L * ss_pool
-  // 维护间宽度（显示W方向厚度，即通道方向）
-  const room_wx = W * ss_room
-  // 集水坑宽度（与平面图 D_pool 成比例）
-  const sump_wx = room_wx / 2  // 集水坑宽度 = 维护间宽的一半
+/**
+ * @param {Object} inputs
+ * @param {Geo} geo
+ * @param {Object} planData
+ * @returns {{ s: string }}
+ */
+function buildSectionView(inputs, geo) {
+  const {
+    L, h_pool, stopLevel, startLevel, Z_start2, alarmLevel, Z_alarm_low, Z_max,
+    DN_branch, DN_main, room_H, Z_sump,
+    pumpsInOrder,
+  } = inputs
 
-  const sec_x1 = sec_cx - sec_wx / 2, sec_x2 = sec_cx + sec_wx / 2
-  const sump_x1 = sec_cx - sump_wx / 2, sump_x2 = sec_cx + sump_wx / 2
+  // 剖面图使用独立水平坐标 sec_left/sec_right，不复用平面图坐标
+  const { SX0, SW, sec_cx, Z_top_px, pool_bot_y, SCALE_SEC, Z_top,
+          sec_left, sec_right } = geo
+  const SMT = 40  // 剖面图顶部留白（与 computeGeometry 保持一致）
 
-  // Y 坐标层次（从上到下）：
-  // 1. 维护间（room）：Z_top 以上，room_top_y ~ room_bot_y
-  // 2. 水池（pool）：Z_bottom ~ Z_top，pool_top_y ~ pool_bot_y
-  // 3. 集水坑（sump）：Z_sump ~ Z_bottom，pool_bot_y ~ sump_bot_y
-  const Z_bottom = stopLevel   // 0.0 mPD（池底）
-  const Z_top    = Z_bottom + h_pool  // 池顶标高 = Z_bottom + h_pool
-  const Z_sumpVal = (Z_sump != null && !isNaN(Z_sump)) ? Z_sump : Z_bottom
+  let s = ''
 
-  // 以池顶标高 Z_top 作为绘制参考点（维护间的底）
-  const pool_top_y = SMT + 10                        // 池顶（维护间底）
-  const pool_bot_y = pool_top_y + h_pool * ss_pool   // 池底，向下画
-  const sump_bot_y = pool_bot_y + (Z_bottom - Z_sumpVal) * ss_pool  // 集水坑底
+  // 背景
+  s += _r(SX0, 0, SW, 560, '#fafafa', 'none')
 
-  // 维护间底 = 池顶标高，向上画维护间
-  const room_bot_y = pool_top_y
-  const room_top_y = room_bot_y - room_H * ss_room  // 维护间顶
+  // 标题
+  s += _t(SX0 + SW / 2, 25, 'A-A 剖 面 图', 12, '#1a5276', 'middle', 'bold')
 
-  // 水位 Y（相对于 pool_bot_y=0.0mPD）
-  // 注意：水位是 mPD 值，>0 表示在 pool_bot_y 上方（Y更小），<0 表示下方（Y更大）
+  // ── 维护间 ──────────────────────────────────────────────────────────
+  s += _r(sec_left, SMT, sec_right - sec_left, room_H * SCALE_SEC, '#f8fbff', '#2980b9', 2.5)
 
-  // 剖面图管道尺寸（使用 ss_pool 比例尺）
-  const L_cv_px_ss  = lookupFF(CHECK_VALVE_FF, DN_branch) / 1000 * ss_pool
-  const L_gv_px_ss  = lookupFF(GATE_VALVE_FF, DN_branch) / 1000 * ss_pool
-  const L_str_px_ss = Math.max(2 * DN_branch, 300) / 1000 * ss_pool
+  // ── Z_top 分割线 ───────────────────────────────────────────────────
+  const z_top_y = Z_top_px  // Z_top = 池顶
+  s += _l(SX0 + 4, z_top_y, SX0 + SW - 4, z_top_y, '#1a5276', 3)  // 粗线
+  s += _t(SX0 + SW / 2, z_top_y - 8, `Z_top = ${fmt(Z_top, 2)}m`, 10, '#1a5276', 'middle', 'bold')
 
-  // Bug C 修复：水位 Y 坐标使用相对深度 (Z - Z_bottom) * ss_pool
-  // Z_bottom = Z_stop（池底设计水位），stopLevel/startLevel/alarmLevel 是绝对 mPD 值
-  const stop_y       = pool_bot_y - (stopLevel - Z_bottom) * ss_pool
-  const start_y      = pool_bot_y - (startLevel - Z_bottom) * ss_pool
-  const start2_y     = pool_bot_y - ((Z_start2 != null ? Z_start2 : alarmLevel) - Z_bottom) * ss_pool
-  const alarm_y      = pool_bot_y - (alarmLevel - Z_bottom) * ss_pool
-  const max_y        = pool_bot_y - ((Z_max != null ? Z_max : alarmLevel) - Z_bottom) * ss_pool
-  const alarm_low_y  = pool_bot_y - ((Z_alarm_low != null ? Z_alarm_low : Z_bottom) - Z_bottom) * ss_pool
+  // ── 水池 ──────────────────────────────────────────────────────────
+  s += _l(sec_left, Z_top_px, sec_left, pool_bot_y, '#2980b9', 2)
+  s += _l(sec_right, Z_top_px, sec_right, pool_bot_y, '#2980b9', 2)
+  s += _l(sec_left, pool_bot_y, sec_right, pool_bot_y, '#2980b9', 2)
+  s += _l(sec_left, Z_top_px, sec_right, Z_top_px, '#2980b9', 1)
 
-  // section panel 组（可拖动）
-  const sectionPanelId = 'section-panel'
-  s += `<g id="${sectionPanelId}">`
+  // 水位填充（以池底 stopLevel 为基准）
+  const stop_y = pool_bot_y
+  const start_y = pool_bot_y - (startLevel - stopLevel) * SCALE_SEC
+  const start2_y = pool_bot_y - ((Z_start2 != null ? Z_start2 : alarmLevel) - stopLevel) * SCALE_SEC
+  const alarm_y = pool_bot_y - (alarmLevel - stopLevel) * SCALE_SEC
+  const max_y = pool_bot_y - ((Z_max != null ? Z_max : alarmLevel) - stopLevel) * SCALE_SEC
+  const alarm_low_y = pool_bot_y - ((Z_alarm_low != null ? Z_alarm_low : stopLevel) - stopLevel) * SCALE_SEC
 
-  s += _t(SX0 + SW / 2, SMT - 14, 'A-A 剖 面 图（沿 泵 轴）', 13, '#1a5276', 'middle', 'bold')
-
-  // ── 维护间（维护间底 = 池顶标高，泵从维护间穿楼板进入水池）─────────
-  const room_x1 = sec_cx - room_wx / 2
-  s += _r(room_x1, room_top_y, room_wx, room_H * ss_room, '#f8fbff', '#2980b9', 2.5)
-
-  // ── 水池（从池顶到池底）────────────────────────────────────────────
-  // 左右边线从池顶到池底
-  s += _l(sec_x1, pool_top_y, sec_x1, pool_bot_y, '#2980b9', 2)
-  s += _l(sec_x2, pool_top_y, sec_x2, pool_bot_y, '#2980b9', 2)
-  // 池底线
-  s += _l(sec_x1, pool_bot_y, sec_x2, pool_bot_y, '#2980b9', 2)
-  // 池顶线（结构边界）
-  s += _l(sec_x1, pool_top_y, sec_x2, pool_top_y, '#2980b9', 1)
-
-  // ── 水池水深填充（从最高水位到池底）────────────────────────────────
-  // 水面从 Z_max (1.2 mPD) 向下填充到池底 Z_bottom (-13 mPD)，深度 = h_active (14.2 m)
-  // 池顶 Z_top (3 mPD) 到最高水位 Z_max (1.2 mPD) 之间是无水空间
-  const water_fill_top = max_y  // 直接用最高水位作为水面（不用Math.min）
-  if (water_fill_top < pool_bot_y) {
-    s += _r(sec_x1, water_fill_top, sec_wx, pool_bot_y - water_fill_top, '#d6eaf8', 'none')
-  }
-  // 各水位之间分层（注意：Y值越小表示越高）
-  if (alarm_y < max_y) s += _r(sec_x1, alarm_y, sec_wx, max_y - alarm_y, '#aed6f1', 'none')
-  if (alarm_low_y < alarm_y) s += _r(sec_x1, alarm_low_y, sec_wx, alarm_y - alarm_low_y, '#85c1e9', 'none')
-
-  // ── 集水坑示意块（窄，宽=维护间一半，底部=Z_sump）─────────────────
-  // 集水坑只是池底的一个凹槽，只画底部区域
-  if (Z_sump != null && !isNaN(Z_sump) && Z_sump < Z_bottom) {
-    const sump_cy = (pool_bot_y + sump_bot_y) / 2
-    // 集水坑底部三边（不延伸到池顶）
-    s += _l(sump_x1, sump_bot_y, sump_x2, sump_bot_y, '#2980b9', 1.5)
-    s += _l(sump_x1, sump_bot_y, sump_x1, pool_bot_y, '#2980b9', 1.5)
-    s += _l(sump_x2, sump_bot_y, sump_x2, pool_bot_y, '#2980b9', 1.5)
-    s += _t(sec_cx, sump_cy, '集水坑', 10, '#2980b9', 'middle', 'bold')
+  const water_top = max_y
+  if (water_top < pool_bot_y) {
+    s += _r(sec_left, water_top, sec_right - sec_left, pool_bot_y - water_top, '#d6eaf8', 'none')
   }
 
-  // ── 池底标高线（Z_bottom = 0.0 mPD）──────────────────────────────────
-  s += _l(SX0 + 4, pool_bot_y, SX0 + SW - 4, pool_bot_y, '#2980b9', 2)
-  s += _t(sec_x1 - 5, pool_bot_y + 4, `池底 ${fmt(Z_bottom, 2)}m`, 9, '#555', 'end')
-
-  // ── 池顶标高线（Z_top）────────────────────────────────────────────
-  s += _l(SX0 + 4, pool_top_y, SX0 + SW - 4, pool_top_y, '#2980b9', 2)
-  s += _t(sec_x1 - 5, pool_top_y + 4, `池顶 ${fmt(Z_top, 2)}m`, 9, '#2980b9', 'end')
-
-  const elev_stop     = stopLevel
-  const elev_start    = startLevel
-  const elev_start2   = Z_start2 != null ? Z_start2 : alarmLevel
-  const elev_alarm    = alarmLevel
-  const elev_alarm_lo = Z_alarm_low != null ? Z_alarm_low : Z_bottom
-  const elev_max      = Z_max != null ? Z_max : alarmLevel
-  const elev_bot      = Z_bottom
-  const elev_sump     = Z_sumpVal
-
-  // 水位线短横线（从池边往里一条短线，标签在池外）
-  const wl_line_len = Math.min(25, sec_wx * 0.1)
-  const wl_lx_left  = sec_x1 - 8   // 左侧标签在池外（anchor='end'）
-  const wl_lx_right = sec_x2 + 8   // 右侧标签在池外（anchor='start'）
-
-  // 左侧：低水位报警、高水位报警、最高水位（均为红色）
-  // 线从左池边往里
-  s += _l(sec_x1, alarm_low_y, sec_x1 + wl_line_len, alarm_low_y, '#c0392b', 1.5, '5,3')
-  s += _t(wl_lx_left, alarm_low_y + 4, '低水位报警 ' + fmt(elev_alarm_lo, 2) + 'm', 10, '#c0392b', 'end')
-
-  s += _l(sec_x1, alarm_y, sec_x1 + wl_line_len, alarm_y, '#c0392b', 1.5, '5,3')
-  s += _t(wl_lx_left, alarm_y + 4, '高水位报警 ' + fmt(elev_alarm, 2) + 'm', 10, '#c0392b', 'end')
-
-  s += _l(sec_x1, max_y, sec_x1 + wl_line_len, max_y, '#c0392b', 1.5, '5,3')
-  s += _t(wl_lx_left, max_y + 4, '最高水位 ' + fmt(elev_max, 2) + 'm', 10, '#c0392b', 'end')
-
-  // 右侧：1#泵启动、2#泵启动（绿色）、停泵（红色）
-  // 线从右池边往里
-  s += _l(sec_x2 - wl_line_len, start_y, sec_x2, start_y, '#27ae60', 1.5, '5,3')
-  s += _t(wl_lx_right, start_y + 4, '1#泵启动 ' + fmt(elev_start, 2) + 'm', 10, '#27ae60', 'start')
-
-  s += _l(sec_x2 - wl_line_len, start2_y, sec_x2, start2_y, '#27ae60', 1.5, '5,3')
-  s += _t(wl_lx_right, start2_y + 4, '2#泵启动 ' + fmt(elev_start2, 2) + 'm', 10, '#27ae60', 'start')
-
-  s += _l(sec_x2 - wl_line_len, stop_y, sec_x2, stop_y, '#c0392b', 1.5, '5,3')
-  s += _t(wl_lx_right, stop_y + 4, '停泵 ' + fmt(elev_stop, 2) + 'm', 10, '#c0392b', 'start')
-
-  // 池底标注
-  s += _t(wl_lx_right, pool_bot_y + 4, '池底 ' + fmt(elev_bot, 2) + 'm', 10, '#555', 'start')
-  // 集水坑底标注（仅当与池底不同时）
-  if (elev_sump < elev_bot - 0.01) {
-    s += _t(wl_lx_right, sump_bot_y + 4, '坑底 ' + fmt(elev_sump, 2) + 'm', 10, '#5d6d7e', 'start')
+  // ── 集水坑 ─────────────────────────────────────────────────────────
+  const Z_sumpVal = (Z_sump != null && !isNaN(Z_sump)) ? Z_sump : stopLevel
+  if (Z_sumpVal < stopLevel - 0.01) {
+    const sump_bot_y = pool_bot_y + (stopLevel - Z_sumpVal) * SCALE_SEC
+    s += _l(sec_cx - 30, sump_bot_y, sec_cx + 30, sump_bot_y, '#2980b9', 1.5)
+    s += _l(sec_cx - 30, sump_bot_y, sec_cx - 30, pool_bot_y, '#2980b9', 1.5)
+    s += _l(sec_cx + 30, sump_bot_y, sec_cx + 30, pool_bot_y, '#2980b9', 1.5)
+    s += _t(sec_cx, (sump_bot_y + pool_bot_y) / 2, '集水坑', 9, '#2980b9', 'middle', 'bold')
   }
 
-  // ── 剖面管道圆截面（根据 aaDragX 位置在三段中切换）────────────────
-  // aaDragX 是切割线 X 坐标（px），沿L方向切割
-  // L 方向分为三段：0~25%（靠左侧墙）、25%~75%（中间）、75%~100%（靠右侧墙）
-  const relX = (aaDragX - room_ox) / (room_x2 - room_ox)  // 0=room_ox, 1=room_x2
-  const relW = relX  // 切割线在 L 方向的相对位置（0=左侧，1=右侧）
+  // ── 水位线标注 ────────────────────────────────────────────────────
+  const wl_len = (sec_right - sec_left) * 0.08
+  const wl_lx_left = sec_left - 6
+  const wl_lx_right = sec_right + 6
 
-  // DN → 圆形截面半径（m → px）
-  const dn2r = (dn) => (dn / 1000) * ss_pool
-  const r_branch = dn2r(DN_branch)
-  const r_main    = dn2r(DN_main)
-
-  s += `<g id="section-pipe-xsection">`
-  // 管道截面显示在池顶标高（维护间底 = 穿楼板位置）
-  const xsection_y = pool_top_y
-  // 基于真实物理尺寸计算阀门和设备尺寸（mm → px）
-  const valve_cv_half = lookupFF(CHECK_VALVE_FF, DN_branch) / 1000 * ss_room / 2
-  const valve_gv_half = lookupFF(GATE_VALVE_FF, DN_branch) / 1000 * ss_room / 2
-  const fm_half = Math.max(300, 4 * DN_main) / 1000 * ss_room / 2
-
-  if (relW <= 0.25) {
-    // 靠集水坑墙：泵出口竖管截面 + 弯头
-    s += `<ellipse cx="${sec_cx.toFixed(1)}" cy="${xsection_y.toFixed(1)}" rx="${r_branch.toFixed(1)}" ry="${(r_branch * 0.3).toFixed(1)}" fill="none" stroke="#2980b9" stroke-width="2"/>`
-    s += _t(sec_cx, xsection_y - r_branch - 8, `DN${DN_branch}`, 9, '#2980b9', 'middle')
-  } else if (relW <= 0.75) {
-    // 中间管道区：支路管道圆形截面 + 止回阀/闸阀（基于真实尺寸）
-    s += `<circle cx="${sec_cx.toFixed(1)}" cy="${xsection_y.toFixed(1)}" r="${r_branch.toFixed(1)}" fill="none" stroke="#2980b9" stroke-width="2"/>`
-    s += _t(sec_cx, xsection_y - r_branch - 8, `DN${DN_branch}`, 9, '#2980b9', 'middle')
-    s += _checkValve(sec_cx - sec_wx * 0.12, xsection_y, valve_cv_half, true, '#c0392b')
-    s += _gateValve(sec_cx + sec_wx * 0.12, xsection_y, valve_gv_half, true, '#c0392b')
-  } else {
-    // 靠远侧墙：总管圆形截面 + 流量计（基于真实尺寸）
-    s += `<circle cx="${sec_cx.toFixed(1)}" cy="${xsection_y.toFixed(1)}" r="${r_main.toFixed(1)}" fill="none" stroke="#2980b9" stroke-width="2"/>`
-    s += _t(sec_cx, xsection_y - r_main - 8, `DN${DN_main}`, 9, '#2980b9', 'middle')
-    s += _flowmeter(sec_cx, xsection_y, fm_half, r_main, true, '#c0392b')
-    const upLabel = `上游${5}D`, dnLabel = `下游${2}D`
-    s += _leader(sec_cx - fm_half - 15, xsection_y - r_main - 8, sec_cx - fm_half - 50, xsection_y - r_main - 18, upLabel, 9, '#c0392b')
-    s += _leader(sec_cx + fm_half + 15, xsection_y + r_main + 8, sec_cx + fm_half + 50, xsection_y + r_main + 18, dnLabel, 9, '#c0392b')
+  function spreadWL(items) {
+    const sorted = [...items].sort((a, b) => a.lineY - b.lineY)
+    for (let i = 1; i < sorted.length; i++) {
+      const prev = sorted[i - 1], cur = sorted[i]
+      cur.lblY = Math.max(cur.lineY + 4, prev.lblY + 12)
+    }
+    return sorted
   }
-  s += `</g>`
 
-  // Bug D 修复：泵在集水坑内，管道和阀门在维护间内
-  // 泵：放在集水坑里（靠近池底）
-  const pump_w = Math.min(sump_wx * 0.4, 25), pump_h = Math.min(sump_wx * 0.3, 18)
-  const pump_x = sec_cx - pump_w / 2
-  const pump_y = sump_bot_y - pump_h - 3  // 泵底在集水坑底部上方
-  s += _r(pump_x, pump_y, pump_w, pump_h, '#2471a3', '#1a5276', 1.5)
-  // 泵体两段：底座（深色）+ 电机罩（浅色）
-  s += _r(pump_x, pump_y + pump_h * 0.6, pump_w, pump_h * 0.4, '#1a5276', 'none', 0)
-  s += _t(pump_x + pump_w / 2, pump_y + pump_h / 2 + 3, 'P', 9, '#fff', 'middle', 'bold')
+  // 左侧水位
+  const leftWL = [
+    { lineY: alarm_low_y, text: '低报警 ' + fmt(Z_alarm_low ?? stopLevel, 2) + 'm', color: '#c0392b' },
+    { lineY: alarm_y, text: '高报警 ' + fmt(alarmLevel, 2) + 'm', color: '#c0392b' },
+    { lineY: max_y, text: '最高水位 ' + fmt(Z_max ?? alarmLevel, 2) + 'm', color: '#c0392b' },
+  ].map(it => ({ ...it, lblY: it.lineY + 4 }))
+  spreadWL(leftWL).forEach(it => {
+    s += _l(sec_left, it.lineY, sec_left + wl_len, it.lineY, it.color, 1.5, '4,2')
+    s += _t(wl_lx_left, it.lblY, it.text, 9, it.color, 'end')
+  })
 
-  // 竖向管道（从泵顶向上穿楼板到维护间）
-  const riser_x = pump_x + pump_w / 2
-  const riser_top_y = pool_top_y - 5  // 竖管顶端在池顶标高以上一点点
-  s += _l(riser_x, pump_y, riser_x, riser_top_y, '#2980b9', 1.5)
+  // 右侧水位
+  const rightWL = [
+    { lineY: start_y, text: '1#启 ' + fmt(startLevel, 2) + 'm', color: '#27ae60' },
+    { lineY: start2_y, text: '2#启 ' + fmt(Z_start2 ?? alarmLevel, 2) + 'm', color: '#27ae60' },
+    { lineY: stop_y, text: '停泵 ' + fmt(stopLevel, 2) + 'm', color: '#555' },
+    { lineY: pool_bot_y, text: '池底 ' + fmt(stopLevel, 2) + 'm', color: '#555' },
+  ].map(it => ({ ...it, lblY: it.lineY + 4 }))
+  spreadWL(rightWL).forEach(it => {
+    if (it.lineY !== pool_bot_y) {
+      s += _l(sec_right - wl_len, it.lineY, sec_right, it.lineY, it.color, 1.5, '4,2')
+    }
+    s += _t(wl_lx_right, it.lblY, it.text, 9, it.color, 'start')
+  })
 
-  // 楼板穿孔标记（圆形虚线标记，在池顶标高）
-  s += `<circle cx="${riser_x.toFixed(1)}" cy="${pool_top_y.toFixed(1)}" r="5" fill="none" stroke="#2980b9" stroke-width="1.5" stroke-dasharray="3,2"/>`
+  // ── 管道截面 ───────────────────────────────────────────────────────
+  const pipe_r = DN_branch / 1000 * SCALE_SEC / 2
+  s += `<circle cx="${sec_cx.toFixed(1)}" cy="${Z_top_px.toFixed(1)}" r="${pipe_r.toFixed(1)}" fill="none" stroke="#2980b9" stroke-width="2"/>`
+  s += _t(sec_cx, Z_top_px - pipe_r - 6, `DN${DN_branch}`, 9, '#2980b9', 'middle')
 
-  // 管道和阀门尺寸（基于AG2-1计算的真实物理尺寸，单位m → px）
-  const pipe_w = DN_branch / 1000 * ss_room  // 管道直径 = DN(mm)转米 * 比例尺
-  // 阀门实际长度（m → px）
-  const valve_cv_len = lookupFF(CHECK_VALVE_FF, DN_branch) / 1000 * ss_room
-  const valve_gv_len = lookupFF(GATE_VALVE_FF, DN_branch) / 1000 * ss_room
-  // 弯头中心到端面 = 1.5×DN（m → px）
-  const elbow_ctf = elbowCTF(DN_branch) / 1000 * ss_room
-  const elbow_r = elbow_ctf / 2  // 弯头半径（半长）
-  // 阀件间直管段（m → px）
-  const minStraight_px = Math.max(2 * DN_branch, 300) / 1000 * ss_room
+  // ── 阀门侧视图 ────────────────────────────────────────────────────
+  const valve_cv_len = lookupFF(CHECK_VALVE_FF, DN_branch) / 1000 * SCALE_SEC
+  const valve_gv_len = lookupFF(GATE_VALVE_FF, DN_branch) / 1000 * SCALE_SEC
+  const horiz_y = Z_top_px - pipe_r * 2 - 10
+  const cv_center_x = sec_cx - (sec_right - sec_left) * 0.25
+  const gv_center_x = sec_cx + (sec_right - sec_left) * 0.25
 
-  // 90°弯头（在维护间内，池顶标高以上）
-  const elbow_y = pool_top_y - elbow_r  // 弯头在池顶以上
-  s += _elbow(riser_x, elbow_y, elbow_r, 'top', 'right', '#2980b9', pipe_w)
-
-  // 水平管段（在维护间内，池顶以上）
-  const horiz_y = elbow_y - elbow_r  // 水平管Y坐标
-  // 止回阀中心位置
-  const cv_center_x = riser_x + elbow_ctf + minStraight_px + valve_cv_len / 2
-  // 闸阀中心位置
-  const gv_center_x = cv_center_x + valve_cv_len / 2 + minStraight_px + valve_gv_len / 2
-  // T节点位置
-  const header_x = gv_center_x + valve_gv_len / 2 + minStraight_px + DN_main / 1000 * ss_room
-
-  s += _l(riser_x + elbow_ctf, horiz_y, cv_center_x - valve_cv_len / 2, horiz_y, '#2980b9', pipe_w)
-
-  // 止回阀 CV（水平，在维护间内）
-  s += `<g class="valve-group" data-type="止回阀" data-dn="${DN_branch}" data-ff="${lookupFF(CHECK_VALVE_FF, DN_branch)}" data-std="GB/T 12221">`
   s += _checkValve(cv_center_x, horiz_y, valve_cv_len / 2, true, '#c0392b')
-  s += '</g>'
-
-  // 闸阀 GV（水平，在维护间内）
-  s += `<g class="valve-group" data-type="闸阀" data-dn="${DN_branch}" data-ff="${lookupFF(GATE_VALVE_FF, DN_branch)}" data-std="GB/T 12221">`
   s += _gateValve(gv_center_x, horiz_y, valve_gv_len / 2, true, '#c0392b')
-  s += '</g>'
 
-  // 水平管段继续到 T 节点
-  s += _l(cv_center_x + valve_cv_len / 2, horiz_y, gv_center_x - valve_gv_len / 2, horiz_y, '#2980b9', pipe_w)
+  // ── 泵 ────────────────────────────────────────────────────────────
+  const pump_w = Math.min((sec_right - sec_left) * 0.15, 25)
+  const pump_h = pump_w * 0.6
+  const pump_x = sec_cx - pump_w / 2
+  const sump_bot_y_val = Z_sumpVal < stopLevel - 0.01 ? pool_bot_y + (stopLevel - Z_sumpVal) * SCALE_SEC : pool_bot_y
+  const pump_y = sump_bot_y_val - pump_h - 5
 
-  // T 节点（总管连接）- 节点大小基于DN
-  const tee_r = DN_main / 1000 * ss_room * 0.8
-  s += _tee(header_x, horiz_y, tee_r, '#2980b9', '#2980b9', 1.5)
+  s += _r(pump_x, pump_y, pump_w, pump_h, '#2471a3', '#1a5276', 1.5)
+  s += _t(sec_cx, pump_y + pump_h / 2 + 2, pumpsInOrder?.[0]?.label || 'P', 8, '#fff', 'middle', 'bold')
 
-  // 总管（右侧）- 基于DN_main，画到边界
-  s += _l(header_x + tee_r, horiz_y, sec_x2, horiz_y, '#2980b9', DN_main / 1000 * ss_room)
+  // 压水管
+  const riser_x = sec_cx
+  s += _l(riser_x, pump_y, riser_x, Z_top_px, '#2980b9', 1.5)
+  s += `<circle cx="${riser_x.toFixed(1)}" cy="${Z_top_px.toFixed(1)}" r="4" fill="none" stroke="#2980b9" stroke-width="1.5" stroke-dasharray="2,2"/>`
 
-  const sec_dvx = sec_x1 - 32
-  s += _dv(sec_dvx, room_top_y, room_bot_y, '室高 ' + fmt(room_H, 1) + 'm', '#2980b9')
-  s += _dv(sec_dvx, pool_top_y, pool_bot_y, 'h_pool=' + fmt(h_pool, 1) + 'm', '#2980b9')
-  if (sump_bot_y > pool_bot_y + 2) {
-    s += _dv(sec_dvx, pool_bot_y, sump_bot_y, '坑深', '#2980b9')
-  }
-  s += _dh(sec_x1, sec_x2, sump_bot_y + 20, 'W=' + fmt(W, 1) + 'm', '#2980b9')
+  // ── 尺寸标注 ──────────────────────────────────────────────────────
+  s += _dv(sec_left - 25, SMT, Z_top_px, '净高 ' + fmt(room_H, 1) + 'm', '#2980b9')
+  s += _dv(sec_left - 25, Z_top_px, pool_bot_y, 'h=' + fmt(h_pool, 1) + 'm', '#2980b9')
 
-  s += `</g>`  // end section-panel
+  // ▽ 标高符号（▽ 4.500 格式）
+  const elev_y_pool_bot = pool_bot_y + 4
+  s += _t(sec_left - 5, elev_y_pool_bot, '▽ ' + fmt(stopLevel, 2) + 'm', 9, '#2980b9', 'end')
+  s += _t(sec_left - 5, Z_top_px + 4, '▽ ' + fmt(Z_top, 2) + 'm', 9, '#1a5276', 'end')
 
-  const el = document.getElementById('svg-ag31')
-  el.setAttribute('viewBox', `0 0 ${VW} ${VH}`)
-  el.innerHTML = s
+  return { s, SX0, SW, sec_cx, Z_top_px, SCALE_SEC, DN_branch, DN_main }
+}
 
-  // ── 剖面符号块交互（独立于画布 zoom/pan）──────────────────────────
-  let aaCurrentX = aaDragX  // 沿L方向拖动
-  let sectionSelected = false   // 选中状态
-  let sectionDragging = false   // 拖动状态
-  let lastSectionX = 0
+// ═══════════════════════════════════════════════════════════════════════════
+// ── 7. SVG 组装与渲染 ────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
 
-  function constrainAAX(x) {
-    return Math.max(room_ox + 10, Math.min(room_x2 - 10, x))
-  }
+// ═══════════════════════════════════════════════════════════════════════════
+// ── 8. 交互逻辑 ─────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
 
-  function setSectionSelected(val) {
-    sectionSelected = val
-    el.querySelector('#section-block')?.classList.toggle('section-selected', val)
-    // 选中时：画布 zoom 暂停（通过在 svg 上加 class）
-    el.classList.toggle('section-drag-active', val)
-  }
+function setupInteractions(el, planData) {
+  const { PW, PH } = planData
 
-  // 点击 section-block → 选中（capture phase 先于 zoom-pan 的 bubble listener）
-  el.addEventListener('mousedown', (e) => {
-    const block = el.querySelector('#section-block')
-    if (!block) return
-    if (block.contains(e.target) || e.target === block) {
-      if (!sectionSelected) setSectionSelected(true)
-      sectionDragging = true
-      lastSectionX = e.clientX
-      e.preventDefault()
-      e.stopPropagation()  // 阻止 zoom-pan 的 bubble listener
-    }
-  }, { capture: true })
-
-  // 全局移动/抬起（拖动用）
-  window.addEventListener('mousemove', onSectionMove)
-  window.addEventListener('mouseup', onSectionUp)
-
-  function onSectionMove(e) {
-    if (!sectionDragging) return
-    e.preventDefault()  // 阻止拖动时选中文本
-    const dx = e.clientX - lastSectionX
-    lastSectionX = e.clientX
-    aaCurrentX = constrainAAX(aaCurrentX + dx)
-    redrawSectionLines(aaCurrentX)
-  }
-
-  function onSectionUp() {
-    sectionDragging = false
-  }
-
-  // 点击空白处 → 取消选中
-  el.addEventListener('mousedown', (e) => {
-    const block = el.querySelector('#section-block')
-    if (sectionSelected && block && !block.contains(e.target) && e.target !== block) {
-      setSectionSelected(false)
-    }
-  })
-
-  // ESC → 取消选中
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && sectionSelected) {
-      setSectionSelected(false)
-    }
-  })
-
-  // 重绘切割线位置（完整重建 section-block SVG 内容）
-  function redrawSectionLines(x) {
-    const color = sectionSelected ? '#e74c3c' : '#555'
-    let html = ''
-    // 透明点击区（覆盖维护间水平范围）
-    html += _r(room_ox - 20, 0, room_x2 - room_ox + 40, room_oy - 4, 'transparent', 'none')
-    html += _r(room_ox - 20, room_y2 + 4, room_x2 - room_ox + 40, PH - room_y2 - 4, 'transparent', 'none')
-    // 切割线（垂直线，沿L方向）
-    html += _sectionLineBS(x, room_oy - 6, 4, 'A', color)
-    html += _sectionLineBS(x, room_y2 + 6, PW - 4, 'A', color)
-    const block = el.querySelector('#section-block')
-    if (block) block.innerHTML = html
-    // 同步更新剖面截面
-    redrawSectionPanel(x)
-  }
-
-  // ── Hover 卡片交互 ─────────────────────────────────────────────────
+  // Hover 卡片交互
   const tooltipPump = document.getElementById('pump-tooltip')
   const tooltipValve = document.getElementById('valve-tooltip')
 
   el.querySelectorAll('.pump-group').forEach(g => {
     g.addEventListener('mouseenter', (e) => {
       if (!tooltipPump) return
-      const { pump, q, h, kw, model } = g.dataset
-      tooltipPump.innerHTML = `<strong>${pump}</strong><br>Q=${q || '—'} m³/h<br>H=${h || '—'} m<br>P=${kw || '—'} kW<br>${model ? `<small>${model}</small>` : ''}`
+      const { pump, q, h, kw } = g.dataset
+      tooltipPump.innerHTML = `<strong>${pump}</strong><br>Q=${q || '—'} m³/h<br>H=${h || '—'} m<br>P=${kw || '—'} kW`
       tooltipPump.style.display = 'block'
       const rect = el.getBoundingClientRect()
       tooltipPump.style.left = (e.clientX - rect.left + 10) + 'px'
       tooltipPump.style.top = (e.clientY - rect.top - 10) + 'px'
     })
-    g.addEventListener('mouseleave', () => {
-      if (tooltipPump) tooltipPump.style.display = 'none'
-    })
+    g.addEventListener('mouseleave', () => { if (tooltipPump) tooltipPump.style.display = 'none' })
     g.addEventListener('mousemove', (e) => {
       if (!tooltipPump) return
       const rect = el.getBoundingClientRect()
@@ -596,16 +747,14 @@ export function runDrawing(N, ag21, params, S, topology, extraInfo = {}) {
   el.querySelectorAll('.valve-group').forEach(g => {
     g.addEventListener('mouseenter', (e) => {
       if (!tooltipValve) return
-      const { type, dn, ff, std } = g.dataset
-      tooltipValve.innerHTML = `<strong>${type}</strong><br>DN${dn}<br>FF=${ff} mm<br>${std}`
+      const { type, dn } = g.dataset
+      tooltipValve.innerHTML = `<strong>${type}</strong><br>DN${dn}`
       tooltipValve.style.display = 'block'
       const rect = el.getBoundingClientRect()
       tooltipValve.style.left = (e.clientX - rect.left + 10) + 'px'
       tooltipValve.style.top = (e.clientY - rect.top - 10) + 'px'
     })
-    g.addEventListener('mouseleave', () => {
-      if (tooltipValve) tooltipValve.style.display = 'none'
-    })
+    g.addEventListener('mouseleave', () => { if (tooltipValve) tooltipValve.style.display = 'none' })
     g.addEventListener('mousemove', (e) => {
       if (!tooltipValve) return
       const rect = el.getBoundingClientRect()
@@ -614,85 +763,28 @@ export function runDrawing(N, ag21, params, S, topology, extraInfo = {}) {
     })
   })
 
-  // ── 剖面组拖动交互 ─────────────────────────────────────────────────
-  let secDragging = false, secLast = { x: 0, y: 0 }
-  let secDx = 0, secDy = 0
-  const secPanel = document.getElementById(sectionPanelId)
-
-  secPanel?.addEventListener('mousedown', (e) => {
-    // 只在 section 区域内部响应，避免与整体 SVG pan 冲突
-    const rect = el.getBoundingClientRect()
-    const sx = (e.clientX - rect.left) / rect.width * VW
-    const sy = (e.clientY - rect.top) / rect.height * VH
-    if (sx >= SX0) {  // 仅在右侧剖面区响应
-      secDragging = true
-      secLast = { x: e.clientX, y: e.clientY }
-      e.stopPropagation()
-      e.preventDefault()
-    }
-  })
-
-  function onSecUp() { secDragging = false }
-  function onSecMove(e) {
-    if (!secDragging) return
-    const dx = e.clientX - secLast.x
-    const dy = e.clientY - secLast.y
-    secLast = { x: e.clientX, y: e.clientY }
-    secDx += dx; secDy += dy
-    secPanel?.setAttribute('transform', `translate(${secDx.toFixed(1)},${secDy.toFixed(1)})`)
-  }
-
-  window.addEventListener('mouseup', onSecUp)
-  window.addEventListener('mousemove', onSecMove)
-
-  // ── 重置回调 ──────────────────────────────────────────────────────
-  const onResetCb = () => {
-    aaCurrentX = aaDragX
-    secDx = 0; secDy = 0
-    secPanel?.setAttribute('transform', '')
-  }
-
-  // ── 初始化 zoom/pan（带最小缩放限制）────────────────────────────────
-  initSvgZoomPan(el, VW, VH,
+  // zoom/pan
+  initSvgZoomPan(el, PW + 520, PH,
     { zIn: 'btn-ag31-zin', zOut: 'btn-ag31-zout', zRst: 'btn-ag31-rst' },
-    { minScale: 1.0, maxScale: 6, onReset: onResetCb })
+    { minScale: 1.0, maxScale: 5 })
+}
 
-  // ── 辅助：重绘剖面截面（根据切割线 X 位置，沿L方向）────────────────
-  function redrawSectionPanel(aaX) {
-    // 切割线在L方向的位置
-    const relX = (aaX - room_ox) / (room_x2 - room_ox)
-    const dn2r = (dn) => (dn / 1000) * ss_pool
-    const r_branch = dn2r(DN_branch)
-    const r_main   = dn2r(DN_main)
-    // 管道截面在池顶标高（维护间底 = 穿楼板位置）
-    const xsection_y = pool_top_y
+// ═══════════════════════════════════════════════════════════════════════════
+// ── 主入口 ────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
 
-    // 基于真实物理尺寸计算阀门和设备尺寸（mm → px）
-    const valve_cv_half = lookupFF(CHECK_VALVE_FF, DN_branch) / 1000 * ss_room / 2
-    const valve_gv_half = lookupFF(GATE_VALVE_FF, DN_branch) / 1000 * ss_room / 2
-    const fm_half = flowmeterBodyL(DN_main) / 1000 * ss_room / 2
+export function runDrawing(N, ag21, params, S, topology, extraInfo = {}) {
+  const inputs = parseInputs(N, ag21, params, S, topology, extraInfo)
+  const geo = computeGeometry(inputs)
+  const minimapSvg = buildMinimap(inputs, geo)
+  const layoutMap = buildLayoutMap(topology, geo, inputs)
+  const planData = buildPlanView(inputs, geo, layoutMap)
+  const sectionData = buildSectionView(inputs, geo)
 
-    let html = ''
-    if (relX <= 0.25) {
-      // 左侧区域：泵出口竖管截面
-      html += `<ellipse cx="${sec_cx.toFixed(1)}" cy="${xsection_y.toFixed(1)}" rx="${r_branch.toFixed(1)}" ry="${(r_branch * 0.3).toFixed(1)}" fill="none" stroke="#2980b9" stroke-width="2"/>`
-      html += `<text x="${sec_cx}" y="${(xsection_y - r_branch - 8).toFixed(1)}" text-anchor="middle" font-size="9" fill="#2980b9">DN${DN_branch}</text>`
-    } else if (relX <= 0.75) {
-      // 中间区域：支路管道圆形截面 + 止回阀/闸阀
-      html += `<circle cx="${sec_cx.toFixed(1)}" cy="${xsection_y.toFixed(1)}" r="${r_branch.toFixed(1)}" fill="none" stroke="#2980b9" stroke-width="2"/>`
-      html += `<text x="${sec_cx}" y="${(xsection_y - r_branch - 8).toFixed(1)}" text-anchor="middle" font-size="9" fill="#2980b9">DN${DN_branch}</text>`
-      // 止回阀/闸阀符号（基于真实尺寸）
-      html += _checkValve(sec_cx - sec_wx * 0.12, xsection_y, valve_cv_half, true, '#c0392b')
-      html += _gateValve(sec_cx + sec_wx * 0.12, xsection_y, valve_gv_half, true, '#c0392b')
-    } else {
-      // 右侧区域：总管圆形截面 + 流量计
-      html += `<circle cx="${sec_cx.toFixed(1)}" cy="${xsection_y.toFixed(1)}" r="${r_main.toFixed(1)}" fill="none" stroke="#2980b9" stroke-width="2"/>`
-      html += `<text x="${sec_cx}" y="${(xsection_y - r_main - 8).toFixed(1)}" text-anchor="middle" font-size="9" fill="#2980b9">DN${DN_main}</text>`
-      // 流量计（基于真实尺寸）
-      html += _flowmeter(sec_cx, xsection_y, fm_half, r_main, true, '#c0392b')
-    }
+  // SVG 组装顺序：背景 → 平面图 → 剖面图 → 缩略图（最后画，防止被覆盖）
+  const el = document.getElementById('svg-ag31')
+  el.setAttribute('viewBox', `0 0 ${planData.PW + 520} ${planData.PH}`)
+  el.innerHTML = planData.s + sectionData.s + minimapSvg
 
-    const xsection = el.querySelector('#section-pipe-xsection')
-    if (xsection) xsection.innerHTML = html
-  }
+  setupInteractions(el, planData)
 }

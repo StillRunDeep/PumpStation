@@ -427,6 +427,14 @@
               </tr>
             </table>
           </details>
+          <!-- 管径偏好选择器 -->
+          <div class="scheme-panel" id="scheme-panel" style="padding:8px 12px;margin-top:8px">
+            <input type="range" id="scheme-slider"
+              min="1" max="3" step="1" value="2"
+              class="scheme-slider"
+              oninput="handleSchemeChange(parseInt(this.value))">
+            <div class="scheme-options" id="scheme-options"></div>
+          </div>
           <input type="hidden" id="pipe-pump-outlet-dn">
         </div>
         <div class="card-body" id="card-ag13"><p class="msg-pending">尚未计算，请点击「重新计算」或顶部「开始计算全流程」。</p></div>
@@ -492,17 +500,6 @@
           </div>
         </summary>
         <div class="card-body" style="padding:0;overflow:hidden">
-          <!-- 方案选择器（位于 SVG 绘图上方） -->
-          <div class="scheme-panel" id="scheme-panel">
-            <div class="scheme-labels">
-              <span>管径偏好</span>
-            </div>
-            <input type="range" id="scheme-slider"
-              min="1" max="3" step="1" value="2"
-              class="scheme-slider"
-              oninput="handleSchemeChange(parseInt(this.value))">
-            <div class="scheme-options" id="scheme-options"></div>
-          </div>
           <svg id="svg-ag31" viewBox="0 0 1080 580" preserveAspectRatio="xMidYMid meet"></svg>
           <div id="pump-tooltip" class="svg-tooltip" style="display:none;position:absolute;"></div>
           <div id="valve-tooltip" class="svg-tooltip" style="display:none;position:absolute;"></div>
