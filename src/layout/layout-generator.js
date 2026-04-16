@@ -384,17 +384,18 @@ function getConnectedEmptyRegions(grid) {
       const key = `${x},${y}`;
       if (grid.getCell(x, y) === 0 && !visited.has(key)) {
         const cellSet = new Set();
-        const queue = [{ x, y }];
+        const queue = [x, y]; // flat array: [x0, y0, x1, y1, ...]
         visited.add(key);
-        while (queue.length > 0) {
-          const { x: cx, y: cy } = queue.shift();
+        let head = 0;
+        while (head < queue.length) {
+          const cx = queue[head++], cy = queue[head++];
           cellSet.add(`${cx},${cy}`);
           for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
             const nx = cx + dx, ny = cy + dy;
             const nk = `${nx},${ny}`;
             if (!visited.has(nk) && grid.getCell(nx, ny) === 0) {
               visited.add(nk);
-              queue.push({ x: nx, y: ny });
+              queue.push(nx, ny);
             }
           }
         }
@@ -615,7 +616,7 @@ function getPreferredDirection(roomId, grid, buildingW, buildingD) {
   return null;
 }
 
-function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionComplete = null, onRectExpansionComplete = null) {
+function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionComplete = null, onRectExpansionComplete = null, stopAfterStage1 = false) {
     let iterations = 0;
     let stage = 1; // Stage 1: Rectangular only, Stage 2: All types allowed
     // currentArea is now in grid cell counts
