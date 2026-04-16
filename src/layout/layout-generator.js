@@ -2,7 +2,7 @@ import { ROOM_DEFS } from './room-defs.js';
 import { checkAdjacency } from './adjacency.js';
 import { placeDoors } from './door-placer.js';
 import { SCORER_PARAMS } from './scorer-params.js';
-import { evaluateCheckpointA } from './scorer.js';
+import { evaluateCheckpointA, GROUND_MUST_EXT, LEVEL1_MUST_FACE_CORRIDOR } from './scorer.js';
 import { adjacent, centerX, centerY, touchesExteriorNonSouth, CONSTRAINT_CHECKS, evaluateTemplate } from './placer.js';
 
 export const GRID_SIZE = 500; // 500mm per grid cell — single source of truth, imported by ag41/ag42
@@ -150,7 +150,7 @@ function getRoomMinCrossWidth(grid, roomId) {
 
 const CORRIDOR_MIN_WIDTH_CELLS = 3; // 3 × 500mm = 1500mm
 
-function findBestRectangleExpansion(grid, roomId, preferElongated = false) {
+function findBestRectangleExpansion(grid, roomId, preferElongated = false, preferredDir = null) {
   const bbox = grid.getBoundingBox(roomId);
   if (!bbox) return null;
 
@@ -198,6 +198,13 @@ function findBestRectangleExpansion(grid, roomId, preferElongated = false) {
 
   if (potentialExpansions.length === 0) return null;
 
+  // If a preferred direction is set and has a valid expansion, return it immediately
+  // (accessibility goal overrides aspect-ratio optimisation)
+  if (preferredDir) {
+    const preferred = potentialExpansions.find(exp => exp.dir === preferredDir);
+    if (preferred) return preferred.cells;
+  }
+
   const currentW = bbox.maxX - bbox.minX + 1;
   const currentD = bbox.maxY - bbox.minY + 1;
 
@@ -223,7 +230,7 @@ function findBestRectangleExpansion(grid, roomId, preferElongated = false) {
   return potentialExpansions[0].cells;
 }
 
-function findBestFillExpansion(grid, roomId) {
+function findBestFillExpansion(grid, roomId, preferredDir = null) {
   const bbox = grid.getBoundingBox(roomId);
   if (!bbox) return null;
 
@@ -275,6 +282,12 @@ function findBestFillExpansion(grid, roomId) {
   });
 
   potentialExpansions.sort((a, b) => {
+    // Preferred direction always ranks before non-preferred directions
+    if (preferredDir) {
+      const aPref = a.dir === preferredDir ? 1 : 0;
+      const bPref = b.dir === preferredDir ? 1 : 0;
+      if (aPref !== bPref) return bPref - aPref;
+    }
     if (a.aspectScore < b.aspectScore) return -1;
     if (a.aspectScore > b.aspectScore) return 1;
     return b.size - a.size;
@@ -357,7 +370,87 @@ function countRoomVertices(grid, roomId) {
     return vertices;
 }
 
-function expandRooms(grid, rooms, rng, onRegularExpansionComplete = null, onRectExpansionComplete = null) {
+// ── Phase 2 Accessibility helpers ────────────────────────────────────────────
+
+/** Convert grid bounding box (cell units) to mm-based placement object. */
+function bboxToPlacement(bbox) {
+  return {
+    x: bbox.minX * GRID_SIZE,
+    y: bbox.minY * GRID_SIZE,
+    w: (bbox.maxX - bbox.minX + 1) * GRID_SIZE,
+    h: (bbox.maxY - bbox.minY + 1) * GRID_SIZE
+  };
+}
+
+/**
+ * Check whether a room's accessibility requirement is already satisfied
+ * given the current grid state. Used by Phase 2 to determine growth priority.
+ */
+function isAccessibilityMet(roomId, grid, buildingW, buildingD) {
+  const bbox = grid.getBoundingBox(roomId);
+  if (!bbox) return true;
+  const p = bboxToPlacement(bbox);
+
+  if (GROUND_MUST_EXT.includes(roomId)) {
+    return touchesExteriorNonSouth(p, buildingW, buildingD);
+  }
+  if (LEVEL1_MUST_FACE_CORRIDOR.includes(roomId)) {
+    const corrBbox = grid.getBoundingBox('corridor_l1');
+    if (!corrBbox) return false;
+    return adjacent(p, bboxToPlacement(corrBbox));
+  }
+  if (roomId === 'repair_zone') {
+    const parkBbox = grid.getBoundingBox('parking');
+    if (!parkBbox) return false;
+    return adjacent(p, bboxToPlacement(parkBbox)) || touchesExteriorNonSouth(p, buildingW, buildingD);
+  }
+  return true;
+}
+
+/**
+ * Return the preferred expansion direction for a room that has not yet met
+ * its accessibility requirement. Returns 'W'|'E'|'N'|'S'|null.
+ */
+function getPreferredDirection(roomId, grid, buildingW, buildingD) {
+  const bbox = grid.getBoundingBox(roomId);
+  if (!bbox) return null;
+  const cx = (bbox.minX + bbox.maxX + 1) / 2 * GRID_SIZE;
+  const cy = (bbox.minY + bbox.maxY + 1) / 2 * GRID_SIZE;
+
+  if (GROUND_MUST_EXT.includes(roomId)) {
+    // Nearest of west / north / east exterior walls
+    const distW = cx;
+    const distN = cy;
+    const distE = buildingW - cx;
+    const minDist = Math.min(distW, distN, distE);
+    if (minDist === distW) return 'W';
+    if (minDist === distN) return 'N';
+    return 'E';
+  }
+  if (LEVEL1_MUST_FACE_CORRIDOR.includes(roomId)) {
+    const corrBbox = grid.getBoundingBox('corridor_l1');
+    if (!corrBbox) return null;
+    const corrCx = (corrBbox.minX + corrBbox.maxX + 1) / 2 * GRID_SIZE;
+    const corrCy = (corrBbox.minY + corrBbox.maxY + 1) / 2 * GRID_SIZE;
+    const dx = corrCx - cx;
+    const dy = corrCy - cy;
+    if (Math.abs(dx) >= Math.abs(dy)) return dx > 0 ? 'E' : 'W';
+    return dy > 0 ? 'S' : 'N';
+  }
+  if (roomId === 'repair_zone') {
+    const parkBbox = grid.getBoundingBox('parking');
+    if (!parkBbox) return null;
+    const parkCx = (parkBbox.minX + parkBbox.maxX + 1) / 2 * GRID_SIZE;
+    const parkCy = (parkBbox.minY + parkBbox.maxY + 1) / 2 * GRID_SIZE;
+    const dx = parkCx - cx;
+    const dy = parkCy - cy;
+    if (Math.abs(dx) >= Math.abs(dy)) return dx > 0 ? 'E' : 'W';
+    return dy > 0 ? 'S' : 'N';
+  }
+  return null;
+}
+
+function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionComplete = null, onRectExpansionComplete = null) {
     let iterations = 0;
     let stage = 1; // Stage 1: Rectangular only, Stage 2: All types allowed
     // currentArea is now in grid cell counts
@@ -375,8 +468,19 @@ function expandRooms(grid, rooms, rng, onRegularExpansionComplete = null, onRect
             break;
         }
 
-        // Sort by completion ratio
-        activeRooms.sort((a, b) => (a.currentArea / a.targetGridCount) - (b.currentArea / b.targetGridCount));
+        // Sort rooms by priority:
+        // Stage 1: area completion ratio only (lower ratio = higher priority)
+        // Stage 2: accessibility-unmet rooms first, then by area completion ratio
+        if (stage === 2) {
+          activeRooms.sort((a, b) => {
+            const aOk = isAccessibilityMet(a.id, grid, buildingW, buildingD);
+            const bOk = isAccessibilityMet(b.id, grid, buildingW, buildingD);
+            if (aOk !== bOk) return aOk ? 1 : -1; // unmet comes first
+            return (a.currentArea / a.targetGridCount) - (b.currentArea / b.targetGridCount);
+          });
+        } else {
+          activeRooms.sort((a, b) => (a.currentArea / a.targetGridCount) - (b.currentArea / b.targetGridCount));
+        }
 
         let growthHappenedThisCycle = false;
 
@@ -411,13 +515,19 @@ function expandRooms(grid, rooms, rng, onRegularExpansionComplete = null, onRect
             // Stage 2: Allow all types of expansion
             for (const roomToGrow of activeRooms) {
                 const isCorridor = roomToGrow.id === 'corridor_l1';
-                let expansionCells = findBestRectangleExpansion(grid, roomToGrow.id, isCorridor);
+
+                // Compute accessibility direction bias for rooms that haven't met their requirement
+                const accessOk = isAccessibilityMet(roomToGrow.id, grid, buildingW, buildingD);
+                const prefDir = accessOk ? null : getPreferredDirection(roomToGrow.id, grid, buildingW, buildingD);
+
+                let expansionCells = findBestRectangleExpansion(grid, roomToGrow.id, isCorridor, prefDir);
 
                 if (!expansionCells) {
-                    expansionCells = findBestFillExpansion(grid, roomToGrow.id);
+                    expansionCells = findBestFillExpansion(grid, roomToGrow.id, prefDir);
                 }
 
                 if (!expansionCells) {
+                    // findSmartLineExpansion: concave-fill logic is self-converging; no dir bias needed
                     expansionCells = findSmartLineExpansion(grid, roomToGrow.id);
                 }
 
@@ -1298,7 +1408,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
 
   // --- Checkpoint A (Phase 1 snapshot evaluation) ---
 
-  expandRooms(groundGrid, groundRooms, rng, (gridState) => {
+  expandRooms(groundGrid, groundRooms, rng, bW, bD, (gridState) => {
     groundGridBeforeGaps = gridState.clone();
   }, (gridState) => {
     groundGridAfterRect = gridState.clone();
@@ -1306,7 +1416,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
    if (!groundGridAfterRect) groundGridAfterRect = groundGrid.clone();
    if (!groundGridBeforeGaps) groundGridBeforeGaps = groundGrid.clone();
 
-  expandRooms(level1Grid, level1Rooms, rng, (gridState) => {
+  expandRooms(level1Grid, level1Rooms, rng, bW, bD, (gridState) => {
     level1GridBeforeGaps = gridState.clone();
   }, (gridState) => {
     level1GridAfterRect = gridState.clone();
