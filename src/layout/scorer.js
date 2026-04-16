@@ -196,6 +196,60 @@ export function computeAspectRatioPenalty(result) {
 }
 
 /**
+ * Checkpoint A — Tier 1 (Hard Redlines) partial score.
+ * Evaluates only the three hard-redline metrics used to gate Phase 1 → Phase 2 progression.
+ * Input must have already been processed by evaluateTemplate() so that result.violations is populated.
+ *
+ * @returns {{ partialScore: number, passes: boolean, missingRooms: number, doorAccess: number, violations: number, missingRoomCount: number, doorAccessCount: number, violationCount: number }}
+ */
+export function scoreHardRedlines(result) {
+  const { mustViolationPenalty } = SCORER_PARAMS
+  const missingRoomsRes = computeMissingRoomsPenalty(result)
+  const doorAccessRes   = computeDoorAccessPenalty(result)
+  const violationCount  = result.violations?.length || 0
+  const violationsPenalty = -(violationCount * mustViolationPenalty)
+  const partialScore = missingRoomsRes.penalty + doorAccessRes.penalty + violationsPenalty
+  return {
+    partialScore,
+    passes: partialScore === 0,
+    missingRooms: missingRoomsRes.penalty,
+    missingRoomCount: missingRoomsRes.ids.length,
+    doorAccess: doorAccessRes.penalty,
+    doorAccessCount: doorAccessRes.ids.length,
+    violations: violationsPenalty,
+    violationCount,
+  }
+}
+
+/**
+ * Checkpoint B — Tier 1 + Tier 2 (Hard Redlines + Spatial Quality) partial score.
+ * Used to rank the 9 schemes after Phase 2 (L/U expansion) completes.
+ * Input must have already been processed by evaluateTemplate().
+ *
+ * @returns {{ partialScore: number, passes: boolean, aspectRatio: number, efficiency: number, spaceEfficiency: number, corridor: number, ...tier1 fields }}
+ */
+export function scoreSpatialQuality(result) {
+  const { corridorHitsThreshold, corridorBonus, efficiencyBase, efficiencyRange, efficiencyMaxBonus } = SCORER_PARAMS
+  const tier1 = scoreHardRedlines(result)
+  const aspectRatioRes = computeAspectRatioPenalty(result)
+  const spaceEfficiency = computeSpaceEfficiency(result)
+  const efficiencyScore = linearScore(spaceEfficiency, efficiencyBase, efficiencyRange, efficiencyMaxBonus)
+  const corridorHits = result.adjacency?.satisfied?.filter(v => v.pair.includes('corridor_l1')).length || 0
+  const corridorScore = corridorHits === 0 ? 0
+    : Math.min(corridorBonus, Math.round((corridorHits / corridorHitsThreshold) * corridorBonus))
+  const partialScore = tier1.partialScore + aspectRatioRes.penalty + efficiencyScore + corridorScore
+  return {
+    partialScore,
+    ...tier1,
+    aspectRatio: aspectRatioRes.penalty,
+    aspectRatioCount: aspectRatioRes.violationCount,
+    efficiency: efficiencyScore,
+    spaceEfficiency,
+    corridor: corridorScore,
+  }
+}
+
+/**
  * Score a layout result (higher = better).
  *
  * All numeric constants are read from SCORER_PARAMS at call time, so UI
@@ -208,7 +262,7 @@ export function scoreLayout(result) {
   const { buildingW, buildingD, groundPlacements, level1Placements } = result
   const allPlacements = { ...groundPlacements, ...level1Placements }
   const {
-    footprintPenaltyPerM2,
+    growthSuccessMaxBonus,
     trafoExteriorBonus, trafoSameSideBonus,
     fanRoomMaxBonus, fanRoomDistDivisor,
     mustAdjacencyBonus, shouldAdjacencyBonus,
@@ -222,7 +276,7 @@ export function scoreLayout(result) {
 
   const breakdown = {
     base: 10000,
-    footprint: 0,
+    growthSuccess: 0,
     adjacency: 0,
     corridor: 0,
     trafo: 0,
@@ -237,10 +291,31 @@ export function scoreLayout(result) {
   }
   let score = breakdown.base
 
-  // 1. Footprint penalty
-  const areaMm2 = buildingW * buildingD
-  breakdown.footprint = -Math.round((areaMm2 / 1e6) * footprintPenaltyPerM2)
-  score += breakdown.footprint
+  // 1. Growth Success Bonus
+  let totalActualArea = 0;
+  for (const p of Object.values(allPlacements)) {
+    if (p.actualArea) {
+      totalActualArea += p.actualArea;
+    } else {
+      totalActualArea += p.w * p.d;
+    }
+  }
+
+  let totalTargetArea = 0;
+  if (result._debug && result._debug.roomTargets) {
+    totalTargetArea = result._debug.roomTargets.reduce((sum, room) => {
+      // room.targetGridCount is in grid cells, convert to mm^2
+      return sum + (room.targetGridCount * 500 * 500);
+    }, 0);
+  }
+
+  if (totalTargetArea > 0) {
+    const growthRatio = Math.min(1, totalActualArea / totalTargetArea);
+    breakdown.growthSuccess = Math.round(growthRatio * growthSuccessMaxBonus);
+  } else {
+    breakdown.growthSuccess = 0;
+  }
+  score += breakdown.growthSuccess;
 
   // 2. Trafo exterior wall bonus
   const bW = buildingW
