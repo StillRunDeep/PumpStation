@@ -515,18 +515,32 @@
           <span>AG4-1</span>
           <span class="agent-label">建筑平面布局生成</span>
           <span class="badge" id="ag41-badge">最优方案推荐</span>
-          <span id="ag41-notify" class="header-notify"></span>
           <div class="card-header-buttons">
             <button id="btn-ag41-params" title="建筑平面参数设置">建筑平面参数</button>
+            <button id="btn-ag41-scorer-params" title="评分参数设置">评分参数</button>
             <button id="btn-ag41-more" hidden>生成方案</button>
             <button id="btn-ag41-reset" hidden>重置方案</button>
           </div>
         </summary>
+        <div class="notify-bar-wrap">
+          <span id="ag41-notify" class="header-notify"></span>
+        </div>
         <div class="card-body">
           <!-- 方案排名（含行内展开详图） -->
           <div id="layout-comparison"></div>
         </div>
       </details>
+
+      <!-- ── 评分参数模态框 ── -->
+      <dialog id="modal-scorer-params" class="modal">
+        <div class="modal-header">
+          <h3>评分参数设置</h3>
+          <div id="modal-scorer-actions" class="modal-actions"></div>
+        </div>
+        <div class="modal-body" id="modal-scorer-wrap">
+          <!-- Content will be injected by JS -->
+        </div>
+      </dialog>
 
       <!-- ── 建筑参数模态框 (moved here) ── -->
       <dialog id="modal-build-params" class="modal">

@@ -738,6 +738,248 @@ function finalizeLayout(grid) {
   return layout;
 }
 
+// ── Phase 3 Algorithm Optimization ───────────────────────────────────────────
+
+const PHASE3_AREA_DEVIATION = 0.15  // 面积偏差阈值：超过 15% 视为候选
+const SWAP_MAX_CELLS = 4            // 单次转让的最大格子数
+const MAX_SWAP_ROUNDS = 30          // 空间交换最大协商轮数
+
+/**
+ * Phase 3a: 无面积限制的 L/U 形继续生长。
+ * 复用 Stage 2 的扩展逻辑，但移除 targetGridCount 限制，让所有房间持续生长直到无法再扩展。
+ */
+function runPhase3Growth(grid, rooms, rng) {
+  let iterations = 0
+  while (iterations < MAX_EXPANSION_ITERATIONS) {
+    let grew = false
+    // 按完成比例排序（面积最小的优先）
+    const sorted = [...rooms].sort((a, b) => {
+      const aA = grid.roomData[a.id]?.length || 0
+      const bA = grid.roomData[b.id]?.length || 0
+      return (aA / (a.targetGridCount || 1)) - (bA / (b.targetGridCount || 1))
+    })
+
+    for (const room of sorted) {
+      const isCorridor = room.id === 'corridor_l1'
+      let cells = findBestRectangleExpansion(grid, room.id, isCorridor)
+      if (!cells) cells = findBestFillExpansion(grid, room.id)
+      if (!cells) cells = findSmartLineExpansion(grid, room.id)
+      if (!cells || cells.length === 0) continue
+
+      // 走廊宽度守护
+      if (isCorridor) {
+        const currentMinWidth = getRoomMinCrossWidth(grid, room.id);
+
+        // 创建一个 testGrid 来模拟生长后的状态
+        const origCells = [...(grid.roomData[room.id] || [])];
+        const testGrid = {
+          getCell: (x, y) => cells.some(c => c.x === x && c.y === y) ? room.id : grid.getCell(x, y),
+          getBoundingBox: (id) => {
+            if (id !== room.id) return grid.getBoundingBox(id);
+            const combined = [...origCells, ...cells];
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            for (const c of combined) {
+              if (c.x < minX) minX = c.x; if (c.x > maxX) maxX = c.x;
+              if (c.y < minY) minY = c.y; if (c.y > maxY) maxY = c.y;
+            }
+            return { minX, minY, maxX, maxY };
+          }
+        };
+
+        const newMinWidth = getRoomMinCrossWidth(testGrid, room.id);
+
+        // 只有当宽度变得更窄，且仍低于标准时，才阻止
+        if (newMinWidth < currentMinWidth && newMinWidth < CORRIDOR_MIN_WIDTH_CELLS) {
+          continue;
+        }
+      }
+
+      // 非走廊房间形态约束（最多 8 顶点）
+      if (!isCorridor) {
+        const origCells = [...(grid.roomData[room.id] || [])]
+        const testGrid = {
+          getCell: (x, y) => cells.some(c => c.x === x && c.y === y) ? room.id : grid.getCell(x, y),
+          getBoundingBox: (id) => {
+            if (id !== room.id) return grid.getBoundingBox(id)
+            const combined = [...origCells, ...cells]
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+            for (const c of combined) {
+              if (c.x < minX) minX = c.x; if (c.x > maxX) maxX = c.x
+              if (c.y < minY) minY = c.y; if (c.y > maxY) maxY = c.y
+            }
+            return { minX, minY, maxX, maxY }
+          }
+        }
+        if (countRoomVertices(testGrid, room.id) > 8) continue
+      }
+
+      cells.forEach(c => grid.addRoomCell(room.id, c.x, c.y))
+      grew = true
+      break
+    }
+
+    if (!grew) break
+    iterations++
+  }
+}
+
+/**
+ * 单房间轻量质量评分（用于交换决策，不调用 evaluateTemplate）。
+ * 综合：利用率 + 面积吻合度 - 形状惩罚
+ */
+function computeRoomQuality(grid, room) {
+  const cellCount = grid.roomData[room.id]?.length || 0
+  const bbox = grid.getBoundingBox(room.id)
+  if (!cellCount || !bbox) return 0
+
+  const bboxW = bbox.maxX - bbox.minX + 1
+  const bboxH = bbox.maxY - bbox.minY + 1
+  const ratio = Math.max(bboxW / bboxH, bboxH / bboxW)
+  const util = cellCount / (bboxW * bboxH)
+  const areaMatch = 1 - Math.abs(cellCount / (room.targetGridCount || 1) - 1)
+
+  const shapePenalty = ratio > 4 ? (ratio - 4) * 30 : 0
+  return Math.max(0, util * 100 + Math.max(0, areaMatch) * 80 - shapePenalty)
+}
+
+/**
+ * 验证房间的格子是否仍然连通（BFS）。防止转让操作将房间切断。
+ */
+function isRoomConnected(grid, roomId) {
+  const cells = grid.roomData[roomId]
+  if (!cells || cells.length <= 1) return true
+
+  const cellSet = new Set(cells.map(c => `${c.x},${c.y}`))
+  const visited = new Set()
+  const queue = [cells[0]]
+  visited.add(`${cells[0].x},${cells[0].y}`)
+
+  while (queue.length > 0) {
+    const { x, y } = queue.shift()
+    for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      const key = `${x+dx},${y+dy}`
+      if (cellSet.has(key) && !visited.has(key)) {
+        visited.add(key)
+        queue.push({ x: x+dx, y: y+dy })
+      }
+    }
+  }
+  return visited.size === cells.length
+}
+
+/**
+ * 返回与 roomId 相邻的所有其他房间 ID（去重）。
+ */
+function findAdjacentRoomIds(grid, roomId) {
+  const adjacent = new Set()
+  for (const { x, y } of (grid.roomData[roomId] || [])) {
+    for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      const neighbor = grid.getCell(x+dx, y+dy)
+      if (neighbor && neighbor !== 0 && neighbor !== roomId) adjacent.add(neighbor)
+    }
+  }
+  return [...adjacent]
+}
+
+/**
+ * Phase 3b: 空间交换协商。
+ * 对质量差或面积偏差大的候选房间，与相邻房间协商边界格子的转让。
+ * 若转让后两房间综合评分提升则保留，否则回退。
+ */
+function runSpaceSwap(grid, rooms) {
+  const roomMap = Object.fromEntries(rooms.map(r => [r.id, r]))
+
+  // 识别候选房间
+  function isCandidateRoom(room) {
+    if (room.id === 'corridor_l1') return false
+    const cellCount = grid.roomData[room.id]?.length || 0
+    const bbox = grid.getBoundingBox(room.id)
+    if (!cellCount || !bbox) return false
+    const bboxW = bbox.maxX - bbox.minX + 1
+    const bboxH = bbox.maxY - bbox.minY + 1
+    const ratio = Math.max(bboxW / bboxH, bboxH / bboxW)
+    const util = cellCount / (bboxW * bboxH)
+    const areaDeviation = Math.abs(cellCount / (room.targetGridCount || 1) - 1)
+    return ratio > 4 || util < 0.70 || areaDeviation > PHASE3_AREA_DEVIATION
+  }
+
+  // 取 fromRoom 紧贴 toRoom 的边界格子（最多 SWAP_MAX_CELLS 个）
+  function getBoundaryCells(fromId, toId, maxCount) {
+    const result = []
+    for (const { x, y } of (grid.roomData[fromId] || [])) {
+      if (result.length >= maxCount) break
+      const touches = [[1,0],[-1,0],[0,1],[0,-1]].some(([dx, dy]) => grid.getCell(x+dx, y+dy) === toId)
+      if (touches) result.push({ x, y })
+    }
+    return result
+  }
+
+  // 将 cells 从 fromId 转让给 toId，返回是否成功
+  function transfer(fromId, toId, cells) {
+    if (cells.length === 0) return false
+    // 从 fromId 移除
+    grid.roomData[fromId] = grid.roomData[fromId].filter(c => !cells.some(t => t.x === c.x && t.y === c.y))
+    cells.forEach(c => grid.grid[c.y][c.x] = 0)
+    // 连通性检查
+    if (!isRoomConnected(grid, fromId)) {
+      // 回退
+      cells.forEach(c => { grid.roomData[fromId].push(c); grid.grid[c.y][c.x] = fromId })
+      return false
+    }
+    // 加入 toId
+    cells.forEach(c => { grid.roomData[toId].push(c); grid.grid[c.y][c.x] = toId })
+    return true
+  }
+
+  function revert(fromId, toId, cells) {
+    grid.roomData[toId] = grid.roomData[toId].filter(c => !cells.some(t => t.x === c.x && t.y === c.y))
+    cells.forEach(c => { grid.roomData[fromId].push(c); grid.grid[c.y][c.x] = fromId })
+  }
+
+  for (let round = 0; round < MAX_SWAP_ROUNDS; round++) {
+    let anyImproved = false
+
+    const candidates = rooms.filter(isCandidateRoom)
+    if (candidates.length === 0) break
+
+    for (const roomA of candidates) {
+      const adjIds = findAdjacentRoomIds(grid, roomA.id)
+      let improved = false
+
+      for (const adjId of adjIds) {
+        const roomB = roomMap[adjId]
+        if (!roomB) continue
+
+        const preQ = computeRoomQuality(grid, roomA) + computeRoomQuality(grid, roomB)
+
+        // 尝试 A → B（A 给出边界格子）
+        const cellsAtoB = getBoundaryCells(roomA.id, adjId, SWAP_MAX_CELLS)
+        if (cellsAtoB.length > 0 && transfer(roomA.id, adjId, cellsAtoB)) {
+          const postQ = computeRoomQuality(grid, roomA) + computeRoomQuality(grid, roomB)
+          if (postQ > preQ) {
+            improved = true; anyImproved = true; break
+          }
+          revert(adjId, roomA.id, cellsAtoB)
+        }
+
+        // 尝试 B → A（B 给出边界格子）
+        const cellsBtoA = getBoundaryCells(adjId, roomA.id, SWAP_MAX_CELLS)
+        if (cellsBtoA.length > 0 && transfer(adjId, roomA.id, cellsBtoA)) {
+          const postQ = computeRoomQuality(grid, roomA) + computeRoomQuality(grid, roomB)
+          if (postQ > preQ) {
+            improved = true; anyImproved = true; break
+          }
+          revert(roomA.id, adjId, cellsBtoA)
+        }
+
+        if (improved) break
+      }
+    }
+
+    if (!anyImproved) break
+  }
+}
+
 function makeRng(seed) {
   let s = ((seed * 0x6b37d369) ^ 0xdeadbeef) >>> 0;
   if (s === 0) s = 1;
@@ -836,6 +1078,12 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId 
   });
   if (!groundGridAfterRect) groundGridAfterRect = groundGrid.clone();
   if (!groundGridBeforeGaps) groundGridBeforeGaps = groundGrid.clone(); // Fallback if regular expansion never stalled
+
+  // ── Phase 3a: 无面积限制 L/U 生长 ──────────────────────────────────
+  runPhase3Growth(groundGrid, groundRooms, rng)
+  // ── Phase 3b: 空间交换协商 ─────────────────────────────────────────
+  //runSpaceSwap(groundGrid, groundRooms)
+  // ── Phase 3c: 边界清理与空隙填充 ──────────────────────────────────
   fillGaps(groundGrid, groundRooms);
 
   let level1GridBeforeGaps, level1GridAfterRect;
@@ -860,6 +1108,12 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId 
   });
   if (!level1GridAfterRect) level1GridAfterRect = level1Grid.clone();
   if (!level1GridBeforeGaps) level1GridBeforeGaps = level1Grid.clone(); // Fallback
+
+  // ── Phase 3a: 无面积限制 L/U 生长 ──────────────────────────────────
+  runPhase3Growth(level1Grid, level1Rooms, rng)
+  // ── Phase 3b: 空间交换协商 ─────────────────────────────────────────
+  //runSpaceSwap(level1Grid, level1Rooms)
+  // ── Phase 3c: 边界清理与空隙填充 ──────────────────────────────────
   fillGaps(level1Grid, level1Rooms);
 
   // 3. Finalize layouts from both grids
