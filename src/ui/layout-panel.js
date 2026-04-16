@@ -101,13 +101,20 @@ function renderComparisonTable(variants) {
     // Prefer Checkpoint A (Phase 1 snapshot) values for table display
     const mustSat = cp.mustAdjacency?.satisfied ?? (v.adjacency?.satisfied || []).filter(a => a.type === 'must').length
     const mustTot = cp.mustAdjacency?.total ?? mustSat + (v.adjacency?.violated || []).filter(a => a.type === 'must').length
+    
+    // Hard Redline Violations (General)
     const violCount = cp.violationCount ?? v.violations?.length ?? 0
     const violCell = violCount === 0
       ? `<span style="color:#27ae60">✓</span>`
       : `<span style="color:#c0392b">⚠ ${violCount}</span>`
-    const area = Math.round(v.buildingW * v.buildingD / 1e6)
+
+    // Accessibility / Door Access Violations (Specific subset)
+    const daCount = cp.doorAccessCount ?? v.breakdown?.doorAccessCount ?? 0
+    const daCell = daCount === 0
+      ? `<span style="color:#27ae60">✓</span>`
+      : `<span style="color:#c0392b;font-weight:700">⚠ ${daCount}</span>`
+
     const eff  = cp.spaceEfficiency != null ? (cp.spaceEfficiency * 100).toFixed(1) + '%' : (v.spaceEfficiency != null ? (v.spaceEfficiency * 100).toFixed(1) + '%' : '—')
-    const ar   = v.aspectRatio != null ? v.aspectRatio.toFixed(2) : '—'
 
     const rowBg = i % 2 === 0 ? '#f8fafc' : '#fff'
 
@@ -119,11 +126,10 @@ function renderComparisonTable(variants) {
             border-left:4px solid transparent;transition:border-color .15s">${i + 1}</td>
         <td style="padding:7px 8px"><strong>${v.id}</strong><br>
           <span style="font-size:11px;color:#555">${v.label}</span></td>
-        <td style="text-align:center;font-size:11px;padding:7px 8px">${ar}</td>
         <td style="text-align:right;font-weight:700;color:#1a5276;padding:7px 8px">${v.score}</td>
-        <td style="text-align:right;padding:7px 8px">${area}</td>
         <td style="text-align:right;padding:7px 8px">${eff}</td>
         <td style="text-align:center;padding:7px 8px">${mustSat} / ${mustTot}</td>
+        <td style="text-align:center;padding:7px 8px">${daCell}</td>
         <td style="text-align:center;padding:7px 8px">${violCell}</td>
       </tr>`
   }).join('')
@@ -135,12 +141,11 @@ function renderComparisonTable(variants) {
           <tr style="background:#1a3a5c;color:#fff;font-size:12px">
             <th class="th-tip" data-tip="按综合得分降序排列" style="padding:7px 8px">排名</th>
             <th class="th-tip" data-tip="方案编号与描述" style="padding:7px 8px;text-align:left">方案</th>
-            <th class="th-tip" data-tip="房间最大长宽比（越小越好）" style="padding:7px 8px">长宽比</th>
             <th class="th-tip" data-tip="三梯队全量评分总分（越高越好）" style="padding:7px 8px;text-align:right">综合得分</th>
-            <th class="th-tip" data-tip="建筑实际占地面积" style="padding:7px 8px;text-align:right">占地 m²</th>
             <th class="th-tip" data-tip="功能房间面积/楼层面积（Phase 1快照）" style="padding:7px 8px;text-align:right">空间有效率</th>
-            <th class="th-tip" data-tip="M-01: meter_main↔meter_sub, M-02: trafo1↔trafo2 (Phase 1快照)" style="padding:7px 8px">必须临近</th>
-            <th class="th-tip" data-tip="C-01: 外墙接触, C-02: 15t桥吊覆盖, C-03: 5t单轨吊覆盖, C-04/C-05: MUST邻接" style="padding:7px 8px">约束违反</th>
+            <th class="th-tip" data-tip="强邻近要求满足度 (Phase 1快照)" style="padding:7px 8px">强邻近</th>
+            <th class="th-tip" data-tip="未满足的可达性/门禁要求（Phase 1快照）" style="padding:7px 8px">可达性</th>
+            <th class="th-tip" data-tip="其他致命红线违反" style="padding:7px 8px">红线</th>
           </tr>
         </thead>
         <tbody id="variant-tbody">
@@ -437,8 +442,16 @@ window._ag41UpdateParam = function(key, value) {
 
 /** Reset all params to defaults, save, rebuild full panel. */
 window._ag41ResetParams = function() {
+  // Clear existing keys and re-assign defaults to ensure a clean reset
+  Object.keys(SCORER_PARAMS).forEach(key => delete SCORER_PARAMS[key])
   Object.assign(SCORER_PARAMS, DEFAULT_SCORER_PARAMS)
   saveScorerParams(SCORER_PARAMS)
+
+  // Refresh the params panel UI if it exists (e.g., in a modal)
+  const modalWrap = document.getElementById('modal-scorer-wrap')
+  if (modalWrap) {
+    modalWrap.innerHTML = renderScorerParamsPanel(SCORER_PARAMS)
+  }
 
   const cmp = document.getElementById('layout-comparison')
   if (!cmp) return
