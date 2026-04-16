@@ -22,10 +22,10 @@ function _sortedVariants() {
 
 // ── Scorer params panel ───────────────────────────────────────────────
 
-function renderScorerParamsPanel(params) {
+export function renderScorerParamsPanel(params) {
   const renderGroup = group => {
     const inputs = group.keys.map(k => {
-      const step = PARAM_STEPS[k] ?? 1
+      const step = PARAM_STEPS[k] ?? 1;
       return `
         <td style="padding:2px 6px;white-space:nowrap;vertical-align:top">
           <label style="font-size:10px;color:#666;display:block;margin-bottom:1px">${PARAM_LABELS[k]}</label>
@@ -35,19 +35,37 @@ function renderScorerParamsPanel(params) {
                  style="width:58px;font-size:12px;padding:1px 4px;border:1px solid #bdc3c7;
                         border-radius:3px;text-align:right"
                  onchange="window._ag41UpdateParam('${k}', +this.value)">
-        </td>`
-    }).join('')
+        </td>`;
+    });
     return `
       <tr>
-        <td style="padding:2px 6px;white-space:nowrap;vertical-align:middle;
-                   font-size:10px;font-weight:700;color:#1a3a5c;min-width:60px">${group.label}</td>
-        ${inputs}
-      </tr>`
+        <td style="padding:2px 6px;white-space:nowrap;vertical-align:middle;font-size:10px;font-weight:700;color:#1a3a5c;min-width:60px">${group.label}</td>
+        ${inputs.join('')}
+      </tr>`;
   }
 
-  const mid = Math.ceil(PARAM_GROUPS.length / 2)
-  const leftCol  = PARAM_GROUPS.slice(0, mid).map(renderGroup).join('')
-  const rightCol = PARAM_GROUPS.slice(mid).map(renderGroup).join('')
+  const renderPenaltyInputs = (group) => {
+    return group.keys.map(k => {
+      const step = PARAM_STEPS[k] ?? 1;
+      return `
+        <div style="margin-bottom: 8px;">
+          <label style="font-size:10px;color:#666;display:block;margin-bottom:1px">${PARAM_LABELS[k]}</label>
+          <input type="number" data-pkey="${k}"
+                 value="${params[k]}"
+                 step="${step}" min="0"
+                 style="width:80px;font-size:12px;padding:1px 4px;border:1px solid #bdc3c7;
+                        border-radius:3px;text-align:right"
+                 onchange="window._ag41UpdateParam('${k}', +this.value)">
+        </div>`;
+    }).join('');
+  }
+
+  const penaltyGroup = PARAM_GROUPS.find(g => g.label === '违反惩罚');
+  const otherGroups = PARAM_GROUPS.filter(g => g.label !== '违反惩罚');
+  const mid = Math.ceil(otherGroups.length / 2);
+  const col1 = otherGroups.slice(0, mid).map(renderGroup).join('');
+  const col2 = otherGroups.slice(mid).map(renderGroup).join('');
+  const penaltyInputs = penaltyGroup ? renderPenaltyInputs(penaltyGroup) : '';
 
   return `
     <div id="scorer-params-panel" style="background:#f0f4f8;border:1px solid #d5dde5;
@@ -61,11 +79,18 @@ function renderScorerParamsPanel(params) {
                        cursor:pointer;color:#555">重置参数</button>
       </div>
       <div style="display:flex;gap:16px;align-items:flex-start">
-        <table style="border-collapse:collapse;flex:1">${leftCol}</table>
+        <table style="border-collapse:collapse;flex:1">${col1}</table>
         <div style="width:1px;background:#c8d6e5;align-self:stretch"></div>
-        <table style="border-collapse:collapse;flex:1">${rightCol}</table>
+        <table style="border-collapse:collapse;flex:1">${col2}</table>
       </div>
-    </div>`
+      <div style="border-top: 1px solid #c8d6e5; margin: 12px 0;"></div>
+      <div>
+        <h4 style="font-size:10px;font-weight:700;color:#1a3a5c;margin-bottom:8px;">${penaltyGroup.label}</h4>
+        <div style="display:flex; flex-wrap:wrap; gap: 12px;">
+          ${penaltyInputs}
+        </div>
+      </div>
+    </div>`;
 }
 
 // ── Comparison table ──────────────────────────────────────────────────
@@ -343,7 +368,7 @@ function _rescoreAndRerender() {
   } else {
     const cmp = document.getElementById('layout-comparison')
     if (cmp) {
-      cmp.innerHTML = renderScorerParamsPanel(SCORER_PARAMS) + renderComparisonTable(_sortedVariants())
+      cmp.innerHTML = renderComparisonTable(_sortedVariants())
     }
   }
 
@@ -368,13 +393,13 @@ export function renderLayoutPanel(variants) {
   const cmp = document.getElementById('layout-comparison')
   if (!cmp) return
 
-  cmp.innerHTML = renderScorerParamsPanel(SCORER_PARAMS) + renderComparisonTable(_sortedVariants())
+  cmp.innerHTML = renderComparisonTable(_sortedVariants())
 
   _restoreSelection(prevId, wasOpen)
 
   // Update badge + controls
   const badge = document.getElementById('ag41-badge')
-  if (badge) badge.textContent = '最优方案推荐'
+  if (badge) badge.style.display = 'none'
   document.getElementById('card-ag41-wrap').hidden = false
   const moreBtn = document.getElementById('btn-ag41-more')
   if (moreBtn) moreBtn.hidden = false
@@ -422,7 +447,7 @@ window._ag41ResetParams = function() {
   })
 
   // Full rebuild (so input values reset too)
-  cmp.innerHTML = renderScorerParamsPanel(SCORER_PARAMS) + renderComparisonTable(_sortedVariants())
+  cmp.innerHTML = renderComparisonTable(_sortedVariants())
   _restoreSelection(prevId, wasOpen)
 }
 
@@ -439,4 +464,8 @@ export function showAg41Notify(msg, isImproved) {
   if (!el) return
   el.textContent = msg
   el.className = 'header-notify ' + (isImproved ? 'notify-ok' : 'notify-warn')
+}
+
+export function rescoreAndRerender() {
+  _rescoreAndRerender();
 }

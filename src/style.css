@@ -732,7 +732,7 @@ svg.zoom-active {
 }
 
 /* ── "更多方案" button ── */
-#btn-ag41-more, #btn-ag41-reset, #btn-ag41-params {
+#btn-ag41-more, #btn-ag41-reset, #btn-ag41-params, #btn-ag41-scorer-params {
   padding: 4px 12px;
   background: rgba(255,255,255,0.15);
   color: #fff;
@@ -746,16 +746,24 @@ svg.zoom-active {
 #btn-ag41-more:disabled, #btn-ag41-reset:disabled { opacity: 0.6; cursor: not-allowed; }
 
 /* ── AG4-1 inline notification ── */
+.notify-bar-wrap {
+  height: 28px; /* 固定高度 */
+  background: #e8f5ef; /* 一个更浅的绿色 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .header-notify {
-  flex-grow: 1;
+  flex-grow: 0; /* 不再需要 flex-grow */
   text-align: center;
   font-size: 13px;
   font-weight: 600;
   padding: 0 16px;
   transition: color 0.3s;
 }
-.header-notify.notify-ok   { color: #d4edda; }
-.header-notify.notify-warn { color: #fff3cd; }
+.header-notify.notify-ok   { color: #1a5276; }
+.header-notify.notify-warn { color: #8a4c00; }
 
 /* ── Variant groups ── */
 .variant-group { margin-bottom: 20px; }
@@ -863,7 +871,7 @@ svg.zoom-active {
 }
 
 /* ── Dialog / Modal Styles ── */
-#modal-build-params {
+.modal {
   border: none;
   border-radius: var(--radius);
   box-shadow: 0 5px 20px rgba(0,0,0,0.25);
@@ -873,11 +881,12 @@ svg.zoom-active {
   margin: auto;
 }
 
-#modal-build-params::backdrop {
+.modal::backdrop {
   background: rgba(0, 0, 0, 0.4);
   -webkit-backdrop-filter: blur(3px);
   backdrop-filter: blur(3px);
 }
+
 
 .modal-header {
   display: flex;
@@ -942,3 +951,7 @@ svg.section-drag-active [data-zoom-handle] {
   pointer-events: none;
 }
 .modal-body { padding: 20px; }
+
+#modal-scorer-params {
+  width: 960px;
+}

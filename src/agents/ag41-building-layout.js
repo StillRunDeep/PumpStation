@@ -62,7 +62,8 @@ export async function runAG41(existingVariants = [], isCancelled = () => false) 
   let pCount = 0;
   let rCount = 0;
   let attempts = 0;
-  let lastFailure = null; // 最后一次检查点 A 失败的诊断信息
+  let lastFailure = null;    // 最后一次检查点 A 失败的诊断信息
+  const failed = [];         // 收集未通过检查点 A 的方案，供前端降级展示
 
   // 优先尝试生成遗传算法方案（最多 2 个，防止第一名影响过大）
   // 组A: 第1名 + 第5名；组B: 第5名 + 第9名
@@ -85,6 +86,7 @@ export async function runAG41(existingVariants = [], isCancelled = () => false) 
         pCount++;
       } else {
         lastFailure = checkA;
+        if (failed.length < numToGenerate) failed.push(t);
       }
       await yieldToEventLoop()
     }
@@ -102,13 +104,15 @@ export async function runAG41(existingVariants = [], isCancelled = () => false) 
       rCount++;
     } else {
       lastFailure = checkA;
+      if (failed.length < numToGenerate) failed.push(t);
     }
     await yieldToEventLoop()
   }
 
-  // 将诊断信息附加到返回数组，供调用方展示提示
+  // 将诊断信息与降级候选附加到返回数组，供调用方展示提示
   passing._checkpointADiagnostic = lastFailure;
   passing._attemptCount = attempts;
+  passing._failedCandidates = failed;
 
   // 检查点 B：对 9 个通过方案按第一+第二梯队得分排序
   applyCheckpointB(passing, buildingW, buildingD)

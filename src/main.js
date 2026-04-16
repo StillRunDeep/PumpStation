@@ -9,9 +9,55 @@ import { runPumpSpec } from './agents/pump-spec.js'
 import { runPipeSizing, PIPE_SCHEMES } from './agents/pipe-sizing.js'
 import { runDrawing } from './agents/drawing.js'
 import { runAG41 } from './agents/ag41-building-layout.js'
-import { runAG42, mergeVariants } from './agents/ag42-layout-eval.js'
+import { mergeVariants } from './agents/ag42-layout-eval.js'
+
+/**
+ * 统一的布局生成结果处理：
+ * - 有通过检查点 A 的方案 → 正常评分展示，返回 { variants, improved, newScored }
+ * - 全部未通过          → 用失败方案降级展示，返回 null，并弹出含具体原因的提示
+ * @param {Array}  newRaw    runAG41() 的返回值
+ * @param {Array}  existing  当前已有方案（首次传 []）
+ * @param {boolean} isReset  true = 重置/初次，不显示"更优/未更优"提示
+ */
+function applyLayoutResult(newRaw, existing, isReset = false) {
+  if (newRaw.length > 0) {
+    const { variants, improved, newScored } = mergeVariants(existing, newRaw)
+    renderLayoutPanel(variants)
+    if (isReset) {
+      showAg41Notify('已生成初始方案', true)
+    } else {
+      const maxNewScore    = Math.max(...newScored.map(v => v.score))
+      const currentTopScore = variants[0]?.score || 0
+      if (improved) {
+        showAg41Notify(`发现更优方案！新方案最高分: ${maxNewScore}`, true)
+      } else {
+        showAg41Notify(`未发现更优方案 (当前最高: ${currentTopScore} / 本轮最高: ${maxNewScore})`, false)
+      }
+    }
+    return { variants, improved, newScored }
+  }
+
+  // 全部未通过检查点 A：降级展示失败方案
+  const failedCandidates = newRaw._failedCandidates || []
+  if (failedCandidates.length > 0) {
+    const { variants: failedDisplay } = mergeVariants(existing, failedCandidates)
+    renderLayoutPanel(failedDisplay)
+  }
+  const diag  = newRaw._checkpointADiagnostic
+  const parts = []
+  if (diag) {
+    if (diag.missingRoomCount > 0) parts.push(`${diag.missingRoomCount} 间房间缺失`)
+    if (diag.doorAccessCount  > 0) parts.push(`${diag.doorAccessCount} 间可达性违规`)
+    if (diag.violationCount   > 0) parts.push(`${diag.violationCount} 项 MUST 约束未满足`)
+  }
+  const detail = parts.length ? `：${parts.join('、')}` : ''
+  const suffix = isReset ? '，建议点击"生成更多方案"继续尝试' : '，继续尝试…'
+  showAg41Notify(`本轮 ${newRaw._attemptCount ?? 50} 次尝试均未通过硬性红线检查${detail}${suffix}`, false)
+  return null
+}
 import { renderAG00, renderAG01, renderPoolDepth, renderPipeSizing, renderMaintenanceRoom, renderPumpSpec, renderRainfallCard, renderSchemeOptions } from './ui/results-panel.js'
-import { renderLayoutPanel, getVariants, showAg41Notify } from './ui/layout-panel.js'
+import { renderLayoutPanel, getVariants, showAg41Notify, renderScorerParamsPanel, rescoreAndRerender } from './ui/layout-panel.js'
+import { SCORER_PARAMS } from './layout/scorer-params.js'
 import { renderBuildingParamsPanel } from './ui/building-params-panel.js'
 import { getDefaultUserParams } from './layout/user-params.js'
 import { initTopologyEditor, setTopologyFromN, getCurrentTopology } from './ui/topology-editor.js'
@@ -606,8 +652,7 @@ async function runCalculation() {
 
   // ── AG4-1/AG4-2: 布局生成与评分 ─────────────────────────────────
   const ag41Variants = await runAG41()
-  const ag42Variants = runAG42(ag41Variants)
-  renderLayoutPanel(ag42Variants)
+  applyLayoutResult(ag41Variants, [], true)
 
   panel.scrollIntoView({ behavior: 'smooth' })
 }
@@ -685,31 +730,7 @@ document.getElementById('btn-ag41-more').addEventListener('click', () => {
           btn.textContent = '生成更多方案';
           return;
         }
-        // 检查点 A 全部失败时给出具体提示（不进入评分流程）
-        if (newRaw.length === 0) {
-          const diag = newRaw._checkpointADiagnostic;
-          const parts = [];
-          if (diag) {
-            if (diag.missingRoomCount > 0) parts.push(`${diag.missingRoomCount} 间房间缺失`);
-            if (diag.doorAccessCount > 0) parts.push(`${diag.doorAccessCount} 间可达性违规`);
-            if (diag.violationCount > 0) parts.push(`${diag.violationCount} 项 MUST 约束未满足`);
-          }
-          const detail = parts.length ? `：${parts.join('、')}` : '';
-          showAg41Notify(`本轮 ${newRaw._attemptCount ?? 50} 次尝试均未通过硬性红线检查${detail}，继续尝试…`, false);
-          // 不 return，继续下一轮
-        } else {
-          const { variants, improved, newScored } = mergeVariants(existing, newRaw);
-          renderLayoutPanel(variants);
-
-          const maxNewScore = Math.max(...newScored.map(v => v.score));
-          const currentTopScore = variants[0]?.score || 0;
-
-          if (improved) {
-            showAg41Notify(`发现更优方案！新方案最高分: ${maxNewScore}`, true);
-          } else {
-            showAg41Notify(`未发现更优方案 (当前最高: ${currentTopScore} / 本轮最高: ${maxNewScore})`, false);
-          }
-        }
+        applyLayoutResult(newRaw, existing, false);
       } catch (error) {
         console.error("Error during layout generation loop:", error);
         showAg41Notify('生成新方案时出错', false);
@@ -733,11 +754,7 @@ document.getElementById('btn-ag41-reset').addEventListener('click', async () => 
   btn.textContent = '生成中…'
   try {
     const newRaw = await runAG41([]) // Start with no existing variants
-    if (newRaw) {
-      const variants = runAG42(newRaw)
-      renderLayoutPanel(variants)
-      showAg41Notify('已生成 9 个初始方案', true)
-    }
+    applyLayoutResult(newRaw, [], true)
   } finally {
     btn.disabled = false
     btn.textContent = '重制方案'
@@ -783,6 +800,35 @@ closeBtn?.addEventListener('click', () => {
 buildParamsDialog.addEventListener('params-confirmed', () => {
   buildParamsDialog.close();
 });
+
+// ── 评分参数面板设置 ──
+const btnScorerParams = document.getElementById('btn-ag41-scorer-params');
+const scorerParamsDialog = document.getElementById('modal-scorer-params');
+
+btnScorerParams?.addEventListener('click', () => {
+    const panelHtml = renderScorerParamsPanel(SCORER_PARAMS);
+    const modalBody = scorerParamsDialog.querySelector('#modal-scorer-wrap');
+    if (modalBody) {
+        modalBody.innerHTML = panelHtml;
+    }
+    const actionsContainer = scorerParamsDialog.querySelector('#modal-scorer-actions');
+    if (actionsContainer) {
+      actionsContainer.innerHTML = `
+        <button id="btn-scorer-cancel" style="padding: 8px 16px; font-size: 13px; border-radius: 6px; border: 1px solid #ccc; background: #fff; cursor: pointer;">取消</button>
+        <button id="btn-scorer-done" style="padding: 8px 16px; font-size: 13px; border-radius: 6px; border: none; background: #2e86c1; color: white; cursor: pointer; font-weight: 600;">完成</button>
+      `;
+      actionsContainer.querySelector('#btn-scorer-done').addEventListener('click', () => {
+        // Since params are updated on-the-fly, "Done" just needs to rescore and close.
+        rescoreAndRerender();
+        scorerParamsDialog.close();
+      });
+      actionsContainer.querySelector('#btn-scorer-cancel').addEventListener('click', () => {
+        scorerParamsDialog.close();
+      });
+    }
+    scorerParamsDialog.showModal();
+});
+
 
 // ── 高级参数标签页切换 ─────────────────────────────────────────────
 document.querySelectorAll('.tab-btn').forEach(btn => {
