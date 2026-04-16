@@ -684,8 +684,11 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
                 if (onRectExpansionComplete) {
                     onRectExpansionComplete(grid); // Take snapshot AFTER all possible rect growths are done
                 }
-                stage = 2; // Proceed to L/U shape phase
-                continue; // Restart the while loop for Stage 2
+                // If stopAfterStage1 is enabled, stop here; otherwise proceed to Phase 2
+                if (!stopAfterStage1) {
+                    stage = 2; // Proceed to L/U shape phase
+                    continue; // Restart the while loop for Stage 2
+                }
             }
         } else if (stage === 2) {
             // Stage 2: Allow all types of expansion
@@ -1584,11 +1587,12 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
 
   // --- Checkpoint A (Phase 1 snapshot evaluation) ---
 
+  // 先用 stopAfterStage1=true 跑 Phase 1 来评估 Checkpoint A
   expandRooms(groundGrid, groundRooms, rng, bW, bD, (gridState) => {
     groundGridBeforeGaps = gridState.clone();
   }, (gridState) => {
     groundGridAfterRect = gridState.clone();
-  });
+  }, true); // stopAfterStage1 = true
    if (!groundGridAfterRect) groundGridAfterRect = groundGrid.clone();
    if (!groundGridBeforeGaps) groundGridBeforeGaps = groundGrid.clone();
 
@@ -1596,7 +1600,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     level1GridBeforeGaps = gridState.clone();
   }, (gridState) => {
     level1GridAfterRect = gridState.clone();
-  });
+  }, true); // stopAfterStage1 = true
   if (!level1GridAfterRect) level1GridAfterRect = level1Grid.clone();
   if (!level1GridBeforeGaps) level1GridBeforeGaps = level1Grid.clone();
 
@@ -1636,6 +1640,17 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
       checkpointADiagnostic,
     };
   }
+
+  // ── Phase 2: 对通过 Checkpoint A 的方案，继续跑 Phase 2（L/U 形扩展） ──────────────────
+  expandRooms(groundGrid, groundRooms, rng, bW, bD, (gridState) => {
+    groundGridBeforeGaps = gridState.clone();
+  }, null, false); // stopAfterStage1 = false，完整执行 Phase 2
+  if (!groundGridBeforeGaps) groundGridBeforeGaps = groundGrid.clone();
+
+  expandRooms(level1Grid, level1Rooms, rng, bW, bD, (gridState) => {
+    level1GridBeforeGaps = gridState.clone();
+  }, null, false); // stopAfterStage1 = false，完整执行 Phase 2
+  if (!level1GridBeforeGaps) level1GridBeforeGaps = level1Grid.clone();
 
   // ── Phase 3a: 无面积限制 L/U 生长 ──────────────────────────────────
   runPhase3Growth(groundGrid, groundRooms, rng)
