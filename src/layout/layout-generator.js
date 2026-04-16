@@ -749,6 +749,31 @@ function makeRng(seed) {
   };
 }
 
+/**
+ * Build a partial layout result from intermediate grid snapshots, for checkpoint evaluation.
+ * Used by ag41-building-layout.js to evaluate layouts at phase boundaries:
+ * - Checkpoint A: pass gridAfterRect snapshots (after Phase 1 rectangle expansion)
+ * - Checkpoint B: pass gridBeforeGaps snapshots (after Phase 2 L/U expansion)
+ *
+ * The returned object is compatible with evaluateTemplate() → scoreHardRedlines() / scoreSpatialQuality().
+ *
+ * @param {Grid} groundGrid - Ground floor grid snapshot
+ * @param {Grid} level1Grid - Level 1 grid snapshot
+ * @param {number} buildingW - Building width in mm
+ * @param {number} buildingD - Building depth in mm
+ * @returns {object} Partial layout result with groundPlacements and level1Placements
+ */
+export function buildPartialResult(groundGrid, level1Grid, buildingW, buildingD) {
+  const groundLayout = groundGrid ? finalizeLayout(groundGrid) : { ground: {}, level1: {} }
+  const level1Layout = level1Grid ? finalizeLayout(level1Grid) : { ground: {}, level1: {} }
+  return {
+    buildingW,
+    buildingD,
+    groundPlacements: groundLayout.ground || {},
+    level1Placements: level1Layout.level1 || {},
+  }
+}
+
 export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId = 'CG', variantIdx = 1, prefix = 'R', initialSeeds = null) {
   const rng = makeRng(seed);
 
@@ -854,6 +879,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, groupId 
     groupId,
     variantIdx,
     _debug: {
+      roomTargets: allRooms,
       ground: { seeds: groundSeeds, gridAfterSeeds: groundGridAfterSeeds, gridAfterRect: groundGridAfterRect, gridBeforeGaps: groundGridBeforeGaps, gridAfterGaps: groundGrid },
       level1: { seeds: level1Seeds, gridAfterSeeds: level1GridAfterSeeds, gridAfterRect: level1GridAfterRect, gridBeforeGaps: level1GridBeforeGaps, gridAfterGaps: level1Grid },
     }

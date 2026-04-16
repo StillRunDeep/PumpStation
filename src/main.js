@@ -685,16 +685,30 @@ document.getElementById('btn-ag41-more').addEventListener('click', () => {
           btn.textContent = '生成更多方案';
           return;
         }
-        const { variants, improved, newScored } = mergeVariants(existing, newRaw);
-        renderLayoutPanel(variants);
-
-        const maxNewScore = Math.max(...newScored.map(v => v.score));
-        const currentTopScore = variants[0]?.score || 0;
-
-        if (improved) {
-          showAg41Notify(`发现更优方案！新方案最高分: ${maxNewScore}`, true);
+        // 检查点 A 全部失败时给出具体提示（不进入评分流程）
+        if (newRaw.length === 0) {
+          const diag = newRaw._checkpointADiagnostic;
+          const parts = [];
+          if (diag) {
+            if (diag.missingRoomCount > 0) parts.push(`${diag.missingRoomCount} 间房间缺失`);
+            if (diag.doorAccessCount > 0) parts.push(`${diag.doorAccessCount} 间可达性违规`);
+            if (diag.violationCount > 0) parts.push(`${diag.violationCount} 项 MUST 约束未满足`);
+          }
+          const detail = parts.length ? `：${parts.join('、')}` : '';
+          showAg41Notify(`本轮 ${newRaw._attemptCount ?? 50} 次尝试均未通过硬性红线检查${detail}，继续尝试…`, false);
+          // 不 return，继续下一轮
         } else {
-          showAg41Notify(`未发现更优方案 (当前最高: ${currentTopScore} / 本轮最高: ${maxNewScore})`, false);
+          const { variants, improved, newScored } = mergeVariants(existing, newRaw);
+          renderLayoutPanel(variants);
+
+          const maxNewScore = Math.max(...newScored.map(v => v.score));
+          const currentTopScore = variants[0]?.score || 0;
+
+          if (improved) {
+            showAg41Notify(`发现更优方案！新方案最高分: ${maxNewScore}`, true);
+          } else {
+            showAg41Notify(`未发现更优方案 (当前最高: ${currentTopScore} / 本轮最高: ${maxNewScore})`, false);
+          }
         }
       } catch (error) {
         console.error("Error during layout generation loop:", error);

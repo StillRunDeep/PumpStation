@@ -9,8 +9,8 @@
 
 export const PARAM_GROUPS = [
   {
-    label: '占地面积',
-    keys: ['footprintPenaltyPerM2'],
+    label: '生长顺利度',
+    keys: ['growthSuccessMaxBonus'],
   },
   {
     label: '变压器布置',
@@ -43,7 +43,7 @@ export const PARAM_GROUPS = [
 ]
 
 export const PARAM_LABELS = {
-  footprintPenaltyPerM2:  '每m²占地扣分',
+  growthSuccessMaxBonus:  '生长顺利度最大奖励',
   trafoExteriorBonus:     '变压器外墙奖励',
   trafoSameSideBonus:     '变压器同侧奖励',
   fanRoomMaxBonus:        '风机房最大奖励',
@@ -77,7 +77,7 @@ export const PARAM_STEPS = {
 }
 
 export const DEFAULT_SCORER_PARAMS = {
-  footprintPenaltyPerM2:  8,
+  growthSuccessMaxBonus:  100,
   trafoExteriorBonus:     20,
   trafoSameSideBonus:     20,
   fanRoomMaxBonus:        30,
