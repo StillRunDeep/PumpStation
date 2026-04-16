@@ -202,10 +202,10 @@ export function computeAspectRatioPenalty(result) {
  *
  * @returns {{ partialScore: number, passes: boolean, missingRooms: number, doorAccess: number, violations: number, missingRoomCount: number, doorAccessCount: number, violationCount: number }}
  */
-export function scoreHardRedlines(result) {
+export function scoreHardRedlines(result, doorAccessOverride = null) {
   const { mustViolationPenalty } = SCORER_PARAMS
   const missingRoomsRes = computeMissingRoomsPenalty(result)
-  const doorAccessRes   = computeDoorAccessPenalty(result)
+  const doorAccessRes   = doorAccessOverride ?? computeDoorAccessPenalty(result)
   const violationCount  = result.violations?.length || 0
   const violationsPenalty = -(violationCount * mustViolationPenalty)
   const partialScore = missingRoomsRes.penalty + doorAccessRes.penalty + violationsPenalty
@@ -227,8 +227,8 @@ export function scoreHardRedlines(result) {
  * needed for the comparison table. This ensures the UI always shows
  * metrics computed at the same (Phase 1) snapshot.
  */
-export function evaluateCheckpointA(result) {
-  const redlines = scoreHardRedlines(result)
+export function evaluateCheckpointA(result, doorAccessOverride = null) {
+  const redlines = scoreHardRedlines(result, doorAccessOverride)
   const spaceEfficiency = computeSpaceEfficiency(result)
   const mustSatisfied = result.adjacency?.satisfied?.filter(v => v.type === 'must').length || 0
   const mustTotal = mustSatisfied + (result.adjacency?.violated?.filter(v => v.type === 'must').length || 0)

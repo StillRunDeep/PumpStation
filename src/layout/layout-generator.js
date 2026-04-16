@@ -370,6 +370,171 @@ function countRoomVertices(grid, roomId) {
     return vertices;
 }
 
+// ── Checkpoint A Relaxed Door-Access helpers ─────────────────────────────────
+
+/**
+ * BFS over empty cells (value === 0) to extract connected empty regions.
+ * Returns an array of regions, each with a unique id and a Set of "x,y" keys.
+ */
+function getConnectedEmptyRegions(grid) {
+  const visited = new Set();
+  const regions = [];
+  for (let y = 0; y < grid.height; y++) {
+    for (let x = 0; x < grid.width; x++) {
+      const key = `${x},${y}`;
+      if (grid.getCell(x, y) === 0 && !visited.has(key)) {
+        const cellSet = new Set();
+        const queue = [{ x, y }];
+        visited.add(key);
+        while (queue.length > 0) {
+          const { x: cx, y: cy } = queue.shift();
+          cellSet.add(`${cx},${cy}`);
+          for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const nx = cx + dx, ny = cy + dy;
+            const nk = `${nx},${ny}`;
+            if (!visited.has(nk) && grid.getCell(nx, ny) === 0) {
+              visited.add(nk);
+              queue.push({ x: nx, y: ny });
+            }
+          }
+        }
+        regions.push({ id: regions.length, cells: cellSet });
+      }
+    }
+  }
+  return regions;
+}
+
+/** True if any room cell has an orthogonal neighbour in regionCellSet. */
+function isRoomAdjacentToRegion(grid, roomId, regionCellSet) {
+  const roomCells = grid.roomData[roomId];
+  if (!roomCells) return false;
+  for (const { x, y } of roomCells) {
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      if (regionCellSet.has(`${x + dx},${y + dy}`)) return true;
+    }
+  }
+  return false;
+}
+
+/** True if any cell in the region sits on the west / north / east grid boundary (non-south). */
+function regionTouchesExteriorNonSouth(regionCellSet, gridW) {
+  for (const key of regionCellSet) {
+    const [x] = key.split(',').map(Number);
+    const y = Number(key.split(',')[1]);
+    if (x === 0 || y === 0 || x === gridW - 1) return true;
+  }
+  return false;
+}
+
+/**
+ * Relaxed door-access check for Checkpoint A.
+ * Allows a room to be considered "accessible" if an unclaimed empty region
+ * bridges the gap to its target (exterior wall or another required room).
+ * Each empty region may be claimed at most once across all checks.
+ *
+ * @returns {{ penalty: number, ids: string[] }}  — same shape as computeDoorAccessPenalty
+ */
+function computeRelaxedDoorAccess(groundGrid, level1Grid) {
+  const { doorAccessPenalty } = SCORER_PARAMS;
+  const ids = [];
+  // Rooms that passed ONLY via the bridging mechanism (not by directly touching the target).
+  // Used by the caller to filter out the matching ext_access violations from result.violations.
+  const bridgedIds = new Set();
+
+  // ── Ground floor ─────────────────────────────────────────────────────────
+  const groundRegions = getConnectedEmptyRegions(groundGrid);
+  const claimedGround = new Set();
+
+  // Helper: find the first unclaimed region satisfying a predicate; claim it if found.
+  function claimRegion(regions, claimed, predicate) {
+    for (const region of regions) {
+      if (!claimed.has(region.id) && predicate(region)) {
+        claimed.add(region.id);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // GROUND_MUST_EXT: rooms that must touch exterior wall (non-south)
+  for (const roomId of GROUND_MUST_EXT) {
+    if (!groundGrid.roomData[roomId]) continue;
+    const bbox = groundGrid.getBoundingBox(roomId);
+    const p = bboxToPlacement(bbox);
+    // Direct check (strict)
+    if (touchesExteriorNonSouth(p, groundGrid.width * GRID_SIZE, groundGrid.height * GRID_SIZE)) continue;
+    // Relaxed: adjacent empty region that itself touches exterior wall
+    const ok = claimRegion(groundRegions, claimedGround, r =>
+      isRoomAdjacentToRegion(groundGrid, roomId, r.cells) &&
+      regionTouchesExteriorNonSouth(r.cells, groundGrid.width)
+    );
+    if (ok) {
+      bridgedIds.add(roomId); // passed via bridge — caller must also relax its violation entry
+    } else {
+      ids.push(roomId);
+    }
+  }
+
+  // repair_zone ↔ parking: must be adjacent or each touches exterior wall
+  const hasParking    = !!groundGrid.roomData['parking'];
+  const hasRepairZone = !!groundGrid.roomData['repair_zone'];
+  if (hasParking && hasRepairZone) {
+    const parkBbox   = groundGrid.getBoundingBox('parking');
+    const repairBbox = groundGrid.getBoundingBox('repair_zone');
+    const pP = bboxToPlacement(parkBbox);
+    const pR = bboxToPlacement(repairBbox);
+    const bW = groundGrid.width * GRID_SIZE;
+    const bD = groundGrid.height * GRID_SIZE;
+    const directlyAdjacent = adjacent(pP, pR);
+    const parkingExtOk  = directlyAdjacent || touchesExteriorNonSouth(pP, bW, bD);
+    const repairExtOk   = directlyAdjacent || touchesExteriorNonSouth(pR, bW, bD);
+    if (!parkingExtOk || !repairExtOk) {
+      // Try relaxed: find unclaimed region adjacent to both
+      const bridged = claimRegion(groundRegions, claimedGround, r =>
+        isRoomAdjacentToRegion(groundGrid, 'parking', r.cells) &&
+        isRoomAdjacentToRegion(groundGrid, 'repair_zone', r.cells)
+      );
+      if (bridged) {
+        if (!parkingExtOk)  bridgedIds.add('parking');
+        if (!repairExtOk)   bridgedIds.add('repair_zone');
+      } else {
+        if (!parkingExtOk)  ids.push('parking');
+        if (!repairExtOk)   ids.push('repair_zone');
+      }
+    }
+  }
+
+  // ── Level-1 floor ─────────────────────────────────────────────────────────
+  const level1Regions  = getConnectedEmptyRegions(level1Grid);
+  const claimedLevel1  = new Set();
+  const corridorExists = !!level1Grid.roomData['corridor_l1'];
+
+  for (const roomId of LEVEL1_MUST_FACE_CORRIDOR) {
+    if (!level1Grid.roomData[roomId]) continue;
+    if (!corridorExists) { ids.push(roomId); continue; }
+
+    const roomBbox = level1Grid.getBoundingBox(roomId);
+    const corrBbox = level1Grid.getBoundingBox('corridor_l1');
+    const pRoom = bboxToPlacement(roomBbox);
+    const pCorr = bboxToPlacement(corrBbox);
+    // Direct adjacency check (strict)
+    if (adjacent(pRoom, pCorr)) continue;
+    // Relaxed: find unclaimed region adjacent to both room and corridor
+    const ok = claimRegion(level1Regions, claimedLevel1, r =>
+      isRoomAdjacentToRegion(level1Grid, roomId, r.cells) &&
+      isRoomAdjacentToRegion(level1Grid, 'corridor_l1', r.cells)
+    );
+    if (ok) {
+      bridgedIds.add(roomId);
+    } else {
+      ids.push(roomId);
+    }
+  }
+
+  return { penalty: -doorAccessPenalty * ids.length, ids, bridgedIds };
+}
+
 // ── Phase 2 Accessibility helpers ────────────────────────────────────────────
 
 /** Convert grid bounding box (cell units) to mm-based placement object. */
@@ -457,9 +622,19 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
     let growingRooms = rooms.map(r => ({ ...r, currentArea: r.id in grid.roomData ? 1 : 0 }));
 
     while (iterations < MAX_EXPANSION_ITERATIONS) {
-        let activeRooms = growingRooms.filter(room => room.currentArea < room.targetGridCount);
-        
-        // If all rooms reached their target area
+        // Stage 2: also include rooms that haven't met accessibility, even if they've reached
+        // their area target — they need to keep growing toward the exterior wall / corridor.
+        let activeRooms;
+        if (stage === 2) {
+          activeRooms = growingRooms.filter(room =>
+            room.currentArea < room.targetGridCount ||
+            !isAccessibilityMet(room.id, grid, buildingW, buildingD)
+          );
+        } else {
+          activeRooms = growingRooms.filter(room => room.currentArea < room.targetGridCount);
+        }
+
+        // If all rooms reached their target area (and accessibility in Stage 2)
         if (activeRooms.length === 0) {
             if (stage === 1) {
                 // If we finished Stage 1 perfectly, take the rect snapshot before finishing
@@ -1426,7 +1601,17 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
 
   const snapshot = buildPartialResult(groundGridAfterRect, level1GridAfterRect, bW, bD);
   const evaluated = evaluateTemplate(snapshot);
-  const checkpointADiagnostic = evaluateCheckpointA(evaluated);
+  // Use relaxed door-access for Checkpoint A: rooms adjacent to an unclaimed empty region
+  // that bridges to the exterior wall / corridor are considered virtually connected.
+  // Strict door-access is still used in Checkpoint B and full scoring (Step 9).
+  const relaxedDoorAccess = computeRelaxedDoorAccess(groundGridAfterRect, level1GridAfterRect);
+  // Also filter out violations for rooms that passed via the bridging mechanism.
+  // (evaluateTemplate adds ext_access violations independently of doorAccess, causing
+  //  double-counting that would fail Checkpoint A even when doorAccess is relaxed.)
+  const relaxedEvaluated = relaxedDoorAccess.bridgedIds.size > 0
+    ? { ...evaluated, violations: evaluated.violations.filter(v => !relaxedDoorAccess.bridgedIds.has(v.room)) }
+    : evaluated;
+  const checkpointADiagnostic = evaluateCheckpointA(relaxedEvaluated, relaxedDoorAccess);
 
   // If the layout fails Checkpoint A, skip expensive Phase 2/3 growth
   if (!checkpointADiagnostic.passes) {
