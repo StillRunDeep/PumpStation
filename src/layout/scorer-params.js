@@ -37,6 +37,10 @@ export const PARAM_GROUPS = [
     keys: ['convenienceIdealGrids', 'convenienceRange', 'convenienceMaxBonus'],
   },
   {
+    label: '多样性',
+    keys: ['diversityThreshold', 'diversityPenalty'],
+  },
+  {
     label: '违反惩罚',
     keys: ['mustViolationPenalty', 'doorAccessPenalty', 'missingRoomPenalty', 'aspectRatioThreshold', 'aspectRatioPenalty', 'utilizationThreshold', 'utilizationStep', 'vertexThreshold', 'vertexStep'],
   },
@@ -58,6 +62,8 @@ export const PARAM_LABELS = {
   convenienceIdealGrids:  '便捷性理想格数',
   convenienceRange:       '便捷性映射范围',
   convenienceMaxBonus:    '便捷性最大奖励',
+  diversityThreshold:     '多样性判定阈值(格)',
+  diversityPenalty:       '重复方案扣分',
   mustViolationPenalty:   'MUST违反扣分',
   doorAccessPenalty:      '可达性违反扣分',
   missingRoomPenalty:     '房间缺失扣分',
@@ -92,6 +98,8 @@ export const DEFAULT_SCORER_PARAMS = {
   convenienceIdealGrids:  150,
   convenienceRange:       100,
   convenienceMaxBonus:    30,
+  diversityThreshold:     5.0,
+  diversityPenalty:       200,
   mustViolationPenalty:   500,
   doorAccessPenalty:      500,
   missingRoomPenalty:     500,

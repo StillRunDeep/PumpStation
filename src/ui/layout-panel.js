@@ -102,8 +102,11 @@ function renderComparisonTable(variants) {
     const mustSat = cp.mustAdjacency?.satisfied ?? (v.adjacency?.satisfied || []).filter(a => a.type === 'must').length
     const mustTot = cp.mustAdjacency?.total ?? mustSat + (v.adjacency?.violated || []).filter(a => a.type === 'must').length
     
-    // Hard Redline Violations (General)
-    const violCount = cp.violationCount ?? v.violations?.length ?? 0
+    // Hard Redline Violations (General) — Filtered to avoid overlap with Adjacency/Accessibility
+    const uniqueViolations = (v.violations || []).filter(err => 
+      err.constraint !== 'must_adjacent' && err.constraint !== 'ext_access'
+    )
+    const violCount = uniqueViolations.length
     const violCell = violCount === 0
       ? `<span style="color:#27ae60">✓</span>`
       : `<span style="color:#c0392b">⚠ ${violCount}</span>`
@@ -145,7 +148,7 @@ function renderComparisonTable(variants) {
             <th class="th-tip" data-tip="功能房间面积/楼层面积（Phase 1快照）" style="padding:7px 8px;text-align:right">空间有效率</th>
             <th class="th-tip" data-tip="强邻近要求满足度 (Phase 1快照)" style="padding:7px 8px">强邻近</th>
             <th class="th-tip" data-tip="未满足的可达性/门禁要求（Phase 1快照）" style="padding:7px 8px">可达性</th>
-            <th class="th-tip" data-tip="其他致命红线违反" style="padding:7px 8px">红线</th>
+            <th class="th-tip" data-tip="不含邻近与可达性的其他工程约束 (如吊装覆盖、特殊距离)" style="padding:7px 8px">工程约束</th>
           </tr>
         </thead>
         <tbody id="variant-tbody">
