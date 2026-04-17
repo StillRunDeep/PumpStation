@@ -155,30 +155,51 @@ function placeRoomSeeds(grid, rooms, rng) {
       const neighborsPlaced = mustNeighbors.every(id => placedSeeds[id]);
 
       if (neighborsPlaced) {
-        const weightMap = generateWeightMapForRoom(grid, room, placedSeeds);
+        // ── MUST 邻接对的"从"成员：直接随机选伙伴周边空格 ──────────────
+        // pair[1] 是"从"，pair[0] 是"主"（主已放置，因为死锁解除时主先放）
+        let bestPos = null;
+        const mustPair = ADJACENCY_PAIRS.find(p => p[1] === room.id && placedSeeds[p[0]]);
+        if (mustPair) {
+          const primarySeed = placedSeeds[mustPair[0]];
+          // 收集伙伴周边所有空格（±3 格范围），随机选一个
+          const nearCandidates = [];
+          for (let dy = -3; dy <= 3; dy++) {
+            for (let dx = -3; dx <= 3; dx++) {
+              const nx = primarySeed.x + dx, ny = primarySeed.y + dy;
+              if (nx >= 0 && nx < grid.width && ny >= 0 && ny < grid.height && grid.getCell(nx, ny) === 0) {
+                nearCandidates.push({ x: nx, y: ny });
+              }
+            }
+          }
+          if (nearCandidates.length > 0) {
+            bestPos = nearCandidates[Math.floor(rng() * nearCandidates.length)];
+          }
+        }
 
-        // 全网格扫描：找到所有权重最高的空格，随机选一个
-        // 比 200 次随机采样更可靠——保证 MUST 邻接伙伴的 ×50 高权重区一定被命中
-        let maxWeight = -1;
-        const bestCandidates = [];
-        for (let y = 0; y < grid.height; y++) {
-          for (let x = 0; x < grid.width; x++) {
+        // ── 无强约束的房间（或周边无空格时的退化）：200 次随机采样 ────
+        if (!bestPos) {
+          const weightMap = generateWeightMapForRoom(grid, room, placedSeeds);
+          let maxWeight = -1;
+          for (let i = 0; i < 200; i++) {
+            const x = Math.floor(rng() * grid.width);
+            const y = Math.floor(rng() * grid.height);
             if (grid.getCell(x, y) === 0) {
               const weight = weightMap[y][x];
-              if (weight > maxWeight) {
-                maxWeight = weight;
-                bestCandidates.length = 0;
-                bestCandidates.push({ x, y });
-              } else if (weight === maxWeight) {
-                bestCandidates.push({ x, y });
+              if (weight > maxWeight) { maxWeight = weight; bestPos = { x, y }; }
+            }
+          }
+          // fallback：全网格扫描
+          if (!bestPos) {
+            for (let y = 0; y < grid.height; y++) {
+              for (let x = 0; x < grid.width; x++) {
+                if (grid.getCell(x, y) === 0) {
+                  const weight = weightMap[y][x];
+                  if (weight > maxWeight) { maxWeight = weight; bestPos = { x, y }; }
+                }
               }
             }
           }
         }
-        // 在所有并列最优位置中随机选一个，保留方案多样性
-        const bestPos = bestCandidates.length > 0
-          ? bestCandidates[Math.floor(rng() * bestCandidates.length)]
-          : null;
 
         if (bestPos) {
           grid.addRoomCell(room.id, bestPos.x, bestPos.y);
