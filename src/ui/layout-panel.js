@@ -294,10 +294,14 @@ function insertDetailRow(idx) {
   const renderFloorRow = (floor) => {
     const debugData = v._debug?.[floor] ?? {};
     const finalView = `<svg viewBox="0 0 240 180" style="background:#f4f6f8">${renderLayoutSVG(v, floor, 240, 180, { showDims: false })}</svg>`;
-    const stage3 = failedA ? '<span class="skipped-text">未通过红线，未执行</span>'
+    const bypassed = v.checkpointABypassed;
+    const stage3 = bypassed ? '<span class="skipped-text">用户跳过</span>'
+      : failedA ? '<span class="skipped-text">未通过红线，未执行</span>'
       : failedB ? '<span class="skipped-text">未通过检查点B，未执行</span>'
       : (debugData.gridAfterGaps ? renderDebugGrid({ grid: debugData.gridAfterGaps, seeds: debugData.seeds }, 200, 150) : '无数据');
-    const stage2 = failedA ? '<span class="skipped-text">未通过红线，未执行</span>' : (debugData.gridBeforeGaps ? renderDebugGrid({ grid: debugData.gridBeforeGaps, seeds: debugData.seeds }, 200, 150) : '无数据');
+    const stage2 = bypassed ? '<span class="skipped-text">用户跳过</span>'
+      : failedA ? '<span class="skipped-text">未通过红线，未执行</span>'
+      : (debugData.gridBeforeGaps ? renderDebugGrid({ grid: debugData.gridBeforeGaps, seeds: debugData.seeds }, 200, 150) : '无数据');
     const stage1 = debugData.gridAfterRect ? renderDebugGrid({ grid: debugData.gridAfterRect, seeds: debugData.seeds }, 200, 150) : '无数据';
 
     return `

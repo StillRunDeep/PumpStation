@@ -108,7 +108,7 @@ export async function runAG41(existingVariants = [], isCancelled = () => false) 
 
   results._attemptCount = attempts;
   applyCheckpointB(results, buildingW, buildingD);
-  return results;
+    return results;
 }
 
 function generateMutatedLayout(parent, reRandomize, seed, bW, bD, roomAreas, groupId, variantIdx, prefix, bypassCheckpointA = false) {

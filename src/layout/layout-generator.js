@@ -2060,11 +2060,16 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
         !relaxedDoorAccess.bridgedPairKeys.has(v.room)
       )}
     : { ...evaluated, violations: violationsWithDebug };
-  const checkpointADiagnostic = evaluateCheckpointA(relaxedEvaluated, relaxedDoorAccess);
+  let checkpointADiagnostic = evaluateCheckpointA(relaxedEvaluated, relaxedDoorAccess);
+
+  // If bypassing, force the diagnostic to 'pass' so the UI doesn't show a failure state
+  // that the user explicitly chose to ignore.
+  if (bypassCheckpointA) {
+    checkpointADiagnostic = { ...checkpointADiagnostic, passes: true };
+  }
 
   // If the layout fails Checkpoint A, skip expensive Phase 2/3 growth
-  // bypassCheckpointA=true 时强制通过，用于调试 Phase 2/3 问题
-  if (!checkpointADiagnostic.passes && !bypassCheckpointA) {
+  if (!checkpointADiagnostic.passes) {
     const groundLayout = finalizeLayout(groundGridAfterRect).ground;
     const level1Layout = finalizeLayout(level1GridAfterRect).level1;
     return {

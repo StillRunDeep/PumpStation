@@ -1,4 +1,5 @@
 import { ROOM_DEFS } from './room-defs.js'
+import { GRID_SIZE } from './layout-generator.js';
 import { checkAdjacency } from './adjacency.js'
 import { placeDoors } from './door-placer.js'
 
@@ -27,7 +28,7 @@ export function adjacent(a, b, tol = 200) {
   return (touchH && yOverlap) || (touchV && xOverlap)
 }
 
-export function touchesExteriorNonSouth(p, buildingW, buildingD, tol = 100) {
+export function touchesExteriorNonSouth(p, buildingW, buildingD, tol = 10) {
   return (
     p.x <= tol ||                        // west wall
     p.y <= tol ||                        // north wall
