@@ -755,7 +755,8 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
         // If all rooms reached their target area (and accessibility in Stage 2)
         if (activeRooms.length === 0) {
             if (stage === 1) {
-                // If we finished Stage 1 perfectly, take the rect snapshot before finishing
+                // Stage 1 finished perfectly — capture rect snapshot before exiting.
+                // onRegularExpansionComplete is called after the loop regardless.
                 if (onRectExpansionComplete) onRectExpansionComplete(grid);
             }
             break;
@@ -834,29 +835,38 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
                 }
 
                 if (expansionCells && expansionCells.length > 0) {
-                    // Morphological constraint: limit non-corridor rooms to 8 vertices (U-shape)
-                    if (roomToGrow.id !== 'corridor_l1') {
-                        // Dry run: apply expansion to a test grid
-                        const originalCells = [...(grid.roomData[roomToGrow.id] || [])];
-                        const testGrid = {
-                            getCell: (x, y) => {
-                                if (expansionCells.some(c => c.x === x && c.y === y)) return roomToGrow.id;
-                                return grid.getCell(x, y);
-                            },
-                            getBoundingBox: (id) => {
-                                if (id !== roomToGrow.id) return grid.getBoundingBox(id);
-                                const combined = [...originalCells, ...expansionCells];
-                                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-                                for (const c of combined) {
-                                    if (c.x < minX) minX = c.x;
-                                    if (c.x > maxX) maxX = c.x;
-                                    if (c.y < minY) minY = c.y;
-                                    if (c.y > maxY) maxY = c.y;
-                                }
-                                return { minX, minY, maxX, maxY };
+                    // Build a lightweight dry-run test grid (shared by all guards below)
+                    const originalCells = [...(grid.roomData[roomToGrow.id] || [])];
+                    const testGrid = {
+                        getCell: (x, y) => {
+                            if (expansionCells.some(c => c.x === x && c.y === y)) return roomToGrow.id;
+                            return grid.getCell(x, y);
+                        },
+                        getBoundingBox: (id) => {
+                            if (id !== roomToGrow.id) return grid.getBoundingBox(id);
+                            const combined = [...originalCells, ...expansionCells];
+                            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                            for (const c of combined) {
+                                if (c.x < minX) minX = c.x;
+                                if (c.x > maxX) maxX = c.x;
+                                if (c.y < minY) minY = c.y;
+                                if (c.y > maxY) maxY = c.y;
                             }
-                        };
-                        
+                            return { minX, minY, maxX, maxY };
+                        }
+                    };
+
+                    // 走廊最小宽度守护：只有当生长会使走廊比当前更窄且仍低于最小宽度时才阻止
+                    if (isCorridor) {
+                        const currentMinWidth = getRoomMinCrossWidth(grid, roomToGrow.id);
+                        const newMinWidth = getRoomMinCrossWidth(testGrid, roomToGrow.id);
+                        if (newMinWidth < currentMinWidth && newMinWidth < CORRIDOR_MIN_WIDTH_CELLS) {
+                            continue;
+                        }
+                    }
+
+                    // Morphological constraint: limit non-corridor rooms to 8 vertices (U-shape)
+                    if (!isCorridor) {
                         if (countRoomVertices(testGrid, roomToGrow.id) > 8) {
                             // Expansion would make the room too complex, try next room
                             continue;
@@ -890,10 +900,8 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
         console.warn("Expansion reached max iterations.");
     }
 
-    // Capture the final state after ALL growth stages (Stage 1 + Stage 2) are complete
-    if (onRegularExpansionComplete) {
-        onRegularExpansionComplete(grid);
-    }
+    // Capture the final grid state (always fires regardless of exit path)
+    if (onRegularExpansionComplete) onRegularExpansionComplete(grid);
 }
 
 function fillGaps(grid, rooms) {
@@ -1807,19 +1815,21 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     };
   }
 
-  // ── Phase 3a (Step 6B): 无面积限制 L/U 生长 ────────────────────────
+  // ── Step 6B: 无面积限制 L/U 生长 ──────────────────────────────────
   runPhase3Growth(groundGrid, groundRooms, rng)
-  // ── Phase 3b: 空间交换协商 ─────────────────────────────────────────
+  // ── Step 7a: 边界清理与空隙填充 ────────────────────────────────────
   if (enableAreaSwap) runAreaSwap(groundGrid, groundRooms)
-  // ── Phase 3c: 边界清理与空隙填充 ──────────────────────────────────
   fillGaps(groundGrid, groundRooms);
+  // ── Step 7b: 平滑房间交界线 ────────────────────────────────────────
+  runSpaceSwap(groundGrid, groundRooms)
 
-  // ── Phase 3a: 无面积限制 L/U 生长 ──────────────────────────────────
+  // ── Step 6B: 无面积限制 L/U 生长 ──────────────────────────────────
   runPhase3Growth(level1Grid, level1Rooms, rng)
-  // ── Phase 3b: 空间交换协商 ─────────────────────────────────────────
+  // ── Step 7a: 边界清理与空隙填充 ────────────────────────────────────
   if (enableAreaSwap) runAreaSwap(level1Grid, level1Rooms)
-  // ── Phase 3c: 边界清理与空隙填充 ──────────────────────────────────
   fillGaps(level1Grid, level1Rooms);
+  // ── Step 7b: 平滑房间交界线 ────────────────────────────────────────
+  runSpaceSwap(level1Grid, level1Rooms)
 
   // 3. Finalize layouts from both grids
   const finalLayout = {
