@@ -2,7 +2,7 @@ import { ROOM_DEFS } from './room-defs.js';
 import { checkAdjacency } from './adjacency.js';
 import { placeDoors } from './door-placer.js';
 import { SCORER_PARAMS } from './scorer-params.js';
-import { evaluateCheckpointA, GROUND_MUST_EXT, LEVEL1_MUST_FACE_CORRIDOR } from './scorer.js';
+import { evaluateCheckpointA, scoreSpatialQuality, GROUND_MUST_EXT, LEVEL1_MUST_FACE_CORRIDOR } from './scorer.js';
 import { adjacent, centerX, centerY, touchesExteriorNonSouth, CONSTRAINT_CHECKS, evaluateTemplate } from './placer.js';
 
 export const GRID_SIZE = 500; // 500mm per grid cell — single source of truth, imported by ag41/ag42
@@ -1030,13 +1030,13 @@ function getSegmentNeighbors(grid, segment) {
         if (isHorizontal) {
             const n_up = grid.getCell(cell.x, cell.y - 1);
             const n_down = grid.getCell(cell.x, cell.y + 1);
-            if (n_up > 0) neighbors.add(n_up);
-            if (n_down > 0) neighbors.add(n_down);
+            if (n_up && n_up !== 0) neighbors.add(n_up);
+            if (n_down && n_down !== 0) neighbors.add(n_down);
         } else { // Vertical
             const n_left = grid.getCell(cell.x - 1, cell.y);
             const n_right = grid.getCell(cell.x + 1, cell.y);
-            if (n_left > 0) neighbors.add(n_left);
-            if (n_right > 0) neighbors.add(n_right);
+            if (n_left && n_left !== 0) neighbors.add(n_left);
+            if (n_right && n_right !== 0) neighbors.add(n_right);
         }
     }
     return neighbors;
@@ -1765,7 +1765,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     };
   }
 
-  // ── Phase 2: 对通过 Checkpoint A 的方案，继续跑 Phase 2（L/U 形扩展） ──────────────────
+  // ── Phase 2 (Step 6A): 对通过 Checkpoint A 的方案，继续跑有面积约束的 L/U 形扩展 ────────
   expandRooms(groundGrid, groundRooms, rng, bW, bD, (gridState) => {
     groundGridBeforeGaps = gridState.clone();
   }, null, false); // stopAfterStage1 = false，完整执行 Phase 2
@@ -1776,7 +1776,38 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
   }, null, false); // stopAfterStage1 = false，完整执行 Phase 2
   if (!level1GridBeforeGaps) level1GridBeforeGaps = level1Grid.clone();
 
-  // ── Phase 3a: 无面积限制 L/U 生长 ──────────────────────────────────
+  // ▼ Checkpoint B（Step 6A 结束后）：第一梯队 + 第二梯队评价，分数 > -1000 才进入后续生长
+  // 使用严格 doorAccess（无宽松），此时 Phase 2 已修正可达性
+  const snapshotB = buildPartialResult(groundGridBeforeGaps, level1GridBeforeGaps, bW, bD);
+  const evaluatedB = evaluateTemplate(snapshotB, { skipDoors: true });
+  const checkpointBDiagnostic = scoreSpatialQuality(evaluatedB);
+  const CHECKPOINT_B_THRESHOLD = -1000; // 总惩罚绝对值 < 1000 才通过
+
+  if (checkpointBDiagnostic.partialScore < CHECKPOINT_B_THRESHOLD) {
+    // 不通过 → 直接用 Phase 2 结果参与排名，跳过 Step 6B（无面积约束生长）与 Phase 3
+    const groundLayout = finalizeLayout(groundGridBeforeGaps).ground;
+    const level1Layout = finalizeLayout(level1GridBeforeGaps).level1;
+    return {
+      id: `${prefix}-${groupId}-${variantIdx}`,
+      label: `约束生长法 (未通过检查点B)`,
+      desc: `建筑 ${(bW / 1000).toFixed(1)}m×${(bD / 1000).toFixed(1)}m`,
+      groundPlacements: groundLayout,
+      level1Placements: level1Layout,
+      buildingW: bW,
+      buildingD: bD,
+      groupId,
+      variantIdx,
+      _debug: {
+        roomTargets: allRooms,
+        ground: { seeds: groundSeeds, gridAfterSeeds: groundGridAfterSeeds, gridAfterRect: groundGridAfterRect, gridBeforeGaps: groundGridBeforeGaps, gridAfterGaps: groundGridBeforeGaps },
+        level1: { seeds: level1Seeds, gridAfterSeeds: level1GridAfterSeeds, gridAfterRect: level1GridAfterRect, gridBeforeGaps: level1GridBeforeGaps, gridAfterGaps: level1GridBeforeGaps },
+      },
+      checkpointADiagnostic,
+      checkpointBDiagnostic,
+    };
+  }
+
+  // ── Phase 3a (Step 6B): 无面积限制 L/U 生长 ────────────────────────
   runPhase3Growth(groundGrid, groundRooms, rng)
   // ── Phase 3b: 空间交换协商 ─────────────────────────────────────────
   if (enableAreaSwap) runAreaSwap(groundGrid, groundRooms)
@@ -1812,5 +1843,6 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
       level1: { seeds: level1Seeds, gridAfterSeeds: level1GridAfterSeeds, gridAfterRect: level1GridAfterRect, gridBeforeGaps: level1GridBeforeGaps, gridAfterGaps: level1Grid },
     },
     checkpointADiagnostic,
+    checkpointBDiagnostic,
   };
 }
