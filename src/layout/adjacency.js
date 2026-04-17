@@ -13,6 +13,7 @@ import { adjacent } from './placer.js'
 export const ADJACENCY_MUST = [
   { pair: ['meter_main', 'meter_sub'], reason: '水表房并排，共用外墙区段' },
   { pair: ['trafo1',     'trafo2'],    reason: '变压器房相邻布置，方便母线桥架连接（共享侧墙，无内门）' },
+  { pair: ['parking',     'repair_zone'], reason: '临近，便于设备转运' },
 ]
 
 export const ADJACENCY_SHOULD = [
@@ -22,7 +23,6 @@ export const ADJACENCY_SHOULD = [
   { pair: ['fan_room',    'corridor_l1'], reason: '风机房通过走廊连通，避免孤立' },
   { pair: ['fan_room',    'dock2'],       reason: '设备经吊装口就近进出风机房，距离越近越便利' },
   { pair: ['fire_equip',  'meter_sub'],   reason: '小型服务用房宜集中布置，减少外墙开门分散' },
-  { pair: ['parking',     'repair_zone'], reason: '临近，便于设备转运' },
 ]
 
 /**
