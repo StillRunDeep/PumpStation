@@ -1,4 +1,4 @@
-import { generateConstrainedLayout, buildPartialResult, computeRelaxedDoorAccess, GRID_SIZE } from '../layout/layout-generator.js'
+import { generateConstrainedLayout, buildPartialResult, GRID_SIZE } from '../layout/layout-generator.js'
 import { getDefaultUserParams, getUserConfirmedParams } from '../layout/user-params.js'
 import { centerX, centerY, evaluateTemplate } from '../layout/placer.js'
 import { scoreSpatialQuality } from '../layout/scorer.js'
@@ -12,13 +12,13 @@ const yieldToEventLoop = () => new Promise(resolve => setTimeout(resolve, 0))
  */
 function applyCheckpointB(layouts, buildingW, buildingD) {
   for (const layout of layouts) {
-    const groundGrid = layout._debug.ground.gridBeforeGaps;
-    const level1Grid = layout._debug.level1.gridBeforeGaps;
-    const snapshot = buildPartialResult(groundGrid, level1Grid, buildingW, buildingD)
-    const relaxed = computeRelaxedDoorAccess(groundGrid, level1Grid)
-    const evaluated = { ...evaluateTemplate(snapshot), _relaxedDoorAccess: relaxed }
+    const snapshot = buildPartialResult(
+      layout._debug.ground.gridBeforeGaps,
+      layout._debug.level1.gridBeforeGaps,
+      buildingW, buildingD
+    )
+    const evaluated = evaluateTemplate(snapshot)
     layout._checkpointBScore = scoreSpatialQuality(evaluated).partialScore
-    layout._relaxedDoorAccess = relaxed
   }
   layouts.sort((a, b) => b._checkpointBScore - a._checkpointBScore)
 }
