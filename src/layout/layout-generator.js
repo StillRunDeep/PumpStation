@@ -570,7 +570,7 @@ function canSatisfyNonCrossing(sequence, pairs) {
  * Relaxed door-access check for Checkpoint A.
  * Multiple rooms can share an empty region if their topological paths don't cross.
  */
-function computeRelaxedDoorAccess(groundGrid, level1Grid) {
+export function computeRelaxedDoorAccess(groundGrid, level1Grid) {
   const { doorAccessPenalty } = SCORER_PARAMS;
   const ids = [];
   const bridgedIds = new Set();
@@ -1829,6 +1829,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
         level1: { seeds: level1Seeds, gridAfterSeeds: level1GridAfterSeeds, gridAfterRect: level1GridAfterRect, gridBeforeGaps: level1GridAfterRect, gridAfterGaps: level1GridAfterRect },
       },
       checkpointADiagnostic,
+      _relaxedDoorAccess: relaxedDoorAccess,
     };
   }
 
@@ -1844,9 +1845,10 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
   if (!level1GridBeforeGaps) level1GridBeforeGaps = level1Grid.clone();
 
   // ▼ Checkpoint B（Step 6A 结束后）：第一梯队 + 第二梯队评价，分数 > -1000 才进入后续生长
-  // 使用严格 doorAccess（无宽松），此时 Phase 2 已修正可达性
+  // 与 Checkpoint A 一致，使用宽松可达性检查（_relaxedDoorAccess）
+  const relaxedB = computeRelaxedDoorAccess(groundGridBeforeGaps, level1GridBeforeGaps);
   const snapshotB = buildPartialResult(groundGridBeforeGaps, level1GridBeforeGaps, bW, bD);
-  const evaluatedB = evaluateTemplate(snapshotB, { skipDoors: true });
+  const evaluatedB = { ...evaluateTemplate(snapshotB, { skipDoors: true }), _relaxedDoorAccess: relaxedB };
   const checkpointBDiagnostic = scoreSpatialQuality(evaluatedB);
   const CHECKPOINT_B_THRESHOLD = -1000; // 总惩罚绝对值 < 1000 才通过
 
@@ -1871,6 +1873,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
       },
       checkpointADiagnostic,
       checkpointBDiagnostic,
+      _relaxedDoorAccess: relaxedB,
     };
   }
 
@@ -1896,6 +1899,9 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     level1: finalizeLayout(level1Grid).level1,
   };
 
+  // 计算 Phase 3 完成后的宽松可达性（供全量评分使用）
+  const relaxedFinal = computeRelaxedDoorAccess(groundGrid, level1Grid);
+
   return {
     id: `${prefix}-${groupId}-${variantIdx}`,
     label: `约束生长法`,
@@ -1913,5 +1919,6 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     },
     checkpointADiagnostic,
     checkpointBDiagnostic,
+    _relaxedDoorAccess: relaxedFinal,
   };
 }

@@ -205,8 +205,20 @@ export function computeAspectRatioPenalty(result) {
 export function scoreHardRedlines(result, doorAccessOverride = null) {
   const { mustViolationPenalty } = SCORER_PARAMS
   const missingRoomsRes = computeMissingRoomsPenalty(result)
-  const doorAccessRes   = doorAccessOverride ?? computeDoorAccessPenalty(result)
-  const violationCount  = result.violations?.length || 0
+
+  // 优先级：显式 override → result 上存储的宽松结果 → 严格计算
+  const relaxed = doorAccessOverride ?? result._relaxedDoorAccess ?? null
+  const doorAccessRes = relaxed ?? computeDoorAccessPenalty(result)
+
+  // 过滤已通过桥接机制放行的 violations（ext_access 和 must_adjacent 类）
+  let violations = result.violations || []
+  if (relaxed?.bridgedIds?.size > 0 || relaxed?.bridgedPairKeys?.size > 0) {
+    violations = violations.filter(v =>
+      !relaxed.bridgedIds?.has(v.room) &&
+      !relaxed.bridgedPairKeys?.has(v.room)
+    )
+  }
+  const violationCount  = violations.length
   const violationsPenalty = -(violationCount * mustViolationPenalty)
   const partialScore = missingRoomsRes.penalty + doorAccessRes.penalty + violationsPenalty
   return {
@@ -250,9 +262,9 @@ export function evaluateCheckpointA(result, doorAccessOverride = null) {
  *
  * @returns {{ partialScore: number, passes: boolean, aspectRatio: number, efficiency: number, spaceEfficiency: number, corridor: number, ...tier1 fields }}
  */
-export function scoreSpatialQuality(result) {
+export function scoreSpatialQuality(result, doorAccessOverride = null) {
   const { corridorHitsThreshold, corridorBonus, efficiencyBase, efficiencyRange, efficiencyMaxBonus } = SCORER_PARAMS
-  const tier1 = scoreHardRedlines(result)
+  const tier1 = scoreHardRedlines(result, doorAccessOverride)
   const aspectRatioRes = computeAspectRatioPenalty(result)
   const spaceEfficiency = computeSpaceEfficiency(result)
   const efficiencyScore = linearScore(spaceEfficiency, efficiencyBase, efficiencyRange, efficiencyMaxBonus)
@@ -405,16 +417,23 @@ export function scoreLayout(result) {
   breakdown.accessibility = accessibilityScore
   score += accessibilityScore
 
-  // 8. MUST violation penalty
-  const violationCount = result.violations?.length || 0
+  // 8. MUST violation penalty — 使用宽松版本过滤已桥接放行的 violations
+  const relaxed = result._relaxedDoorAccess ?? null
+  let effectiveViolations = result.violations || []
+  if (relaxed?.bridgedIds?.size > 0 || relaxed?.bridgedPairKeys?.size > 0) {
+    effectiveViolations = effectiveViolations.filter(v =>
+      !relaxed.bridgedIds?.has(v.room) &&
+      !relaxed.bridgedPairKeys?.has(v.room)
+    )
+  }
+  const violationCount = effectiveViolations.length
   breakdown.violations = -(violationCount * mustViolationPenalty)
   breakdown.violationCount = violationCount
-  // Safety check: handle violations that might not have a 'pair' or use 'room' property instead
-  breakdown.violationDetails = result.violations?.map(v => v.room || 'unknown') || []
+  breakdown.violationDetails = effectiveViolations.map(v => v.room || 'unknown')
   score += breakdown.violations
 
-  // 9. Door-access penalty
-  const doorAccessRes = computeDoorAccessPenalty(result)
+  // 9. Door-access penalty — 使用宽松版本（存储于 _relaxedDoorAccess），降级到严格计算
+  const doorAccessRes = relaxed ?? computeDoorAccessPenalty(result)
   breakdown.doorAccess = doorAccessRes.penalty
   breakdown.doorAccessCount = doorAccessRes.ids.length
   breakdown.doorAccessDetails = doorAccessRes.ids
