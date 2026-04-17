@@ -1939,7 +1939,7 @@ export function buildPartialResult(groundGrid, level1Grid, buildingW, buildingD)
 
 
 export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParams = {}, groupId = 'CG', variantIdx = 1, prefix = 'R', initialSeeds = null) {
-  const { enableAreaSwap = false } = runParams;
+  const { enableAreaSwap = false, bypassCheckpointA = false } = runParams;
   const rng = makeRng(seed);
 
   const gridW = Math.floor(bW / GRID_SIZE);
@@ -2063,7 +2063,8 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
   const checkpointADiagnostic = evaluateCheckpointA(relaxedEvaluated, relaxedDoorAccess);
 
   // If the layout fails Checkpoint A, skip expensive Phase 2/3 growth
-  if (!checkpointADiagnostic.passes) {
+  // bypassCheckpointA=true 时强制通过，用于调试 Phase 2/3 问题
+  if (!checkpointADiagnostic.passes && !bypassCheckpointA) {
     const groundLayout = finalizeLayout(groundGridAfterRect).ground;
     const level1Layout = finalizeLayout(level1GridAfterRect).level1;
     return {

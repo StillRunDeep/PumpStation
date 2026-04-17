@@ -133,7 +133,6 @@ function renderComparisonTable(variants) {
         <td style="text-align:right;padding:7px 8px">${eff}</td>
         <td style="text-align:center;padding:7px 8px">${mustSat} / ${mustTot}</td>
         <td style="text-align:center;padding:7px 8px">${daCell}</td>
-        <td style="text-align:center;padding:7px 8px">${violCell}</td>
       </tr>`
   }).join('')
 
@@ -148,7 +147,6 @@ function renderComparisonTable(variants) {
             <th class="th-tip" data-tip="功能房间面积/楼层面积（Phase 1快照）" style="padding:7px 8px;text-align:right">空间有效率</th>
             <th class="th-tip" data-tip="强邻近要求满足度 (Phase 1快照)" style="padding:7px 8px">强邻近</th>
             <th class="th-tip" data-tip="未满足的可达性/门禁要求（Phase 1快照）" style="padding:7px 8px">可达性</th>
-            <th class="th-tip" data-tip="不含邻近与可达性的其他工程约束 (如吊装覆盖、特殊距离)" style="padding:7px 8px">工程约束</th>
           </tr>
         </thead>
         <tbody id="variant-tbody">
@@ -167,8 +165,57 @@ function buildBreakdownHtml(v) {
   const negColor = '#c0392b'
   const color = x => x >= 0 ? posColor : negColor
 
-  const getLabel = id => ROOM_DEFS[id]?.label || id
-  const fmtDetails = ids => ids && ids.length > 0 ? `<div style="font-size:10px;color:#999;font-weight:normal;line-height:1.2;margin-top:2px">${ids.map(getLabel).join(', ')}</div>` : ''
+  const getLabel = id => ROOM_DEFS[id]?.label || id;
+  const fmtDetails = details => {
+    if (!details || details.length === 0) return '';
+
+    // Group violations by room ID to handle multiple violations per room
+    const groupedDetails = details.reduce((acc, detail) => {
+      const id = detail.id || 'unknown';
+      if (!acc[id]) {
+        acc[id] = {
+          label: getLabel(id),
+          sources: new Set(),
+          debug: ''
+        };
+      }
+      if (detail.source) {
+        // For aspectRatio, sources might be a comma-separated string
+        if (typeof detail.source === 'string') {
+          detail.source.split(',').forEach(s => acc[id].sources.add(s));
+        } else {
+           acc[id].sources.add(detail.source);
+        }
+      } else if (detail.sources) { // Handle AspectRatioPenalty format
+        detail.sources.split(',').forEach(s => acc[id].sources.add(s));
+      }
+      if (detail.debug) {
+        // HACK: Format the complex debug object into a string for display
+        if (typeof detail.debug === 'object' && detail.debug.sequences) {
+          const seqs = detail.debug.sequences.map(s => `[${s.join('↔')}]`).join(', ');
+          const reason = detail.debug.failureReason ? ` (${detail.debug.failureReason})` : '';
+          acc[id].debug = `接触区域: ${seqs}${reason}`;
+        } else {
+          acc[id].debug = detail.debug;
+        }
+      }
+      return acc;
+    }, {});
+
+    const detailsHtml = Object.values(groupedDetails).map(item => {
+      const roomName = item.label;
+      const sources = Array.from(item.sources);
+      const sourceStr = sources.length > 0
+        ? ` <span style="color:#c0392b">[${sources.join(', ')}]</span>`
+        : '';
+      const debugStr = item.debug
+        ? ` <span style="color:#e67e22;font-style:italic">(${item.debug})</span>`
+        : '';
+      return `${roomName}${sourceStr}${debugStr}`;
+    }).join(', ');
+
+    return `<div style="font-size:10px;color:#999;font-weight:normal;line-height:1.2;margin-top:2px">${detailsHtml}</div>`;
+  };
 
   // Ordered according to PARAM_GROUPS in scorer-params.js
   const items = [
@@ -421,6 +468,8 @@ export function renderLayoutPanel(variants) {
   if (moreBtn) moreBtn.hidden = false
   const resetBtn = document.getElementById('btn-ag41-reset')
   if (resetBtn) resetBtn.hidden = false
+  const bypassLbl = document.getElementById('lbl-bypass-ckA')
+  if (bypassLbl) { bypassLbl.hidden = false; bypassLbl.style.display = 'flex'; }
 
   showAg41Notify('已生成初始方案。可点击"生成方案"持续优化。', true)
 }
