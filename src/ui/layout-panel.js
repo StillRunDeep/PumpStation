@@ -242,15 +242,12 @@ function insertDetailRow(idx) {
   const title = `方案 ${v.id}：${v.label}  —  ` +
     `${(v.buildingW / 1000).toFixed(1)} m × ${(v.buildingD / 1000).toFixed(1)} m  得分 ${v.score}`
 
-  const failedA = !v.checkpointADiagnostic?.passes;
-  const failedB = !failedA && v.checkpointBDiagnostic?.partialScore < -1000;
+  const failed = !v.checkpointADiagnostic?.passes;
   const renderFloorRow = (floor) => {
     const debugData = v._debug?.[floor] ?? {};
     const finalView = `<svg viewBox="0 0 240 180" style="background:#f4f6f8">${renderLayoutSVG(v, floor, 240, 180, { showDims: false })}</svg>`;
-    const stage3 = failedA ? '<span class="skipped-text">未通过红线，未执行</span>'
-      : failedB ? '<span class="skipped-text">未通过检查点B，未执行</span>'
-      : (debugData.gridAfterGaps ? renderDebugGrid({ grid: debugData.gridAfterGaps, seeds: debugData.seeds }, 200, 150) : '无数据');
-    const stage2 = failedA ? '<span class="skipped-text">未通过红线，未执行</span>' : (debugData.gridBeforeGaps ? renderDebugGrid({ grid: debugData.gridBeforeGaps, seeds: debugData.seeds }, 200, 150) : '无数据');
+    const stage3 = failed ? '<span class="skipped-text">未通过红线，未执行</span>' : (debugData.gridAfterGaps ? renderDebugGrid({ grid: debugData.gridAfterGaps, seeds: debugData.seeds }, 200, 150) : '无数据');
+    const stage2 = failed ? '<span class="skipped-text">未通过红线，未执行</span>' : (debugData.gridBeforeGaps ? renderDebugGrid({ grid: debugData.gridBeforeGaps, seeds: debugData.seeds }, 200, 150) : '无数据');
     const stage1 = debugData.gridAfterRect ? renderDebugGrid({ grid: debugData.gridAfterRect, seeds: debugData.seeds }, 200, 150) : '无数据';
 
     return `
