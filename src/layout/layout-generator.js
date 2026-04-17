@@ -1,5 +1,5 @@
 import { ROOM_DEFS } from './room-defs.js';
-import { checkAdjacency } from './adjacency.js';
+import { checkAdjacency, ADJACENCY_MUST } from './adjacency.js';
 import { placeDoors } from './door-placer.js';
 import { SCORER_PARAMS } from './scorer-params.js';
 import { evaluateCheckpointA, scoreSpatialQuality, GROUND_MUST_EXT, LEVEL1_MUST_FACE_CORRIDOR } from './scorer.js';
@@ -641,11 +641,42 @@ function computeRelaxedDoorAccess(groundGrid, level1Grid) {
 
   // Ground Floor: Exterior access for main rooms + Mutual access for parking/repair
   processFloor(groundGrid, GROUND_MUST_EXT, [['parking', 'repair_zone']]);
-  
+
   // Level 1: Corridor access
   processFloor(level1Grid, [], LEVEL1_MUST_FACE_CORRIDOR.map(r => [r, 'corridor_l1']));
 
-  return { penalty: -doorAccessPenalty * ids.length, ids, bridgedIds };
+  // ── MUST adjacency bridging ───────────────────────────────────────────────
+  // MUST 邻接对（meter_main↔meter_sub, trafo1↔trafo2）与可达性规则在算法层面
+  // 完全一致：允许通过空白区域作为虚拟中间节点来满足 Phase 1 的宽松评价。
+  // 通过桥接的对以 'a↔b' 形式记入 bridgedPairKeys，用于过滤 violations[]。
+  const bridgedPairKeys = new Set();
+
+  // 按楼层分组处理（当前 ADJACENCY_MUST 均为地面层房间）
+  const groundMustPairs = ADJACENCY_MUST.filter(({ pair: [a, b] }) =>
+    groundGrid.roomData[a] || groundGrid.roomData[b]
+  );
+  if (groundMustPairs.length > 0) {
+    const { regions, regionIdGrid } = getConnectedEmptyRegions(groundGrid);
+    for (const { pair: [a, b] } of groundMustPairs) {
+      if (!groundGrid.roomData[a] || !groundGrid.roomData[b]) continue;
+      const pA = bboxToPlacement(groundGrid.getBoundingBox(a));
+      const pB = bboxToPlacement(groundGrid.getBoundingBox(b));
+      if (adjacent(pA, pB)) continue; // 已直接相邻，无需桥接
+
+      // 尝试通过空白区域桥接：找到同时接触 a 和 b 的连通空白域
+      for (const region of regions) {
+        const sequence = getRegionBoundarySequence(groundGrid, regionIdGrid, region.id);
+        if (sequence.includes(a) && sequence.includes(b) &&
+            canSatisfyNonCrossing(sequence, [[a, b]])) {
+          bridgedPairKeys.add(`${a}↔${b}`);
+          break;
+        }
+      }
+      // 若未桥接：must_adjacent violation 保留在 violations[] 中，Checkpoint A 正常失败
+    }
+  }
+
+  return { penalty: -doorAccessPenalty * ids.length, ids, bridgedIds, bridgedPairKeys };
 }
 
 // ── Phase 2 Accessibility helpers ────────────────────────────────────────────
@@ -681,6 +712,14 @@ function isAccessibilityMet(roomId, grid, buildingW, buildingD) {
     const parkBbox = grid.getBoundingBox('parking');
     if (!parkBbox) return false;
     return adjacent(p, bboxToPlacement(parkBbox)) || touchesExteriorNonSouth(p, buildingW, buildingD);
+  }
+  // MUST 邻接：与可达性规则保持算法一致，未满足则视为"可达性未达标"
+  for (const { pair: [a, b] } of ADJACENCY_MUST) {
+    if (roomId !== a && roomId !== b) continue;
+    const partnerId = roomId === a ? b : a;
+    const partnerBbox = grid.getBoundingBox(partnerId);
+    if (!partnerBbox) return false;
+    if (!adjacent(p, bboxToPlacement(partnerBbox))) return false;
   }
   return true;
 }
@@ -722,6 +761,19 @@ function getPreferredDirection(roomId, grid, buildingW, buildingD) {
     const parkCy = (parkBbox.minY + parkBbox.maxY + 1) / 2 * GRID_SIZE;
     const dx = parkCx - cx;
     const dy = parkCy - cy;
+    if (Math.abs(dx) >= Math.abs(dy)) return dx > 0 ? 'E' : 'W';
+    return dy > 0 ? 'S' : 'N';
+  }
+  // MUST 邻接：朝向未满足的邻接伙伴中心方向
+  for (const { pair: [a, b] } of ADJACENCY_MUST) {
+    if (roomId !== a && roomId !== b) continue;
+    const partnerId = roomId === a ? b : a;
+    const partnerBbox = grid.getBoundingBox(partnerId);
+    if (!partnerBbox) return null;
+    const partnerCx = (partnerBbox.minX + partnerBbox.maxX + 1) / 2 * GRID_SIZE;
+    const partnerCy = (partnerBbox.minY + partnerBbox.maxY + 1) / 2 * GRID_SIZE;
+    const dx = partnerCx - cx;
+    const dy = partnerCy - cy;
     if (Math.abs(dx) >= Math.abs(dy)) return dx > 0 ? 'E' : 'W';
     return dy > 0 ? 'S' : 'N';
   }
@@ -1745,8 +1797,15 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
   // Also filter out violations for rooms that passed via the bridging mechanism.
   // (evaluateTemplate adds ext_access violations independently of doorAccess, causing
   //  double-counting that would fail Checkpoint A even when doorAccess is relaxed.)
-  const relaxedEvaluated = relaxedDoorAccess.bridgedIds.size > 0
-    ? { ...evaluated, violations: evaluated.violations.filter(v => !relaxedDoorAccess.bridgedIds.has(v.room)) }
+  // 过滤通过桥接机制放行的违规：
+  //   bridgedIds      → ext_access 类（v.room = 单个 room ID）
+  //   bridgedPairKeys → must_adjacent 类（v.room = 'a↔b' 拼接字符串）
+  const hasBridged = relaxedDoorAccess.bridgedIds.size > 0 || relaxedDoorAccess.bridgedPairKeys.size > 0;
+  const relaxedEvaluated = hasBridged
+    ? { ...evaluated, violations: evaluated.violations.filter(v =>
+        !relaxedDoorAccess.bridgedIds.has(v.room) &&
+        !relaxedDoorAccess.bridgedPairKeys.has(v.room)
+      )}
     : evaluated;
   const checkpointADiagnostic = evaluateCheckpointA(relaxedEvaluated, relaxedDoorAccess);
 
