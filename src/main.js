@@ -896,7 +896,11 @@ function initSummaryToggleLogic() {
     // The triangle is within the first 35px. 
     // If click is further to the right, prevent the default toggle.
     if (clickX > 35) {
-      e.preventDefault();
+      const targetTag = e.target.tagName.toLowerCase();
+      const isInteractive = ['input', 'button', 'label'].includes(targetTag) || e.target.closest('button, label');
+      if (!isInteractive) {
+        e.preventDefault();
+      }
     }
   });
 }

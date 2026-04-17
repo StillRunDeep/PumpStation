@@ -1,4 +1,5 @@
-import { generateConstrainedLayout, buildPartialResult, GRID_SIZE } from '../layout/layout-generator.js'
+import { generateConstrainedLayout, buildPartialResult, computeRelaxedDoorAccess, GRID_SIZE, generateWeightMapForRoom } from '../layout/layout-generator.js'
+import { ROOM_DEFS } from '../layout/room-defs.js';
 import { getDefaultUserParams, getUserConfirmedParams } from '../layout/user-params.js'
 import { centerX, centerY, evaluateTemplate } from '../layout/placer.js'
 import { scoreSpatialQuality } from '../layout/scorer.js'
@@ -12,13 +13,13 @@ const yieldToEventLoop = () => new Promise(resolve => setTimeout(resolve, 0))
  */
 function applyCheckpointB(layouts, buildingW, buildingD) {
   for (const layout of layouts) {
-    const snapshot = buildPartialResult(
-      layout._debug.ground.gridBeforeGaps,
-      layout._debug.level1.gridBeforeGaps,
-      buildingW, buildingD
-    )
-    const evaluated = evaluateTemplate(snapshot)
+    const groundGrid = layout._debug.ground.gridBeforeGaps;
+    const level1Grid = layout._debug.level1.gridBeforeGaps;
+    const snapshot = buildPartialResult(groundGrid, level1Grid, buildingW, buildingD)
+    const relaxed = computeRelaxedDoorAccess(groundGrid, level1Grid)
+    const evaluated = { ...evaluateTemplate(snapshot), _relaxedDoorAccess: relaxed }
     layout._checkpointBScore = scoreSpatialQuality(evaluated).partialScore
+    layout._relaxedDoorAccess = relaxed
   }
   layouts.sort((a, b) => b._checkpointBScore - a._checkpointBScore)
 }
@@ -41,58 +42,153 @@ export async function runAG41(existingVariants = [], isCancelled = () => false) 
   const { buildingW, buildingD, roomTargetAreas } = userParams;
 
   const sortedExisting = [...existingVariants].sort((a, b) => b.score - a.score);
-  const numToGenerate = 9;
-  const MAX_ATTEMPTS = 50; // 防止无限循环
   const results = [];
-  let pCount = 0;
-  let rCount = 0;
   let attempts = 0;
 
-  // 优先尝试生成遗传算法方案（最多 2 个，防止第一名影响过大）
-  // 组A: 第1名 + 第5名；组B: 第5名 + 第9名
+  // 调试开关：跳过 Checkpoint A（让所有方案直接进入阶段2/3）
+  const bypassCheckpointA = !!(document.getElementById('chk-bypass-ckA')?.checked);
+
+  // 1. 交叉进化 (2个方案)
   if (sortedExisting.length >= 5) {
-    const rank9 = sortedExisting[8] || sortedExisting[0];
+    const rank9 = sortedExisting[8] || sortedExisting[0]; // Fallback for smaller populations
     const parentPairs = [
-      [sortedExisting[0], sortedExisting[4]],
-      [sortedExisting[4], rank9],
+      { a: sortedExisting[0], b: sortedExisting[4], prefix: 'C15' },
+      { a: sortedExisting[4], b: rank9, prefix: 'C59' },
     ];
 
-    for (let i = 0; i < 2 && results.length < numToGenerate; i++) {
-      if (isCancelled()) return results
-      const [parentA, parentB] = parentPairs[i];
-      const seed = Math.floor(Math.random() * 100000) + pCount;
-      const t = generateHybridLayout(parentA, parentB, seed, buildingW, buildingD, roomTargetAreas, 'S', pCount + 1);
+    for (const { a, b, prefix } of parentPairs) {
+      if (isCancelled()) break;
+      const seed = Math.floor(Math.random() * 100000);
+      const child = generateHybridLayout(a, b, seed, buildingW, buildingD, roomTargetAreas, 'Evo', results.length + 1, prefix, bypassCheckpointA);
+      results.push(evaluateTemplate(child));
       attempts++;
-
-      // 调用 evaluateTemplate 确保包含 violations、adjacency 等属性
-      const score = evaluateTemplate(t);
-      results.push(score);
-      pCount++;
-      await yieldToEventLoop()
+      await yieldToEventLoop();
     }
   }
 
-  // 用纯随机方案补足至 9 个
-  while (results.length < numToGenerate && attempts < MAX_ATTEMPTS) {
-    if (isCancelled()) return results
-    const seed = Math.floor(Math.random() * 100000) + rCount;
-    const t = generateConstrainedLayout(seed, buildingW, buildingD, roomTargetAreas, { enableAreaSwap: true }, 'S', rCount + 1, 'R');
-    attempts++;
+  // 2. 随机探索 (7个方案)
+  const explorers = [
+    // 组1: 对未验证房间进行智能优化 (3个)
+    { parent: sortedExisting[0], reRandomize: 'unverified_smart', count: 1, prefix: 'O1' },
+    { parent: sortedExisting[1], reRandomize: 'unverified_smart', count: 1, prefix: 'O2' },
+    { parent: sortedExisting[2], reRandomize: 'unverified_smart', count: 1, prefix: 'O3' },
+    // 组2: 仅保留通过验证的房间 (2个)
+    { parent: sortedExisting[3], reRandomize: 'all_but_verified', count: 1, prefix: 'M4' },
+    { parent: sortedExisting[4], reRandomize: 'all_but_verified', count: 1, prefix: 'M5' },
+    // 组3: 纯随机 (2个)
+    { parent: null, reRandomize: 'all', count: 2, prefix: 'RND' },
+  ];
 
-    // 调用 evaluateTemplate 确保包含 violations、adjacency 等属性
-    const score = evaluateTemplate(t);
-    results.push(score);
-    rCount++;
-    await yieldToEventLoop()
+  for (const { parent, reRandomize, count, prefix } of explorers) {
+    for (let i = 0; i < count; i++) {
+      if (isCancelled() || results.length >= 9) break;
+      const seed = Math.floor(Math.random() * 100000);
+
+      if (parent) {
+        const child = generateMutatedLayout(parent, reRandomize, seed, buildingW, buildingD, roomTargetAreas, 'Exp', results.length + 1, prefix, bypassCheckpointA);
+        results.push(evaluateTemplate(child));
+      } else {
+        const randomLayout = generateConstrainedLayout(seed, buildingW, buildingD, roomTargetAreas, { enableAreaSwap: true, bypassCheckpointA }, 'Exp', results.length + 1, prefix);
+        results.push(evaluateTemplate(randomLayout));
+      }
+      attempts++;
+      await yieldToEventLoop();
+    }
+    if (isCancelled() || results.length >= 9) break;
   }
 
-  // 将尝试次数附加到返回数组，供调用方展示
+  // 补足：如果交叉和变异没有生成足够方案，用纯随机补足
+  while (results.length < 9 && attempts < 50 && !isCancelled()) {
+    const seed = Math.floor(Math.random() * 100000);
+    const randomLayout = generateConstrainedLayout(seed, buildingW, buildingD, roomTargetAreas, { enableAreaSwap: true, bypassCheckpointA }, 'Fill', results.length + 1, 'R');
+    results.push(evaluateTemplate(randomLayout));
+    attempts++;
+    await yieldToEventLoop();
+  }
+
   results._attemptCount = attempts;
+  applyCheckpointB(results, buildingW, buildingD);
+    return results;
+}
 
-  // 检查点 B：对所有方案按第一+第二梯队得分排序
-  applyCheckpointB(results, buildingW, buildingD)
+function generateMutatedLayout(parent, reRandomize, seed, bW, bD, roomAreas, groupId, variantIdx, prefix, bypassCheckpointA = false) {
+  const childSeeds = { ground: {}, level1: {} };
+  const verifiedRooms = new Set();
 
-  return results;
+  const allRoomIds = Object.keys(ROOM_DEFS);
+
+  // A room is "verified" if it doesn't participate in any hard-redline violations.
+  const violatingRooms = new Set();
+  if (parent.violations) {
+    parent.violations.forEach(v => {
+      if (v.constraint === 'must_adjacent') {
+        v.room.split('↔').forEach(r => violatingRooms.add(r));
+      } else {
+        violatingRooms.add(v.room);
+      }
+    });
+  }
+  if (parent._relaxedDoorAccess?.ids) {
+    parent._relaxedDoorAccess.ids.forEach(id => violatingRooms.add(id));
+  }
+
+  ['ground', 'level1'].forEach(floor => {
+    const roomsOnThisFloor = allRoomIds.filter(id => ROOM_DEFS[id].floor === floor && !ROOM_DEFS[id].isOpening);
+    const gridW = Math.floor(bW / GRID_SIZE);
+    const gridH = Math.floor(bD / GRID_SIZE);
+
+    for (const roomId of roomsOnThisFloor) {
+      const isVerified = !violatingRooms.has(roomId);
+      let keepSeed = false;
+
+      if (reRandomize === 'unverified' && isVerified) {
+        keepSeed = true;
+      } else if (reRandomize === 'all_but_verified' && isVerified) {
+        keepSeed = true;
+      }
+
+      const parentPlacement = parent?.[`${floor}Placements`]?.[roomId];
+
+      if (keepSeed && parentPlacement) {
+        childSeeds[floor][roomId] = placementToGridCenter(parentPlacement);
+      } else {
+        // This room's seed is not kept, so it gets a new random one.
+        if (reRandomize === 'unverified_smart') {
+          // Smart randomization: use weight map to find a better spot.
+          const roomDef = { id: roomId, ...ROOM_DEFS[roomId] };
+          // Create a mock grid and a map of already placed seeds for the weight map function
+          const mockGrid = { width: gridW, height: gridH, getCell: (x, y) => {
+            for (const seed of Object.values(childSeeds[floor])) {
+              if (seed.x === x && seed.y === y) return 1; // Occupied
+            }
+            return 0; // Empty
+          }};
+          const weightMap = generateWeightMapForRoom(mockGrid, roomDef, childSeeds[floor]);
+
+          let bestPos = null;
+          let maxWeight = -1;
+          // Increased attempts to find a high-weight spot
+          for (let i = 0; i < 500; i++) {
+            const x = Math.floor(Math.random() * gridW);
+            const y = Math.floor(Math.random() * gridH);
+            if (mockGrid.getCell(x,y) === 0 && weightMap[y][x] > maxWeight) {
+              maxWeight = weightMap[y][x];
+              bestPos = { x, y };
+            }
+          }
+          childSeeds[floor][roomId] = bestPos || { x: Math.floor(Math.random() * gridW), y: Math.floor(Math.random() * gridH) };
+        } else {
+          // Pure random placement
+          childSeeds[floor][roomId] = {
+            x: Math.floor(Math.random() * gridW),
+            y: Math.floor(Math.random() * gridH),
+          };
+        }
+      }
+    }
+  });
+
+  return generateConstrainedLayout(seed, bW, bD, roomAreas, { enableAreaSwap: true, bypassCheckpointA }, groupId, variantIdx, prefix, childSeeds);
 }
 
 /**
@@ -107,47 +203,59 @@ function placementToGridCenter(placement) {
   }
 }
 
-function generateHybridLayout(parentA, parentB, seed, bW, bD, roomAreas, groupId, variantIdx) {
-  // Use seed to determine which parent dominates for each room
-  const rng = () => (seed % 10000) / 10000;
+function generateHybridLayout(parentA, parentB, seed, bW, bD, roomAreas, groupId, variantIdx, prefix, bypassCheckpointA = false) {
+  // Use a simple pseudo-random generator based on the seed for deterministic crossover
+  let rngState = seed;
+  const rng = () => {
+    rngState = (rngState * 9301 + 49297) % 233280;
+    return rngState / 233280;
+  };
 
   const childSeeds = { ground: {}, level1: {} };
 
-  const allRoomIds = new Set([
-      ...Object.keys(parentA._debug.ground.seeds),
-      ...Object.keys(parentB._debug.ground.seeds),
-      ...Object.keys(parentA._debug.level1.seeds),
-      ...Object.keys(parentB._debug.level1.seeds)
-  ]);
+  const allRoomIds = Object.keys(ROOM_DEFS);
+  const gridW = Math.floor(bW / GRID_SIZE);
+  const gridH = Math.floor(bD / GRID_SIZE);
 
-  for (const roomId of allRoomIds) {
-      const hasGroundA = parentA._debug.ground.seeds[roomId];
-      const hasGroundB = parentB._debug.ground.seeds[roomId];
-      const hasLevel1A = parentA._debug.level1.seeds[roomId];
-      const hasLevel1B = parentB._debug.level1.seeds[roomId];
+  ['ground', 'level1'].forEach(floor => {
+    const usedCoords = new Set();
+    const roomsOnThisFloor = allRoomIds.filter(id => ROOM_DEFS[id].floor === floor && !ROOM_DEFS[id].isOpening);
 
-      // Ground floor crossover: use bounding-box center of chosen parent's actual room placement
-      if (hasGroundA || hasGroundB) {
-          const chosenParent = rng() < 0.5 ? parentA : parentB;
-          const fallbackParent = chosenParent === parentA ? parentB : parentA;
-          const placement = (chosenParent.groundPlacements || {})[roomId]
-                         || (fallbackParent.groundPlacements || {})[roomId];
-          if (placement) {
-              childSeeds.ground[roomId] = placementToGridCenter(placement);
-          }
+    for (const roomId of roomsOnThisFloor) {
+      const pA = parentA?.[`${floor}Placements`]?.[roomId];
+      const pB = parentB?.[`${floor}Placements`]?.[roomId];
+
+      let placement = null;
+      if (pA && pB) {
+        const chosenParent = rng() < 0.5 ? parentA : parentB;
+        placement = chosenParent[`${floor}Placements`][roomId];
+      } else {
+        placement = pA || pB;
       }
 
-      // Level 1 crossover: same strategy
-      if (hasLevel1A || hasLevel1B) {
-          const chosenParent = rng() < 0.5 ? parentA : parentB;
-          const fallbackParent = chosenParent === parentA ? parentB : parentA;
-          const placement = (chosenParent.level1Placements || {})[roomId]
-                         || (fallbackParent.level1Placements || {})[roomId];
-          if (placement) {
-              childSeeds.level1[roomId] = placementToGridCenter(placement);
-          }
-      }
-  }
+      if (placement) {
+        let seedPos = placementToGridCenter(placement);
 
-  return generateConstrainedLayout(seed, bW, bD, roomAreas, { enableAreaSwap: true }, groupId, variantIdx, 'P', childSeeds);
+        // Anti-collision
+        let key = `${seedPos.x},${seedPos.y}`;
+        let attempts = 0;
+        while (usedCoords.has(key) && attempts < 20) {
+          seedPos.x = (seedPos.x + (rng() < 0.5 ? 1 : -1) + gridW) % gridW;
+          seedPos.y = (seedPos.y + (rng() < 0.5 ? 1 : -1) + gridH) % gridH;
+          key = `${seedPos.x},${seedPos.y}`;
+          attempts++;
+        }
+        childSeeds[floor][roomId] = seedPos;
+        usedCoords.add(key);
+      } else {
+        // Spontaneous mutation: if a room is missing from both parents, give it a random seed.
+        childSeeds[floor][roomId] = {
+          x: Math.floor(rng() * gridW),
+          y: Math.floor(rng() * gridH),
+        };
+      }
+    }
+  });
+
+  return generateConstrainedLayout(seed, bW, bD, roomAreas, { enableAreaSwap: true, bypassCheckpointA }, groupId, variantIdx, prefix, childSeeds);
 }

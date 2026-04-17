@@ -10,6 +10,9 @@ function renderBuildingParamsPanel(defaultParams = {}) {
   const defaultBd = defaultParams.buildingD || 18600
   const defaultAreas = defaultParams.roomTargetAreas || {}
 
+  // 共享读取函数：在 init() 和 validateAndConfirm() 中均使用
+  let _readCurrent = null;
+
   const panelHTML = `
     <div class="ag41-section-title">建筑总尺寸设置
       <span class="ag41-hint">尺寸确认后用于生成布局方案</span>
@@ -123,6 +126,7 @@ function renderBuildingParamsPanel(defaultParams = {}) {
         const roomTargetAreas = {}
         const mapping = {
           'ra-trafo':   ['trafo1', 'trafo2'],  // 同一输入同时应用到 trafo1 和 trafo2
+          'ra-svc':     ['meter_main', 'meter_sub', 'fire_equip'], // 服务用房合计，按比例分配给三间
           'ra-repair':  ['repair_zone'],
           'ra-parking': ['parking'],
           'ra-fan':     ['fan_room'],
@@ -133,7 +137,19 @@ function renderBuildingParamsPanel(defaultParams = {}) {
 
         for (const [inputId, keys] of Object.entries(mapping)) {
           const v = readVal(inputId)
-          if (v !== null) keys.forEach(k => { roomTargetAreas[k] = v })
+          if (v !== null) {
+            if (inputId === 'ra-svc') {
+              // 服务用房合计按原始默认比例拆分到三间：meter_main:meter_sub:fire_equip = 12:8:15
+              const total = HARDCODED_DEFAULTS.roomTargetAreas.meter_main
+                          + HARDCODED_DEFAULTS.roomTargetAreas.meter_sub
+                          + HARDCODED_DEFAULTS.roomTargetAreas.fire_equip
+              roomTargetAreas.meter_main  = Math.round(v * HARDCODED_DEFAULTS.roomTargetAreas.meter_main  / total)
+              roomTargetAreas.meter_sub   = Math.round(v * HARDCODED_DEFAULTS.roomTargetAreas.meter_sub   / total)
+              roomTargetAreas.fire_equip  = Math.round(v * HARDCODED_DEFAULTS.roomTargetAreas.fire_equip  / total)
+            } else {
+              keys.forEach(k => { roomTargetAreas[k] = v })
+            }
+          }
         }
 
         return {
@@ -142,6 +158,9 @@ function renderBuildingParamsPanel(defaultParams = {}) {
           roomTargetAreas,
         }
       }
+
+      // 供 validateAndConfirm 共享使用
+      _readCurrent = readCurrent;
 
       // 监听所有可编辑 input，每次变化即刻保存
       container.querySelectorAll('input:not([disabled])').forEach(el => {
@@ -171,7 +190,7 @@ function renderBuildingParamsPanel(defaultParams = {}) {
      * @returns {boolean} true if user confirms to proceed, false otherwise.
      */
     validateAndConfirm() {
-      const params = this.readParams ? this.readParams() : readCurrent(); // Use readParams if it exists for compatibility
+      const params = _readCurrent ? _readCurrent() : (this.readParams ? this.readParams() : {});
       const { buildingW, buildingD, roomTargetAreas } = params;
       const floorAreaM2 = (buildingW * buildingD) / 1e6;
 

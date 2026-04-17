@@ -90,12 +90,14 @@ export function computeAccessibilityScore(result) {
 export function computeDoorAccessPenalty(result) {
   const { buildingW, buildingD, groundPlacements = {}, level1Placements = {} } = result
   const { doorAccessPenalty } = SCORER_PARAMS
-  let ids = []
+  let violations = []
 
   for (const id of GROUND_MUST_EXT) {
     const p = groundPlacements[id]
     if (!p) continue
-    if (!touchesExteriorNonSouth(p, buildingW, buildingD)) ids.push(id)
+    if (!touchesExteriorNonSouth(p, buildingW, buildingD)) {
+      violations.push({ id, source: 'touchesExteriorNonSouth' })
+    }
   }
 
   const parking    = groundPlacements['parking']
@@ -103,18 +105,20 @@ export function computeDoorAccessPenalty(result) {
   if (parking && repairZone) {
     const parkingOk = adjacent(parking, repairZone) || touchesExteriorNonSouth(parking, buildingW, buildingD)
     const repairOk  = adjacent(parking, repairZone) || touchesExteriorNonSouth(repairZone, buildingW, buildingD)
-    if (!parkingOk) ids.push('parking')
-    if (!repairOk)  ids.push('repair_zone')
+    if (!parkingOk) violations.push({ id: 'parking', source: 'parkingRepairAdjExt' })
+    if (!repairOk)  violations.push({ id: 'repair_zone', source: 'parkingRepairAdjExt' })
   }
 
   const corridor = level1Placements['corridor_l1']
   for (const id of LEVEL1_MUST_FACE_CORRIDOR) {
     const p = level1Placements[id]
     if (!p) continue
-    if (!corridor || !adjacent(p, corridor)) ids.push(id)
+    if (!corridor || !adjacent(p, corridor)) {
+      violations.push({ id, source: 'adjacentToCorridor' })
+    }
   }
 
-  return { penalty: -doorAccessPenalty * ids.length, ids }
+  return { penalty: -doorAccessPenalty * violations.length, violations }
 }
 
 /**
@@ -124,10 +128,14 @@ export function computeDoorAccessPenalty(result) {
 export function computeMissingRoomsPenalty(result) {
   const { groundPlacements = {}, level1Placements = {} } = result
   const { missingRoomPenalty } = SCORER_PARAMS
-  let ids = []
-  for (const id of GROUND_ROOMS) { if (!groundPlacements[id]) ids.push(id) }
-  for (const id of EXPECTED_LEVEL1) { if (!level1Placements[id]) ids.push(id) }
-  return { penalty: -missingRoomPenalty * ids.length, ids }
+  const violations = []
+  for (const id of GROUND_ROOMS) {
+    if (!groundPlacements[id]) violations.push({ id, source: 'missing_ground' })
+  }
+  for (const id of EXPECTED_LEVEL1) {
+    if (!level1Placements[id]) violations.push({ id, source: 'missing_level1' })
+  }
+  return { penalty: -missingRoomPenalty * violations.length, violations }
 }
 
 /**
@@ -146,24 +154,26 @@ export function computeAspectRatioPenalty(result) {
     vertexThreshold, vertexStep
   } = SCORER_PARAMS
   const allPlacements = { ...groundPlacements, ...level1Placements }
-  let ids = []
+  let violations = []
   let totalViolations = 0
   let maxAspectRatio = 1
 
   for (const [id, p] of Object.entries(allPlacements)) {
     if (id === 'corridor_l1') continue
     if (!p.w || !p.d) continue
-    
+
     const ratio = aspectRatio(p.w, p.d)
     if (ratio > maxAspectRatio) maxAspectRatio = ratio
 
     let roomViolations = 0
-    
+    let sources = []
+
     // 1. Aspect Ratio
     if (ratio > aspectRatioThreshold) {
       roomViolations++
+      sources.push('aspectRatio')
     }
-    
+
     // 2. Room Utilization
     if (p.actualArea) {
       const bboxArea = p.w * p.d
@@ -171,25 +181,29 @@ export function computeAspectRatioPenalty(result) {
       if (utilization < utilizationThreshold) {
         // Every utilizationStep deficit = 1 violation, at least 1 if below threshold
         const deficit = utilizationThreshold - utilization
-        roomViolations += 1 + Math.floor(deficit / utilizationStep)
+        const numViolations = 1 + Math.floor(deficit / utilizationStep)
+        roomViolations += numViolations
+        for (let i = 0; i < numViolations; i++) sources.push('utilization')
       }
     }
-    
+
     // 3. Corner Count
     if (p.vertices > vertexThreshold) {
       // Every vertexStep extra vertices over threshold = 1 violation
-      roomViolations += (p.vertices - vertexThreshold) / vertexStep
+      const numViolations = (p.vertices - vertexThreshold) / vertexStep
+      roomViolations += numViolations
+      for (let i = 0; i < numViolations; i++) sources.push('vertexCount')
     }
 
     if (roomViolations > 0) {
-      ids.push(id)
+      violations.push({ id, sources: sources.join(',') })
       totalViolations += roomViolations
     }
   }
 
   return {
     penalty: -aspectRatioPenalty * totalViolations,
-    ids,
+    violations,
     violationCount: totalViolations,
     maxAspectRatio
   }
@@ -205,17 +219,29 @@ export function computeAspectRatioPenalty(result) {
 export function scoreHardRedlines(result, doorAccessOverride = null) {
   const { mustViolationPenalty } = SCORER_PARAMS
   const missingRoomsRes = computeMissingRoomsPenalty(result)
-  const doorAccessRes   = doorAccessOverride ?? computeDoorAccessPenalty(result)
-  const violationCount  = result.violations?.length || 0
+
+  // 优先级：显式 override → result 上存储的宽松结果 → 严格计算
+  const relaxed = doorAccessOverride ?? result._relaxedDoorAccess ?? null
+  const doorAccessRes = relaxed ?? computeDoorAccessPenalty(result)
+
+  // 过滤已通过桥接机制放行的 violations（ext_access 和 must_adjacent 类）
+  let violations = result.violations || []
+  if (relaxed?.bridgedIds?.size > 0 || relaxed?.bridgedPairKeys?.size > 0) {
+    violations = violations.filter(v =>
+      !relaxed.bridgedIds?.has(v.room) &&
+      !relaxed.bridgedPairKeys?.has(v.room)
+    )
+  }
+  const violationCount  = violations.length
   const violationsPenalty = -(violationCount * mustViolationPenalty)
   const partialScore = missingRoomsRes.penalty + doorAccessRes.penalty + violationsPenalty
   return {
     partialScore,
     passes: partialScore === 0,
     missingRooms: missingRoomsRes.penalty,
-    missingRoomCount: missingRoomsRes.ids.length,
+    missingRoomCount: missingRoomsRes.violations.length,
     doorAccess: doorAccessRes.penalty,
-    doorAccessCount: doorAccessRes.ids.length,
+    doorAccessCount: (doorAccessRes.violations || doorAccessRes.ids)?.length || 0,
     violations: violationsPenalty,
     violationCount,
   }
@@ -250,9 +276,9 @@ export function evaluateCheckpointA(result, doorAccessOverride = null) {
  *
  * @returns {{ partialScore: number, passes: boolean, aspectRatio: number, efficiency: number, spaceEfficiency: number, corridor: number, ...tier1 fields }}
  */
-export function scoreSpatialQuality(result) {
+export function scoreSpatialQuality(result, doorAccessOverride = null) {
   const { corridorHitsThreshold, corridorBonus, efficiencyBase, efficiencyRange, efficiencyMaxBonus } = SCORER_PARAMS
-  const tier1 = scoreHardRedlines(result)
+  const tier1 = scoreHardRedlines(result, doorAccessOverride)
   const aspectRatioRes = computeAspectRatioPenalty(result)
   const spaceEfficiency = computeSpaceEfficiency(result)
   const efficiencyScore = linearScore(spaceEfficiency, efficiencyBase, efficiencyRange, efficiencyMaxBonus)
@@ -405,33 +431,55 @@ export function scoreLayout(result) {
   breakdown.accessibility = accessibilityScore
   score += accessibilityScore
 
-  // 8. MUST violation penalty
-  const violationCount = result.violations?.length || 0
+  // 8. MUST violation penalty — 使用宽松版本过滤已桥接放行的 violations
+  const relaxed = result._relaxedDoorAccess ?? null
+  let effectiveViolations = result.violations || []
+  if (relaxed?.bridgedIds?.size > 0 || relaxed?.bridgedPairKeys?.size > 0) {
+    effectiveViolations = effectiveViolations.filter(v =>
+      !relaxed.bridgedIds?.has(v.room) &&
+      !relaxed.bridgedPairKeys?.has(v.room)
+    )
+  }
+  const violationCount = effectiveViolations.length
   breakdown.violations = -(violationCount * mustViolationPenalty)
   breakdown.violationCount = violationCount
-  // Safety check: handle violations that might not have a 'pair' or use 'room' property instead
-  breakdown.violationDetails = result.violations?.map(v => v.room || 'unknown') || []
+  breakdown.violationDetails = effectiveViolations.map(v => ({
+    id: v.room || 'unknown',
+    source: v.constraint || 'unknown_constraint',
+    debug: v.debug, // Pass along the debug info
+  }))
   score += breakdown.violations
 
-  // 9. Door-access penalty
-  const doorAccessRes = computeDoorAccessPenalty(result)
+  // 9. Door-access penalty — 使用宽松版本（存储于 _relaxedDoorAccess），降级到严格计算
+  const doorAccessRes = relaxed ?? computeDoorAccessPenalty(result)
   breakdown.doorAccess = doorAccessRes.penalty
-  breakdown.doorAccessCount = doorAccessRes.ids.length
-  breakdown.doorAccessDetails = doorAccessRes.ids
+  breakdown.doorAccessCount = (doorAccessRes.violations || doorAccessRes.ids)?.length || 0
+
+  if (relaxed?.violationsWithDetails?.length > 0) {
+    breakdown.doorAccessDetails = relaxed.violationsWithDetails;
+    // Recalculate count based on detailed list
+    breakdown.doorAccessCount = relaxed.violationsWithDetails.length;
+  } else if (doorAccessRes.violations) {
+    breakdown.doorAccessDetails = doorAccessRes.violations
+  } else if (doorAccessRes.ids) {
+    breakdown.doorAccessDetails = doorAccessRes.ids.map(id => ({ id, source: 'relaxed' }))
+  } else {
+    breakdown.doorAccessDetails = []
+  }
   score += breakdown.doorAccess
 
   // 10. Missing-room penalty
   const missingRoomsRes = computeMissingRoomsPenalty(result)
   breakdown.missingRooms = missingRoomsRes.penalty
-  breakdown.missingRoomCount = missingRoomsRes.ids.length
-  breakdown.missingRoomDetails = missingRoomsRes.ids
+  breakdown.missingRoomCount = missingRoomsRes.violations.length
+  breakdown.missingRoomDetails = missingRoomsRes.violations
   score += breakdown.missingRooms
 
   // 11. Aspect-ratio penalty
   const aspectRatioRes = computeAspectRatioPenalty(result)
   breakdown.aspectRatio = aspectRatioRes.penalty
   breakdown.aspectRatioCount = aspectRatioRes.violationCount
-  breakdown.aspectRatioDetails = aspectRatioRes.ids
+  breakdown.aspectRatioDetails = aspectRatioRes.violations
   score += breakdown.aspectRatio
 
   return {
