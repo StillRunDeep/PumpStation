@@ -157,37 +157,28 @@ function placeRoomSeeds(grid, rooms, rng) {
       if (neighborsPlaced) {
         const weightMap = generateWeightMapForRoom(grid, room, placedSeeds);
 
-        let bestPos = null;
+        // 全网格扫描：找到所有权重最高的空格，随机选一个
+        // 比 200 次随机采样更可靠——保证 MUST 邻接伙伴的 ×50 高权重区一定被命中
         let maxWeight = -1;
-
-        // Find the best position based on the generated weight map
-        for (let i = 0; i < 200; i++) { // Increase attempts for better coverage
-          const x = Math.floor(rng() * grid.width);
-          const y = Math.floor(rng() * grid.height);
-
-          if (grid.getCell(x, y) === 0) {
-            const weight = weightMap[y][x];
-            if (weight > maxWeight) {
-              maxWeight = weight;
-              bestPos = { x, y };
+        const bestCandidates = [];
+        for (let y = 0; y < grid.height; y++) {
+          for (let x = 0; x < grid.width; x++) {
+            if (grid.getCell(x, y) === 0) {
+              const weight = weightMap[y][x];
+              if (weight > maxWeight) {
+                maxWeight = weight;
+                bestCandidates.length = 0;
+                bestCandidates.push({ x, y });
+              } else if (weight === maxWeight) {
+                bestCandidates.push({ x, y });
+              }
             }
           }
         }
-
-        // If no position found in random attempts, scan the grid
-        if (!bestPos) {
-            for (let y = 0; y < grid.height; y++) {
-                for (let x = 0; x < grid.width; x++) {
-                    if (grid.getCell(x, y) === 0) {
-                        const weight = weightMap[y][x];
-                        if (weight > maxWeight) {
-                            maxWeight = weight;
-                            bestPos = { x, y };
-                        }
-                    }
-                }
-            }
-        }
+        // 在所有并列最优位置中随机选一个，保留方案多样性
+        const bestPos = bestCandidates.length > 0
+          ? bestCandidates[Math.floor(rng() * bestCandidates.length)]
+          : null;
 
         if (bestPos) {
           grid.addRoomCell(room.id, bestPos.x, bestPos.y);
