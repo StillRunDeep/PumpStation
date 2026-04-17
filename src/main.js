@@ -387,34 +387,43 @@ function countPipesFromJunction(topoParams) {
   if (!topoParams?.devicesByRoom?.pump_room) return 1
 
   const pumpRoomDevices = topoParams.devicesByRoom.pump_room
-  const edges = topoParams.edges || []
+  const pipes = topoParams.pipes || []
 
-  // 找到汇合点(junction)
-  const junction = pumpRoomDevices.find(d => d.type === 'junction')
-  if (!junction) return 1
+  // 找到汇流节点（label === '汇'）
+  const allNodes = topoParams.allNodes || []
+  const junctionNode = allNodes.find(n => n.label === '汇')
+  if (!junctionNode) return 1
 
-  // 泵房维护间右边界（约在 editorX=770 处）
+  // 泵房维护间右边界（约在 canvasX=770 处）
   const pumpRoomRightBoundary = 770
 
   // 统计从junction出发，进入泵房维护间范围的管道数量
-  // 沿拓扑边追踪：从junction出发，跟随edges直到离开泵房维护间范围
+  // 沿 pipes 追踪：从junction出发，跟随 pipes 直到离开泵房维护间范围
   const visited = new Set()
-  const queue = [junction.id]
+  const queue = [junctionNode.id]
+
+  // 构建双向邻接表
+  const adj = {}
+  for (const pipe of pipes) {
+    if (!adj[pipe.node1]) adj[pipe.node1] = []
+    if (!adj[pipe.node2]) adj[pipe.node2] = []
+    adj[pipe.node1].push(pipe.node2)
+    adj[pipe.node2].push(pipe.node1)
+  }
 
   while (queue.length > 0) {
     const currentId = queue.shift()
     if (visited.has(currentId)) continue
     visited.add(currentId)
 
-    // 查找所有从currentId出发的边
-    const outgoingEdges = edges.filter(e => e.fromId === currentId)
-    for (const edge of outgoingEdges) {
-      // 检查目标设备是否在泵房维护间范围内
-      const targetDevice = pumpRoomDevices.find(d => d.id === edge.toId)
-      if (targetDevice && targetDevice.editorX < pumpRoomRightBoundary) {
-        // 继续追踪（仍在泵房维护间范围内）
-        if (!visited.has(edge.toId)) {
-          queue.push(edge.toId)
+    // 查找所有从 currentId 出发的 pipe（双向邻接表）
+    const neighbors = adj[currentId] || []
+    for (const neighborId of neighbors) {
+      // 检查目标节点是否在泵房维护间范围内
+      const node = allNodes.find(n => n.id === neighborId)
+      if (node && node.canvasX < pumpRoomRightBoundary) {
+        if (!visited.has(neighborId)) {
+          queue.push(neighborId)
         }
       }
     }

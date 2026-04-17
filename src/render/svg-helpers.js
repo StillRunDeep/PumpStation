@@ -363,7 +363,7 @@ export function _reducer(x1, y1, dn1_px, dn2_px, len_px, horiz = true, color = '
   if (horiz) {
     const x2 = x1 + len_px
     const ytop1 = y1 - dn1_px, ybot1 = y1 + dn1_px
-    const ytop2 = y2 - dn2_px, ybot2 = y2 + dn2_px
+    const ytop2 = y1 - dn2_px, ybot2 = y1 + dn2_px
     return `<polygon points="${x1.toFixed(1)},${ytop1.toFixed(1)} ${x2.toFixed(1)},${ytop2.toFixed(1)} ${x2.toFixed(1)},${ybot2.toFixed(1)} ${x1.toFixed(1)},${ybot1.toFixed(1)}" fill="${color}" opacity="0.7"/>`
   } else {
     const y2 = y1 - len_px
@@ -406,16 +406,43 @@ export function _sectionLineBS(x1, x2, y, label = 'A', color = '#555') {
     _l(x1 - arrowSize, y, x1, y - arrowSize, color, 2),  // 上箭头斜边
     _l(x1 - arrowSize, y, x1, y + arrowSize, color, 2),  // 下箭头斜边
   ].join('')
-  // 右端 L 形 + 箭头
+  // 右端 L 形 + 箭头（与左端同向，均指向左←，表示从右侧看剖面）
   const rightL = [
     _l(x2, y - lLen, x2, y + lLen, color, 3),  // L 形垂直段
-    _l(x2 + arrowSize, y, x2, y - arrowSize, color, 2),  // 上箭头斜边
-    _l(x2 + arrowSize, y, x2, y + arrowSize, color, 2),  // 下箭头斜边
+    _l(x2 - arrowSize, y, x2, y - arrowSize, color, 2),  // 上箭头斜边
+    _l(x2 - arrowSize, y, x2, y + arrowSize, color, 2),  // 下箭头斜边
   ].join('')
   // 中间细虚线
   const centerDash = _l(x1 + arrowSize, y, x2 - arrowSize, y, color, 1, '6,3')
   // 字母 A（两端各一个）
   const leftA = _t(x1 - arrowSize - 6, y + 4, label, 10, color, 'end', 'bold')
-  const rightA = _t(x2 + arrowSize + 6, y + 4, label, 10, color, 'start', 'bold')
+  const rightA = _t(x2 - arrowSize - 6, y + 4, label, 10, color, 'end', 'bold')
   return leftL + centerDash + rightL + leftA + rightA
+}
+
+/**
+ * BS EN ISO 128 竖向剖面切割线符号（沿 Y 方向贯穿机房）
+ * 两端 L 形粗线 + 箭头（等边三角形）+ 中间细虚线 + 字母标注
+ * @param {number} x - 切割线 X 坐标
+ * @param {number} y1 - 切割线起点 Y
+ * @param {number} y2 - 切割线终点 Y
+ * @param {string} label - 标注字母，默认 'A'
+ * @param {string} color - 颜色，默认 #555
+ */
+export function _sectionLineV(x, y1, y2, label = 'A', color = '#555') {
+  const arrowSize = 8, lLen = 12
+  // 上端 L 形 + 向右箭头
+  const topTick = _l(x - lLen, y1, x + lLen, y1, color, 3) +
+    _l(x, y1 - arrowSize, x + arrowSize, y1, color, 2) +
+    _l(x, y1 + arrowSize, x + arrowSize, y1, color, 2)
+  // 下端 L 形 + 向右箭头
+  const botTick = _l(x - lLen, y2, x + lLen, y2, color, 3) +
+    _l(x, y2 - arrowSize, x + arrowSize, y2, color, 2) +
+    _l(x, y2 + arrowSize, x + arrowSize, y2, color, 2)
+  // 中间细虚线
+  const dash = _l(x, y1 + arrowSize, x, y2 - arrowSize, color, 1, '8,3,2,3')
+  // 字母 A（两端各一个）
+  const topA = _t(x + arrowSize + 6, y1 + 4, label, 10, color, 'start', 'bold')
+  const botA = _t(x + arrowSize + 6, y2 + 4, label, 10, color, 'start', 'bold')
+  return topTick + botTick + dash + topA + botA
 }

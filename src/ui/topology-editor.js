@@ -6,24 +6,24 @@
 import {
   generateDefaultTopology, cloneTopology,
   addDevice, removeDevice, moveDevice, moveDeviceToRoom,
-  addEdge, removeEdge,
-  FIXED_NODES,
+  addPipe, removePipe,
+  ROOMS,
 } from '../agents/topology.js'
 
 // ── 模块状态 ─────────────────────────────────────────────────────────
 let _topology     = null
 let _svgEl        = null
-let _selected     = null    // device id 或 edge id
+let _selected     = null    // node id, device id, 或 pipe id
 let _connectMode  = false
 let _connectFrom  = null
-let _dragging     = null    // { deviceId, offsetX, offsetY }
+let _dragging     = null    // { nodeId, offsetX, offsetY }
 let _ghostLine    = null    // SVG line element for connect preview
 let _onConfirm    = () => {}
 
 // 画布 viewBox 尺寸
 const VW = 800, VH = 400
 
-// ── 节点尺寸 ─────────────────────────────────────────────────────────
+// ── 节点形状尺寸 ─────────────────────────────────────────────────────────
 const NODE_SHAPES = {
   pump:       { w: 52, h: 34 },
   check_valve:{ r: 14 },        // 菱形半径
@@ -32,10 +32,6 @@ const NODE_SHAPES = {
   discharge:  { r: 18 },
   junction:   { r: 10 },        // 汇流点小圆
   flowmeter:  { r: 18 },        // 电磁流量计圆
-}
-
-function nodeCenter(node) {
-  return { x: node.editorX, y: node.editorY }
 }
 
 function nodeHalfSize(node) {
@@ -66,7 +62,7 @@ export function initTopologyEditor(containerId, onConfirmCallback) {
       <button class="topo-btn" data-action="add-cv">＋ 止回阀</button>
       <button class="topo-btn" data-action="add-gv">＋ 电动闸阀</button>
       <button class="topo-btn" data-action="add-fm">＋ 电磁流量计</button>
-      <button class="topo-btn" data-action="add-junc">＋ 汇流节点</button>
+      <button class="topo-btn" data-action="add-node">＋ 节点</button>
       <button class="topo-btn danger" data-action="delete-selected">删除选中</button>
       <button class="topo-btn" id="btn-connect-mode" data-action="toggle-connect">连线模式</button>
       <button class="topo-btn" data-action="reset">↺ 重置</button>
@@ -118,22 +114,62 @@ function _bindToolbar() {
     if (action === 'add-cv')       { _topology = addDevice(_topology, 'check_valve', 'pump_room'); _render() }
     if (action === 'add-gv')       { _topology = addDevice(_topology, 'gate_valve', 'pump_room'); _render() }
     if (action === 'add-fm')       { _topology = addDevice(_topology, 'flowmeter', 'pump_room'); _render() }
-    if (action === 'add-junc')     { _topology = addDevice(_topology, 'junction', 'pump_room'); _render() }
+    if (action === 'add-node')     { _topology = _addJunctionNode(_topology); _render() }
     if (action === 'delete-selected') _deleteSelected()
     if (action === 'toggle-connect')  _toggleConnectMode()
     if (action === 'reset') {
-      const N = _topology.devices.filter(d => d.type === 'pump' && !d.isSpare).length || 3
+      const N = _topology.devices.filter(d => d.type === 'pump' && !d.isSpare).length || 2
       setTopologyFromN(N)
     }
   })
 }
 
+// 添加独立节点（汇流节点等）
+function _addJunctionNode(topology) {
+  const room = topology.rooms.find(r => r.id === 'pump_room')
+  const existingNodes = topology.nodes
+  const offsetX = (existingNodes.length % 5) * 50
+  const offsetY = Math.floor(existingNodes.length / 5) * 60
+  const nodeId = `node_${Date.now()}`
+  const newNode = {
+    id: nodeId,
+    label: '汇',
+    canvasX: room.canvasX + 200 + offsetX,
+    canvasY: room.canvasY + 100 + offsetY,
+  }
+  return { ...topology, nodes: [...topology.nodes, newNode] }
+}
+
 function _deleteSelected() {
   if (!_selected) return
-  // 判断是 edge 还是 device
-  if (_topology.edges.find(e => e.id === _selected)) {
-    _topology = removeEdge(_topology, _selected)
-  } else if (_topology.devices.find(d => d.id === _selected)) {
+  // pipe
+  if (_topology.pipes.find(p => p.id === _selected)) {
+    _topology = removePipe(_topology, _selected)
+  }
+  // node
+  else if (_topology.nodes.find(n => n.id === _selected)) {
+    // 删除节点时同时删除关联的 pipes
+    const pipesToRemove = _topology.pipes.filter(p => p.node1 === _selected || p.node2 === _selected)
+    let t = _topology
+    for (const p of pipesToRemove) {
+      t = removePipe(t, p.id)
+    }
+    t = { ...t, nodes: t.nodes.filter(n => n.id !== _selected) }
+    // 同时删除以该节点关联的设备（如果有）
+    const deviceWithNode = t.devices.find(d => d.nodeIds && d.nodeIds.includes(_selected))
+    if (deviceWithNode) {
+      const newNodeIds = deviceWithNode.nodeIds.filter(id => id !== _selected)
+      t = {
+        ...t,
+        devices: t.devices.map(d =>
+          d.id === deviceWithNode.id ? { ...d, nodeIds: newNodeIds } : d
+        ),
+      }
+    }
+    _topology = t
+  }
+  // device
+  else if (_topology.devices.find(d => d.id === _selected)) {
     _topology = removeDevice(_topology, _selected)
   }
   _selected = null
@@ -170,40 +206,69 @@ function _bindSvgEvents() {
 function _onMouseDown(e) {
   const pt = svgPoint(e)
 
-  // 连线模式：点击节点
+  // 连线模式：点击设备（使用设备的第一个 nodeId）
   if (_connectMode) {
-    const nodeId = _hitTestNode(pt.x, pt.y)
-    if (nodeId) {
-      if (!_connectFrom) {
-        _connectFrom = nodeId
-      } else if (_connectFrom !== nodeId) {
-        _topology = addEdge(_topology, _connectFrom, nodeId)
-        _connectFrom = null
-        _ghostLine   = null
-        _toggleConnectMode()
+    const deviceId = _hitTestDevice(pt.x, pt.y)
+    if (deviceId) {
+      const device = _topology.devices.find(d => d.id === deviceId)
+      if (device && device.nodeIds && device.nodeIds.length > 0) {
+        const nodeId = device.nodeIds[0]  // 使用设备的第一个节点
+        if (!_connectFrom) {
+          _connectFrom = nodeId
+        } else if (_connectFrom !== nodeId) {
+          _topology = addPipe(_topology, _connectFrom, nodeId)
+          _connectFrom = null
+          _ghostLine   = null
+          _toggleConnectMode()
+        }
       }
     }
     return
   }
 
-  // 普通模式：选中 device 或 edge
-  const deviceId = _hitTestNode(pt.x, pt.y)
+  // 普通模式：选中 device、labeled node 或 pipe
+  const deviceId = _hitTestDevice(pt.x, pt.y)
   if (deviceId) {
-    const device = _allNodes().find(n => n.id === deviceId)
-    if (device && !device.fixed) {
+    const device = _topology.devices.find(d => d.id === deviceId)
+    if (device) {
       _selected = deviceId
-      _dragging = { deviceId, offsetX: pt.x - device.editorX, offsetY: pt.y - device.editorY }
+      // 记录拖拽起始状态和所有节点的偏移量
+      const nodeOffsets = (device.nodeIds || []).map(nid => {
+        const node = _topology.nodes.find(n => n.id === nid)
+        return { nodeId: nid, ox: node.canvasX, oy: node.canvasY }
+      })
+      _dragging = {
+        deviceId,
+        offsetX: pt.x - device.canvasX,
+        offsetY: pt.y - device.canvasY,
+        originX: device.canvasX,
+        originY: device.canvasY,
+        nodeOffsets,
+      }
       _render()
     }
     return
   }
-  const edgeId = _hitTestEdge(pt.x, pt.y)
-  if (edgeId) {
-    _selected = edgeId
+
+  const nodeId = _hitTestNode(pt.x, pt.y)
+  if (nodeId) {
+    const node = _topology.nodes.find(n => n.id === nodeId)
+    if (node && node.label) {
+      _selected = nodeId
+      _dragging = { nodeId, offsetX: pt.x - node.canvasX, offsetY: pt.y - node.canvasY }
+      _render()
+    }
+    return
+  }
+
+  const pipeId = _hitTestPipe(pt.x, pt.y)
+  if (pipeId) {
+    _selected = pipeId
     _dragging = null
     _render()
     return
   }
+
   // 点击空白：取消选中
   _selected = null
   _dragging = null
@@ -216,17 +281,17 @@ function _onMouseMove(e) {
   // 连线预览
   if (_connectMode && _connectFrom) {
     const ghost = _svgEl.getElementById('ghost-line')
-    const from = _allNodes().find(n => n.id === _connectFrom)
-    if (from) {
+    const fromNode = _allNodes().find(n => n.id === _connectFrom)
+    if (fromNode) {
       if (ghost) {
-        ghost.setAttribute('x1', from.editorX)
-        ghost.setAttribute('y1', from.editorY)
+        ghost.setAttribute('x1', fromNode.canvasX)
+        ghost.setAttribute('y1', fromNode.canvasY)
         ghost.setAttribute('x2', pt.x)
         ghost.setAttribute('y2', pt.y)
       } else {
         const line = _makeSvgEl('line', {
           id: 'ghost-line',
-          x1: from.editorX, y1: from.editorY, x2: pt.x, y2: pt.y,
+          x1: fromNode.canvasX, y1: fromNode.canvasY, x2: pt.x, y2: pt.y,
           stroke: '#3498db', 'stroke-width': 1.5, 'stroke-dasharray': '5,3',
           'marker-end': 'url(#arrow-ghost)',
         })
@@ -236,69 +301,157 @@ function _onMouseMove(e) {
     return
   }
 
-  // 拖拽：只更新被拖节点的位移（轻量，不全量重渲）
-  if (_dragging) {
-    const { deviceId, offsetX, offsetY } = _dragging
+  // 拖拽设备：只更新视觉 transform，不动数据
+  if (_dragging && _dragging.deviceId) {
+    const { deviceId, offsetX, offsetY, originX, originY, nodeOffsets } = _dragging
     let nx = pt.x - offsetX
     let ny = pt.y - offsetY
-    // 限制在画布内
     nx = Math.max(10, Math.min(VW - 10, nx))
     ny = Math.max(10, Math.min(VH - 10, ny))
-    // 找到对应 <g> 元素直接移动
+
+    const dx = nx - originX
+    const dy = ny - originY
+
+    // 设备 transform
     const g = _svgEl.querySelector(`[data-device-id="${deviceId}"]`)
     if (g) {
-      // 更新 data 属性以便 mouseup 时读取
-      g.dataset.liveX = nx
-      g.dataset.liveY = ny
-      g.setAttribute('transform', `translate(${nx - _topology.devices.find(d => d.id === deviceId).editorX}, ${ny - _topology.devices.find(d => d.id === deviceId).editorY})`)
-      // 同步更新 edge 位置
-      _updateEdgePositions(deviceId, nx, ny)
+      g.setAttribute('transform', `translate(${dx},${dy})`)
     }
+
+    // 更新关联的 pipes
+    if (nodeOffsets) {
+      for (const { nodeId, ox, oy } of nodeOffsets) {
+        _updatePipePositions(nodeId, ox + dx, oy + dy)
+      }
+    }
+  }
+
+  // 拖拽节点（包括汇流节点）：只更新视觉 transform
+  if (_dragging && _dragging.nodeId) {
+    const { nodeId, offsetX, offsetY, originX, originY } = _dragging
+    let nx = pt.x - offsetX
+    let ny = pt.y - offsetY
+    nx = Math.max(10, Math.min(VW - 10, nx))
+    ny = Math.max(10, Math.min(VH - 10, ny))
+
+    const dx = nx - originX
+    const dy = ny - originY
+
+    // 节点 transform
+    const g = _svgEl.querySelector(`[data-device-id="${nodeId}"]`)
+    if (g) {
+      g.setAttribute('transform', `translate(${dx},${dy})`)
+    }
+
+    // 更新关联的 pipes
+    _updatePipePositions(nodeId, nx, ny)
   }
 }
 
 function _onMouseUp(e) {
-  if (_dragging) {
-    const { deviceId } = _dragging
+  if (_dragging && _dragging.deviceId) {
+    const { deviceId, originX, originY, nodeOffsets } = _dragging
     const g = _svgEl.querySelector(`[data-device-id="${deviceId}"]`)
-    let nx = parseFloat(g?.dataset.liveX)
-    let ny = parseFloat(g?.dataset.liveY)
-    if (!isNaN(nx) && !isNaN(ny)) {
-      // 检测落入哪个房间
-      const newRoom = _detectRoom(nx, ny)
-      _topology = moveDevice(_topology, deviceId, nx, ny)
-      if (newRoom) _topology = moveDeviceToRoom(_topology, deviceId, newRoom)
+    if (g) {
+      const transform = g.getAttribute('transform')
+      const match = transform?.match(/translate\(([^,]+),([^)]+)\)/)
+      if (match) {
+        const dx = parseFloat(match[1])
+        const dy = parseFloat(match[2])
+        const nx = originX + dx
+        const ny = originY + dy
+        _topology = {
+          ..._topology,
+          devices: _topology.devices.map(d =>
+            d.id === deviceId ? { ...d, canvasX: nx, canvasY: ny } : d
+          ),
+          nodes: _topology.nodes.map(n => {
+            const off = nodeOffsets?.find(o => o.nodeId === n.id)
+            if (off) {
+              return { ...n, canvasX: off.ox + dx, canvasY: off.oy + dy }
+            }
+            return n
+          }),
+        }
+      }
     }
-    _dragging = null
-    _render()
   }
+  if (_dragging && _dragging.nodeId) {
+    const { nodeId, originX, originY } = _dragging
+    const g = _svgEl.querySelector(`[data-device-id="${nodeId}"]`)
+    if (g) {
+      const transform = g.getAttribute('transform')
+      const match = transform?.match(/translate\(([^,]+),([^)]+)\)/)
+      if (match) {
+        const dx = parseFloat(match[1])
+        const dy = parseFloat(match[2])
+        _topology = {
+          ..._topology,
+          nodes: _topology.nodes.map(n =>
+            n.id === nodeId ? { ...n, canvasX: originX + dx, canvasY: originY + dy } : n
+          ),
+        }
+      }
+    }
+  }
+  _dragging = null
+  _render()
 }
 
 // ── 碰撞检测 ──────────────────────────────────────────────────────────
 function _allNodes() {
-  return [...FIXED_NODES, ...(_topology ? _topology.devices : [])]
+  return _topology ? _topology.nodes : []
+}
+
+function _allDevices() {
+  return _topology ? _topology.devices : []
+}
+
+function _hitTestDevice(x, y) {
+  const devices = _allDevices()
+  for (const d of devices) {
+    if (d.type === 'pump') {
+      const hw = 26, hh = 17
+      if (Math.abs(x - d.canvasX) <= hw + 4 && Math.abs(y - d.canvasY) <= hh + 4) {
+        return d.id
+      }
+    } else if (d.type === 'check_valve' || d.type === 'gate_valve') {
+      const r = NODE_SHAPES[d.type]?.r || 14
+      if (Math.abs(x - d.canvasX) <= r + 4 && Math.abs(y - d.canvasY) <= r + 4) {
+        return d.id
+      }
+    } else if (d.type === 'flowmeter' || d.type === 'junction') {
+      const r = NODE_SHAPES[d.type]?.r || 10
+      const dist = Math.hypot(x - d.canvasX, y - d.canvasY)
+      if (dist <= r + 4) {
+        return d.id
+      }
+    }
+  }
+  return null
 }
 
 function _hitTestNode(x, y) {
-  const nodes = _allNodes()
+  // 只检测有标签的节点
+  const nodes = _allNodes().filter(n => n.label)
   for (const n of nodes) {
-    const { hw, hh } = nodeHalfSize(n)
-    if (Math.abs(x - n.editorX) <= hw + 4 && Math.abs(y - n.editorY) <= hh + 4) {
+    const r = 10
+    if (Math.abs(x - n.canvasX) <= r + 4 && Math.abs(y - n.canvasY) <= r + 4) {
       return n.id
     }
   }
   return null
 }
 
-function _hitTestEdge(x, y, thresh = 6) {
+function _hitTestPipe(x, y, thresh = 6) {
   if (!_topology) return null
   const nodes = _allNodes()
-  for (const edge of _topology.edges) {
-    const from = nodes.find(n => n.id === edge.fromId)
-    const to   = nodes.find(n => n.id === edge.toId)
+  for (const pipe of _topology.pipes) {
+    const from = nodes.find(n => n.id === pipe.node1)
+    const to   = nodes.find(n => n.id === pipe.node2)
     if (!from || !to) continue
-    if (_pointToSegDist(x, y, from.editorX, from.editorY, to.editorX, to.editorY) < thresh) {
-      return edge.id
+    if (_pointToSegDist(x, y, from.canvasX, from.canvasY, to.canvasX, to.canvasY) < thresh) {
+      return pipe.id
     }
   }
   return null
@@ -313,27 +466,27 @@ function _pointToSegDist(px, py, x1, y1, x2, y2) {
 }
 
 function _detectRoom(x, y) {
+  if (!_topology) return null
   for (const room of _topology.rooms) {
-    if (x >= room.editorX && x <= room.editorX + room.editorW &&
-        y >= room.editorY && y <= room.editorY + room.editorH) {
+    if (x >= room.canvasX && x <= room.canvasX + room.editorW &&
+        y >= room.canvasY && y <= room.canvasY + room.editorH) {
       return room.id
     }
   }
   return null
 }
 
-// ── 边位置更新（拖拽中轻量更新）────────────────────────────────────────
-function _updateEdgePositions(deviceId, nx, ny) {
+// ── Pipe 位置更新（拖拽中轻量更新）────────────────────────────────────────
+function _updatePipePositions(nodeId, nx, ny) {
   if (!_topology) return
-  for (const edge of _topology.edges) {
-    let line
-    if (edge.fromId === deviceId) {
-      line = _svgEl.querySelector(`[data-edge-id="${edge.id}"]`)
-      if (line) { line.setAttribute('x1', nx); line.setAttribute('y1', ny) }
+  for (const pipe of _topology.pipes) {
+    const line = _svgEl.querySelector(`[data-pipe-id="${pipe.id}"]`)
+    if (!line) continue
+    if (pipe.node1 === nodeId) {
+      line.setAttribute('x1', nx); line.setAttribute('y1', ny)
     }
-    if (edge.toId === deviceId) {
-      line = _svgEl.querySelector(`[data-edge-id="${edge.id}"]`)
-      if (line) { line.setAttribute('x2', nx); line.setAttribute('y2', ny) }
+    if (pipe.node2 === nodeId) {
+      line.setAttribute('x2', nx); line.setAttribute('y2', ny)
     }
   }
 }
@@ -352,43 +505,49 @@ function _render() {
     _svgEl.appendChild(_makeRoom(room))
   }
 
-  // 2. 边
+  // 2. Pipes（线）- 直接从设备边缘的节点位置画出
   const allNodes = _allNodes()
-  for (const edge of _topology.edges) {
-    const from = allNodes.find(n => n.id === edge.fromId)
-    const to   = allNodes.find(n => n.id === edge.toId)
+  for (const pipe of _topology.pipes) {
+    const from = allNodes.find(n => n.id === pipe.node1)
+    const to   = allNodes.find(n => n.id === pipe.node2)
     if (!from || !to) continue
-    const isSel = _selected === edge.id
+    const isSel = _selected === pipe.id
     const line = _makeSvgEl('line', {
-      'data-edge-id': edge.id,
-      x1: from.editorX, y1: from.editorY,
-      x2: to.editorX,   y2: to.editorY,
+      'data-pipe-id': pipe.id,
+      x1: from.canvasX, y1: from.canvasY,
+      x2: to.canvasX,   y2: to.canvasY,
       stroke: isSel ? '#e74c3c' : '#95a5a6',
       'stroke-width': isSel ? 2.5 : 1.5,
-      'marker-end': `url(#${isSel ? 'arrow-sel' : 'arrow'})`,
       style: 'cursor:pointer',
     })
     _svgEl.appendChild(line)
   }
 
-  // 3. 固定节点
-  for (const node of FIXED_NODES) {
-    _svgEl.appendChild(_makeNode(node))
+  // 3. 有标签的节点（进水、出水、汇）显示小圆点
+  for (const node of _topology.nodes) {
+    if (node.label) {
+      _svgEl.appendChild(_makeNode(node))
+    }
   }
 
-  // 4. 设备节点
+  // 4. 设备（形状）- 拖拽时用 transform 跟随
   for (const device of _topology.devices) {
-    _svgEl.appendChild(_makeNode(device))
+    const g = _makeDevice(device)
+    // 如果设备正在被拖拽，用 liveX/liveY 计算 transform
+    if (_dragging && _dragging.deviceId === device.id && _dragging.liveX !== undefined) {
+      const dx = _dragging.liveX - device.canvasX
+      const dy = _dragging.liveY - device.canvasY
+      g.setAttribute('transform', `translate(${dx},${dy})`)
+    }
+    _svgEl.appendChild(g)
   }
-
-  // 5. 连线预览残留清理（会被重渲覆盖）
 }
 
 function _makeRoom(room) {
   const g = _makeSvgEl('g', {})
   const isWetWell = room.id === 'wet_well'
   const rect = _makeSvgEl('rect', {
-    x: room.editorX, y: room.editorY, width: room.editorW, height: room.editorH,
+    x: room.canvasX, y: room.canvasY, width: room.editorW, height: room.editorH,
     fill: isWetWell ? '#d6eaf8' : '#eaf2fb',
     stroke: isWetWell ? '#2471a3' : '#2c3e50',
     'stroke-width': 1.5,
@@ -396,8 +555,8 @@ function _makeRoom(room) {
     rx: 4,
   })
   const label = _makeSvgEl('text', {
-    x: room.editorX + 8,
-    y: room.editorY + 20,
+    x: room.canvasX + 8,
+    y: room.canvasY + 20,
     'font-size': 14,
     fill: isWetWell ? '#2471a3' : '#2c3e50',
     'font-weight': 'bold',
@@ -409,82 +568,111 @@ function _makeRoom(room) {
   return g
 }
 
+// 渲染节点（小圆/连接点）
 function _makeNode(node) {
+  // 推断 type
+  const type = node.type ||
+    (node.label === '进水' ? 'source' :
+     node.label === '出水' ? 'discharge' :
+     node.label === '汇' ? 'junction' : 'junction')
+
   const g = _makeSvgEl('g', {
     'data-device-id': node.id,
-    style: node.fixed ? 'cursor:default' : 'cursor:move',
+    style: 'cursor:move',
   })
   const isSel = _selected === node.id
-  const selStroke = isSel ? '#2980b9' : null
 
-  if (node.type === 'pump') {
+  if (type === 'source' || type === 'discharge') {
+    const r = NODE_SHAPES[type].r
+    g.appendChild(_makeSvgEl('circle', {
+      cx: node.canvasX, cy: node.canvasY, r,
+      fill: '#117a65', stroke: '#0e6655', 'stroke-width': 1.5,
+    }))
+    g.appendChild(_makeLabel(node.canvasX, node.canvasY + 5, node.label, '#fff', 11))
+  } else {
+    // junction 或其他节点
+    const r = NODE_SHAPES.junction.r
+    g.appendChild(_makeSvgEl('circle', {
+      cx: node.canvasX, cy: node.canvasY, r,
+      fill: isSel ? '#2980b9' : '#2c3e50', stroke: '#1a252f', 'stroke-width': 1.5,
+    }))
+    if (node.label) {
+      g.appendChild(_makeLabel(node.canvasX, node.canvasY + r + 13, node.label, '#555', 11))
+    }
+  }
+
+  return g
+}
+
+// 渲染设备（形状）
+function _makeDevice(device) {
+  const g = _makeSvgEl('g', {
+    'data-device-id': device.id,
+    style: 'cursor:move',
+  })
+  const isSel = _selected === device.id
+
+  if (device.type === 'pump') {
     const sh = NODE_SHAPES.pump
-    const fill = node.isSpare ? '#7f8c8d' : '#2471a3'
-    const stroke = node.isSpare ? '#566573' : '#1a5276'
+    const fill = device.isSpare ? '#7f8c8d' : '#2471a3'
+    const stroke = device.isSpare ? '#566573' : '#1a5276'
     g.appendChild(_makeSvgEl('rect', {
-      x: node.editorX - sh.w / 2, y: node.editorY - sh.h / 2,
+      x: device.canvasX - sh.w / 2, y: device.canvasY - sh.h / 2,
       width: sh.w, height: sh.h,
       fill, stroke, 'stroke-width': isSel ? 2.5 : 1.5,
       rx: 3,
     }))
     if (isSel) {
       g.appendChild(_makeSvgEl('rect', {
-        x: node.editorX - sh.w / 2 - 3, y: node.editorY - sh.h / 2 - 3,
+        x: device.canvasX - sh.w / 2 - 3, y: device.canvasY - sh.h / 2 - 3,
         width: sh.w + 6, height: sh.h + 6,
-        fill: 'none', stroke: selStroke, 'stroke-width': 2,
+        fill: 'none', stroke: '#2980b9', 'stroke-width': 2,
         'stroke-dasharray': '3,2', rx: 5,
       }))
     }
-    g.appendChild(_makeLabel(node.editorX, node.editorY + 5, node.label, '#fff', 12))
+    g.appendChild(_makeLabel(device.canvasX, device.canvasY + 5, device.label, '#fff', 12))
   }
 
-  else if (node.type === 'check_valve') {
+  else if (device.type === 'check_valve') {
     const r = NODE_SHAPES.check_valve.r
-    const pts = `${node.editorX},${node.editorY - r} ${node.editorX + r},${node.editorY} ${node.editorX},${node.editorY + r} ${node.editorX - r},${node.editorY}`
+    const pts = `${device.canvasX},${device.canvasY - r} ${device.canvasX + r},${device.canvasY} ${device.canvasX},${device.canvasY + r} ${device.canvasX - r},${device.canvasY}`
     g.appendChild(_makeSvgEl('polygon', {
       points: pts, fill: '#e74c3c', stroke: '#c0392b',
       'stroke-width': isSel ? 2.5 : 1,
     }))
-    g.appendChild(_makeLabel(node.editorX, node.editorY + r + 13, node.label, '#555', 11))
+    g.appendChild(_makeLabel(device.canvasX, device.canvasY + r + 13, device.label, '#555', 11))
   }
 
-  else if (node.type === 'gate_valve') {
+  else if (device.type === 'gate_valve') {
     const s = NODE_SHAPES.gate_valve.s
     g.appendChild(_makeSvgEl('rect', {
-      x: node.editorX - s / 2, y: node.editorY - s / 2,
+      x: device.canvasX - s / 2, y: device.canvasY - s / 2,
       width: s, height: s,
       fill: '#e74c3c', stroke: '#c0392b',
       'stroke-width': isSel ? 2.5 : 1,
     }))
-    g.appendChild(_makeLabel(node.editorX, node.editorY + s / 2 + 13, node.label, '#555', 11))
+    g.appendChild(_makeLabel(device.canvasX, device.canvasY + s / 2 + 13, device.label, '#555', 11))
   }
 
-  else if (node.type === 'junction') {
-    const r = NODE_SHAPES.junction.r
-    g.appendChild(_makeSvgEl('circle', {
-      cx: node.editorX, cy: node.editorY, r,
-      fill: isSel ? '#2980b9' : '#2c3e50', stroke: '#1a252f', 'stroke-width': 1.5,
-    }))
-  }
-
-  else if (node.type === 'flowmeter') {
+  else if (device.type === 'flowmeter') {
     const r = NODE_SHAPES.flowmeter.r
     g.appendChild(_makeSvgEl('circle', {
-      cx: node.editorX, cy: node.editorY, r,
+      cx: device.canvasX, cy: device.canvasY, r,
       fill: '#8e44ad', stroke: '#6c3483',
       'stroke-width': isSel ? 2.5 : 1.5,
     }))
-    g.appendChild(_makeLabel(node.editorX, node.editorY + 5, 'FM', '#fff', 11))
-    g.appendChild(_makeLabel(node.editorX, node.editorY + r + 13, node.label, '#555', 11))
+    g.appendChild(_makeLabel(device.canvasX, device.canvasY + 5, 'FM', '#fff', 11))
+    g.appendChild(_makeLabel(device.canvasX, device.canvasY + r + 13, device.label, '#555', 11))
   }
 
-  else if (node.type === 'source' || node.type === 'discharge') {
-    const r = NODE_SHAPES.source.r
+  else if (device.type === 'junction') {
+    const r = NODE_SHAPES.junction.r
     g.appendChild(_makeSvgEl('circle', {
-      cx: node.editorX, cy: node.editorY, r,
-      fill: '#117a65', stroke: '#0e6655', 'stroke-width': 1.5,
+      cx: device.canvasX, cy: device.canvasY, r,
+      fill: '#f39c12', stroke: '#d68910',
+      'stroke-width': isSel ? 2.5 : 1.5,
     }))
-    g.appendChild(_makeLabel(node.editorX, node.editorY + 5, node.label, '#fff', 11))
+    g.appendChild(_makeLabel(device.canvasX, device.canvasY + r + 13, device.label, '#555', 11))
   }
 
   return g
