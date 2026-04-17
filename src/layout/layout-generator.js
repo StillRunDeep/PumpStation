@@ -89,53 +89,154 @@ class Grid {
   }
 }
 
-const weightMapCache = new Map();
+const ADJACENCY_PAIRS = ADJACENCY_MUST.map(item => item.pair);
 
-function createWeightMap(gridW, gridH) {
-  const cacheKey = `${gridW}x${gridH}`;
-  if (weightMapCache.has(cacheKey)) return weightMapCache.get(cacheKey);
+/**
+ * Generates a weight map for a specific room based on its constraints.
+ */
+export function generateWeightMapForRoom(grid, room, placedSeeds) {
+  const { width, height } = grid;
+  const weightMap = Array(height).fill(null).map(() => Array(width).fill(1));
+  const roomDef = ROOM_DEFS[room.id];
 
-  const weightMap = Array(gridH).fill(null).map(() => Array(gridW).fill(1));
-  for (let y = 0; y < gridH; y++) {
-    for (let x = 0; x < gridW; x++) {
-      if (x < 2 || x > gridW - 3 || y < 2 || y > gridH - 3) {
-        weightMap[y][x] = 0.5;
+  // Rule 1: Exterior wall constraint
+  if (roomDef.constraints.includes('ext_access')) {
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        // 500mm is 1 grid cell. Non-south walls.
+        if (x === 0 || y === 0 || x === width - 1) {
+          weightMap[y][x] = 10;
+        }
       }
     }
   }
-  weightMapCache.set(cacheKey, weightMap);
+
+  // Rule 2: Adjacency constraint
+  for (const pair of ADJACENCY_PAIRS) {
+    let partnerId = null;
+    if (pair[0] === room.id) partnerId = pair[1];
+    if (pair[1] === room.id) partnerId = pair[0];
+
+    if (partnerId && placedSeeds[partnerId]) {
+      const partnerSeed = placedSeeds[partnerId];
+      // 1500mm is 3 grid cells.
+      for (let dy = -3; dy <= 3; dy++) {
+        for (let dx = -3; dx <= 3; dx++) {
+          const nx = partnerSeed.x + dx;
+          const ny = partnerSeed.y + dy;
+          if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+            weightMap[ny][nx] *= 50;
+          }
+        }
+      }
+    }
+  }
+
   return weightMap;
 }
 
-function placeRoomSeeds(grid, rooms, rng) {
-    const weightMap = createWeightMap(grid.width, grid.height);
-    const placedSeeds = {};
 
-    for (const room of rooms) {
+function placeRoomSeeds(grid, rooms, rng) {
+  const placedSeeds = {};
+  let roomsToPlace = [...rooms];
+  const MAX_PLACEMENT_ROUNDS = rooms.length * 2;
+  let rounds = 0;
+
+  while (roomsToPlace.length > 0 && rounds < MAX_PLACEMENT_ROUNDS) {
+    let placedInRound = false;
+    const remainingRooms = [];
+
+    for (const room of roomsToPlace) {
+      // Check if all MUST neighbors are already placed
+      const mustNeighbors = ADJACENCY_PAIRS
+        .filter(p => p.includes(room.id))
+        .map(p => p[0] === room.id ? p[1] : p[0]);
+
+      const neighborsPlaced = mustNeighbors.every(id => placedSeeds[id]);
+
+      if (neighborsPlaced) {
+        const weightMap = generateWeightMapForRoom(grid, room, placedSeeds);
+
         let bestPos = null;
         let maxWeight = -1;
 
-        for (let i = 0; i < 100; i++) {
-            const x = Math.floor(rng() * grid.width);
-            const y = Math.floor(rng() * grid.height);
+        // Find the best position based on the generated weight map
+        for (let i = 0; i < 200; i++) { // Increase attempts for better coverage
+          const x = Math.floor(rng() * grid.width);
+          const y = Math.floor(rng() * grid.height);
 
-            if (grid.getCell(x, y) === 0) {
-                const weight = weightMap[y][x];
-                if (weight > maxWeight) {
-                    maxWeight = weight;
-                    bestPos = { x, y };
+          if (grid.getCell(x, y) === 0) {
+            const weight = weightMap[y][x];
+            if (weight > maxWeight) {
+              maxWeight = weight;
+              bestPos = { x, y };
+            }
+          }
+        }
+
+        // If no position found in random attempts, scan the grid
+        if (!bestPos) {
+            for (let y = 0; y < grid.height; y++) {
+                for (let x = 0; x < grid.width; x++) {
+                    if (grid.getCell(x, y) === 0) {
+                        const weight = weightMap[y][x];
+                        if (weight > maxWeight) {
+                            maxWeight = weight;
+                            bestPos = { x, y };
+                        }
+                    }
                 }
             }
         }
 
         if (bestPos) {
-            grid.addRoomCell(room.id, bestPos.x, bestPos.y);
-            placedSeeds[room.id] = bestPos;
+          grid.addRoomCell(room.id, bestPos.x, bestPos.y);
+          placedSeeds[room.id] = bestPos;
+          placedInRound = true;
         } else {
-            console.warn(`Could not find a placement seed for room ${room.id}`);
+          console.warn(`Could not find a placement seed for room ${room.id}`);
+          remainingRooms.push(room); // Keep it for the next round
+        }
+      } else {
+        remainingRooms.push(room);
+      }
+    }
+
+    // If no room was placed in a full pass, there might be a circular dependency or no space.
+    // To handle circular deps, we relax the constraint and place one room to break the cycle.
+    if (!placedInRound && remainingRooms.length > 0) {
+        console.warn("Deadlock in seed placement, placing one room randomly to break.", remainingRooms.map(r=>r.id));
+        const roomToForcePlace = remainingRooms[0];
+        const weightMap = generateWeightMapForRoom(grid, roomToForcePlace, placedSeeds);
+        let bestPos = null;
+        let maxWeight = -1;
+         for (let y = 0; y < grid.height; y++) {
+            for (let x = 0; x < grid.width; x++) {
+                if (grid.getCell(x, y) === 0) {
+                    const weight = weightMap[y][x];
+                    if (weight > maxWeight) {
+                        maxWeight = weight;
+                        bestPos = { x, y };
+                    }
+                }
+            }
+        }
+        if (bestPos) {
+            grid.addRoomCell(roomToForcePlace.id, bestPos.x, bestPos.y);
+            placedSeeds[roomToForcePlace.id] = bestPos;
+            remainingRooms.shift(); // remove the forced-placed room
         }
     }
-    return placedSeeds;
+
+    roomsToPlace = remainingRooms;
+    rounds++;
+  }
+
+  if (roomsToPlace.length > 0) {
+      console.error("Failed to place all room seeds:", roomsToPlace.map(r => r.id));
+  }
+
+  return placedSeeds;
 }
 
 /**
@@ -397,7 +498,7 @@ function getConnectedEmptyRegions(grid) {
 
   for (let y = 0; y < grid.height; y++) {
     for (let x = 0; x < grid.width; x++) {
-      if (grid.getCell(x, y) === 0 && regionIdGrid[y][x] === -1) {
+      if (!grid.getCell(x, y) && regionIdGrid[y][x] === -1) {
         const regionId = regions.length;
         const regionCells = [];
         const queue = [x, y];
@@ -412,7 +513,7 @@ function getConnectedEmptyRegions(grid) {
           for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
             const nx = cx + dx, ny = cy + dy;
             if (nx >= 0 && nx < grid.width && ny >= 0 && ny < grid.height) {
-              if (grid.getCell(nx, ny) === 0 && regionIdGrid[ny][nx] === -1) {
+              if (!grid.getCell(nx, ny) && regionIdGrid[ny][nx] === -1) {
                 regionIdGrid[ny][nx] = regionId;
                 queue.push(nx, ny);
               }
@@ -460,7 +561,7 @@ function getRegionBoundarySequence(grid, regionIdGrid, regionId) {
       return ny === grid.height ? -1 : 'EXTERIOR'; // South wall is not 'EXTERIOR' for access
     }
     const val = grid.getCell(nx, ny);
-    return val === 0 ? null : val; // null if it's another empty cell (shouldn't happen on boundary)
+    return !val ? null : val; // null if it's another empty cell (0, null, undef)
   }
 
   // Find the first external edge (North edge of top-left cell is guaranteed to be an edge)
@@ -482,14 +583,22 @@ function getRegionBoundarySequence(grid, regionIdGrid, regionId) {
     // Try to turn "right" (clockwise)
     const rightDir = (curDir + 1) % 4;
     const rx = curX + dx[rightDir], ry = curY + dy[rightDir];
-    
+
     if (cells.has(`${rx},${ry}`)) {
       // Can move into the right cell, so turn right and move
       curX = rx; curY = ry;
       curDir = (curDir + 3) % 4; // Face "left" relative to new cell to continue boundary
     } else {
-      // Cannot move right, so turn left and stay in current cell
-      curDir = (curDir + 3) % 4;
+      // Cannot move right. Check if we can move forward.
+      const fx = curX + dx[curDir], fy = curY + dy[curDir];
+      if (cells.has(`${fx},${fy}`)) {
+        // Can move forward
+        curX = fx; curY = fy;
+        // Keep same direction
+      } else {
+        // Cannot move right or forward, so must turn left and stay.
+        curDir = (curDir + 3) % 4;
+      }
     }
   }
 
@@ -574,6 +683,7 @@ export function computeRelaxedDoorAccess(groundGrid, level1Grid) {
   const { doorAccessPenalty } = SCORER_PARAMS;
   const ids = [];
   const bridgedIds = new Set();
+  const violationsWithDetails = [];
 
   function processFloor(grid, mustExt, extraPairs = []) {
     const { regions, regionIdGrid } = getConnectedEmptyRegions(grid);
@@ -634,7 +744,40 @@ export function computeRelaxedDoorAccess(groundGrid, level1Grid) {
     // Add remaining truly unmet to global list
     unmet.forEach(req => {
       if (!satisfiedInFloor.has(req.room)) {
-        if (!ids.includes(req.room)) ids.push(req.room);
+        if (!ids.includes(req.room)) {
+          ids.push(req.room);
+
+          const debugInfo = { sequences: [] };
+          const source = req.target === 'EXTERIOR' ? 'touchesExteriorNonSouth' : 'parkingRepairAdjExt';
+
+          let criticalSequence = null;
+          let candidateRegions = [];
+
+          for (const region of regions) {
+            const sequence = getRegionBoundarySequence(grid, regionIdGrid, region.id);
+            const touchesRoom = sequence.includes(req.room);
+            const touchesTarget = sequence.includes(req.target);
+
+            if (touchesRoom) {
+                candidateRegions.push({id: region.id, sequence});
+            }
+
+            if (touchesRoom && touchesTarget) {
+                criticalSequence = sequence;
+                break; // Found the critical one
+            }
+          }
+
+          if (criticalSequence) {
+            debugInfo.sequences.push(criticalSequence);
+            debugInfo.failureReason = '拓扑检查失败';
+          } else {
+            debugInfo.sequences = candidateRegions.map(r => r.sequence);
+            debugInfo.failureReason = '无桥接区域';
+          }
+
+          violationsWithDetails.push({ id: req.room, source, debug: debugInfo });
+        }
       }
     });
   }
@@ -642,14 +785,72 @@ export function computeRelaxedDoorAccess(groundGrid, level1Grid) {
   // Ground Floor: Exterior access for main rooms + Mutual access for parking/repair
   processFloor(groundGrid, GROUND_MUST_EXT, [['parking', 'repair_zone']]);
 
-  // Level 1: Corridor access
-  processFloor(level1Grid, [], LEVEL1_MUST_FACE_CORRIDOR.map(r => [r, 'corridor_l1']));
+  // Level 1: Corridor access (custom one-way check)
+  const { regions: l1Regions, regionIdGrid: l1RegionIdGrid } = getConnectedEmptyRegions(level1Grid);
+  const corridorPlaced = !!level1Grid.roomData['corridor_l1'];
+  for (const roomId of LEVEL1_MUST_FACE_CORRIDOR) {
+    if (!level1Grid.roomData[roomId]) continue;
+
+    const pRoom = bboxToPlacement(level1Grid.getBoundingBox(roomId));
+    const pCorr = corridorPlaced ? bboxToPlacement(level1Grid.getBoundingBox('corridor_l1')) : null;
+
+    if (pCorr && adjacent(pRoom, pCorr)) {
+      continue; // Strictly adjacent, OK.
+    }
+
+    // Not strictly adjacent, try to find a bridge
+    let bridgeFound = false;
+    for (const region of l1Regions) {
+      const sequence = getRegionBoundarySequence(level1Grid, l1RegionIdGrid, region.id);
+      if (sequence.includes(roomId) && sequence.includes('corridor_l1') &&
+          canSatisfyNonCrossing(sequence, [[roomId, 'corridor_l1']])) {
+        bridgedIds.add(roomId);
+        bridgeFound = true;
+        break;
+      }
+    }
+
+    if (!bridgeFound) {
+      ids.push(roomId); // Truly unmet
+      const debugInfo = { sequences: [] };
+      let criticalSequence = null;
+      let candidateRegions = [];
+
+      for (const region of l1Regions) {
+        const sequence = getRegionBoundarySequence(level1Grid, l1RegionIdGrid, region.id);
+        const touchesRoom = sequence.includes(roomId);
+        const touchesCorridor = sequence.includes('corridor_l1');
+
+        if (touchesRoom) {
+            candidateRegions.push({id: region.id, sequence});
+        }
+
+        if (touchesRoom && touchesCorridor) {
+            criticalSequence = sequence;
+            break;
+        }
+      }
+
+      if (criticalSequence) {
+        // We found the region that touches both, but it failed the topo check.
+        debugInfo.sequences.push(criticalSequence);
+        debugInfo.failureReason = '拓扑检查失败';
+      } else {
+        // No single region touches both. This is an isolation problem.
+        debugInfo.sequences = candidateRegions.map(r => r.sequence);
+        debugInfo.failureReason = '无桥接区域';
+      }
+
+      violationsWithDetails.push({ id: roomId, source: 'adjacentToCorridor', debug: debugInfo });
+    }
+  }
 
   // ── MUST adjacency bridging ───────────────────────────────────────────────
   // MUST 邻接对（meter_main↔meter_sub, trafo1↔trafo2）与可达性规则在算法层面
   // 完全一致：允许通过空白区域作为虚拟中间节点来满足 Phase 1 的宽松评价。
   // 通过桥接的对以 'a↔b' 形式记入 bridgedPairKeys，用于过滤 violations[]。
   const bridgedPairKeys = new Set();
+  const bridgeDebugInfo = {};
 
   // 按楼层分组处理（当前 ADJACENCY_MUST 均为地面层房间）
   const groundMustPairs = ADJACENCY_MUST.filter(({ pair: [a, b] }) =>
@@ -663,20 +864,40 @@ export function computeRelaxedDoorAccess(groundGrid, level1Grid) {
       const pB = bboxToPlacement(groundGrid.getBoundingBox(b));
       if (adjacent(pA, pB)) continue; // 已直接相邻，无需桥接
 
+      const debugTouches = { [a]: [], [b]: [] };
+      let bridgeFound = false;
+
       // 尝试通过空白区域桥接：找到同时接触 a 和 b 的连通空白域
       for (const region of regions) {
         const sequence = getRegionBoundarySequence(groundGrid, regionIdGrid, region.id);
-        if (sequence.includes(a) && sequence.includes(b) &&
+        const touchesA = sequence.includes(a);
+        const touchesB = sequence.includes(b);
+        if (touchesA) debugTouches[a].push(region.id);
+        if (touchesB) debugTouches[b].push(region.id);
+
+        if (touchesA && touchesB &&
             canSatisfyNonCrossing(sequence, [[a, b]])) {
           bridgedPairKeys.add(`${a}↔${b}`);
+          bridgeFound = true;
           break;
         }
+      }
+
+      if (!bridgeFound) {
+        let debugMsg = `${a} 接触区域[${debugTouches[a].join(',') || '无'}], ${b} 接触区域[${debugTouches[b].join(',') || '无'}].`;
+        const common = debugTouches[a].filter(id => debugTouches[b].includes(id));
+        if (common.length > 0) {
+          debugMsg += ` 共同区域[${common.join(',')}]但拓扑检查失败。`;
+        } else {
+          debugMsg += ' 无共同区域。';
+        }
+        bridgeDebugInfo[`${a}↔${b}`] = debugMsg;
       }
       // 若未桥接：must_adjacent violation 保留在 violations[] 中，Checkpoint A 正常失败
     }
   }
 
-  return { penalty: -doorAccessPenalty * ids.length, ids, bridgedIds, bridgedPairKeys };
+  return { penalty: -doorAccessPenalty * ids.length, ids, bridgedIds, bridgedPairKeys, bridgeDebugInfo, violationsWithDetails };
 }
 
 // ── Phase 2 Accessibility helpers ────────────────────────────────────────────
@@ -826,7 +1047,13 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
               return (a.currentArea / a.targetGridCount) - (b.currentArea / b.targetGridCount);
             });
           } else {
-            activeRooms.sort((a, b) => (a.currentArea / a.targetGridCount) - (b.currentArea / b.targetGridCount));
+            // Stage 1: MUST 邻接未满足的房间优先，其次按面积完成率排序
+            activeRooms.sort((a, b) => {
+              const aOk = isAccessibilityMet(a.id, grid, buildingW, buildingD);
+              const bOk = isAccessibilityMet(b.id, grid, buildingW, buildingD);
+              if (aOk !== bOk) return aOk ? 1 : -1;
+              return (a.currentArea / a.targetGridCount) - (b.currentArea / b.targetGridCount);
+            });
           }
           needsSort = false;
         }
@@ -837,7 +1064,10 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
             // Stage 1: Try strictly rectangular expansion for ALL rooms
             for (const roomToGrow of activeRooms) {
                 const isCorridor = roomToGrow.id === 'corridor_l1';
-                let expansionCells = findBestRectangleExpansion(grid, roomToGrow.id, isCorridor);
+                // 若 MUST 邻接未满足，加方向偏置朝向伙伴
+                const mustOk = isAccessibilityMet(roomToGrow.id, grid, buildingW, buildingD);
+                const prefDir = mustOk ? null : getPreferredDirection(roomToGrow.id, grid, buildingW, buildingD);
+                let expansionCells = findBestRectangleExpansion(grid, roomToGrow.id, isCorridor, prefDir);
                 if (expansionCells && expansionCells.length > 0) {
                     // To keep it a rectangle, we MUST add the entire line.
                     // If adding the entire line makes us overgrow significantly, 
@@ -1702,6 +1932,8 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
 
   const gridW = Math.floor(bW / GRID_SIZE);
   const gridH = Math.floor(bD / GRID_SIZE);
+  const alignedBW = gridW * GRID_SIZE;
+  const alignedBD = gridH * GRID_SIZE;
 
   // 1. Separate rooms by floor
   const allRooms = Object.values(ROOM_DEFS).filter(r => !r.isOpening).map(r => {
@@ -1772,7 +2004,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
   // --- Checkpoint A (Phase 1 snapshot evaluation) ---
 
   // 先用 stopAfterStage1=true 跑 Phase 1 来评估 Checkpoint A
-  expandRooms(groundGrid, groundRooms, rng, bW, bD, (gridState) => {
+  expandRooms(groundGrid, groundRooms, rng, alignedBW, alignedBD, (gridState) => {
     groundGridBeforeGaps = gridState.clone();
   }, (gridState) => {
     groundGridAfterRect = gridState.clone();
@@ -1780,7 +2012,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
    if (!groundGridAfterRect) groundGridAfterRect = groundGrid.clone();
    if (!groundGridBeforeGaps) groundGridBeforeGaps = groundGrid.clone();
 
-  expandRooms(level1Grid, level1Rooms, rng, bW, bD, (gridState) => {
+  expandRooms(level1Grid, level1Rooms, rng, alignedBW, alignedBD, (gridState) => {
     level1GridBeforeGaps = gridState.clone();
   }, (gridState) => {
     level1GridAfterRect = gridState.clone();
@@ -1788,12 +2020,21 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
   if (!level1GridAfterRect) level1GridAfterRect = level1Grid.clone();
   if (!level1GridBeforeGaps) level1GridBeforeGaps = level1Grid.clone();
 
-  const snapshot = buildPartialResult(groundGridAfterRect, level1GridAfterRect, bW, bD);
+  const snapshot = buildPartialResult(groundGridAfterRect, level1GridAfterRect, alignedBW, alignedBD);
   const evaluated = evaluateTemplate(snapshot, { skipDoors: true });
   // Use relaxed door-access for Checkpoint A: rooms adjacent to an unclaimed empty region
   // that bridges to the exterior wall / corridor are considered virtually connected.
   // Strict door-access is still used in Checkpoint B and full scoring (Step 9).
   const relaxedDoorAccess = computeRelaxedDoorAccess(groundGridAfterRect, level1GridAfterRect);
+
+  // 在过滤前，将桥接调试信息附加到 must_adjacent 违规项上
+  const violationsWithDebug = evaluated.violations.map(v => {
+    if (v.constraint === 'must_adjacent' && relaxedDoorAccess.bridgeDebugInfo?.[v.room]) {
+      return { ...v, debug: relaxedDoorAccess.bridgeDebugInfo[v.room] };
+    }
+    return v;
+  });
+
   // Also filter out violations for rooms that passed via the bridging mechanism.
   // (evaluateTemplate adds ext_access violations independently of doorAccess, causing
   //  double-counting that would fail Checkpoint A even when doorAccess is relaxed.)
@@ -1802,11 +2043,11 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
   //   bridgedPairKeys → must_adjacent 类（v.room = 'a↔b' 拼接字符串）
   const hasBridged = relaxedDoorAccess.bridgedIds.size > 0 || relaxedDoorAccess.bridgedPairKeys.size > 0;
   const relaxedEvaluated = hasBridged
-    ? { ...evaluated, violations: evaluated.violations.filter(v =>
+    ? { ...evaluated, violations: violationsWithDebug.filter(v =>
         !relaxedDoorAccess.bridgedIds.has(v.room) &&
         !relaxedDoorAccess.bridgedPairKeys.has(v.room)
       )}
-    : evaluated;
+    : { ...evaluated, violations: violationsWithDebug };
   const checkpointADiagnostic = evaluateCheckpointA(relaxedEvaluated, relaxedDoorAccess);
 
   // If the layout fails Checkpoint A, skip expensive Phase 2/3 growth
@@ -1816,11 +2057,11 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     return {
       id: `${prefix}-${groupId}-${variantIdx}`,
       label: `约束生长法 (未通过红线)`,
-      desc: `建筑 ${(bW / 1000).toFixed(1)}m×${(bD / 1000).toFixed(1)}m`,
+      desc: `建筑 ${(alignedBW / 1000).toFixed(1)}m×${(alignedBD / 1000).toFixed(1)}m`,
       groundPlacements: groundLayout,
       level1Placements: level1Layout,
-      buildingW: bW,
-      buildingD: bD,
+      buildingW: alignedBW,
+      buildingD: alignedBD,
       groupId,
       variantIdx,
       _debug: {
@@ -1834,12 +2075,12 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
   }
 
   // ── Phase 2 (Step 6A): 对通过 Checkpoint A 的方案，继续跑有面积约束的 L/U 形扩展 ────────
-  expandRooms(groundGrid, groundRooms, rng, bW, bD, (gridState) => {
+  expandRooms(groundGrid, groundRooms, rng, alignedBW, alignedBD, (gridState) => {
     groundGridBeforeGaps = gridState.clone();
   }, null, false); // stopAfterStage1 = false，完整执行 Phase 2
   if (!groundGridBeforeGaps) groundGridBeforeGaps = groundGrid.clone();
 
-  expandRooms(level1Grid, level1Rooms, rng, bW, bD, (gridState) => {
+  expandRooms(level1Grid, level1Rooms, rng, alignedBW, alignedBD, (gridState) => {
     level1GridBeforeGaps = gridState.clone();
   }, null, false); // stopAfterStage1 = false，完整执行 Phase 2
   if (!level1GridBeforeGaps) level1GridBeforeGaps = level1Grid.clone();
@@ -1847,7 +2088,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
   // ▼ Checkpoint B（Step 6A 结束后）：第一梯队 + 第二梯队评价，分数 > -1000 才进入后续生长
   // 与 Checkpoint A 一致，使用宽松可达性检查（_relaxedDoorAccess）
   const relaxedB = computeRelaxedDoorAccess(groundGridBeforeGaps, level1GridBeforeGaps);
-  const snapshotB = buildPartialResult(groundGridBeforeGaps, level1GridBeforeGaps, bW, bD);
+  const snapshotB = buildPartialResult(groundGridBeforeGaps, level1GridBeforeGaps, alignedBW, alignedBD);
   const evaluatedB = { ...evaluateTemplate(snapshotB, { skipDoors: true }), _relaxedDoorAccess: relaxedB };
   const checkpointBDiagnostic = scoreSpatialQuality(evaluatedB);
   const CHECKPOINT_B_THRESHOLD = -1000; // 总惩罚绝对值 < 1000 才通过
@@ -1859,11 +2100,11 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     return {
       id: `${prefix}-${groupId}-${variantIdx}`,
       label: `约束生长法 (未通过检查点B)`,
-      desc: `建筑 ${(bW / 1000).toFixed(1)}m×${(bD / 1000).toFixed(1)}m`,
+      desc: `建筑 ${(alignedBW / 1000).toFixed(1)}m×${(alignedBD / 1000).toFixed(1)}m`,
       groundPlacements: groundLayout,
       level1Placements: level1Layout,
-      buildingW: bW,
-      buildingD: bD,
+      buildingW: alignedBW,
+      buildingD: alignedBD,
       groupId,
       variantIdx,
       _debug: {
@@ -1905,11 +2146,11 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
   return {
     id: `${prefix}-${groupId}-${variantIdx}`,
     label: `约束生长法`,
-    desc: `建筑 ${(bW / 1000).toFixed(1)}m×${(bD / 1000).toFixed(1)}m`,
+    desc: `建筑 ${(alignedBW / 1000).toFixed(1)}m×${(alignedBD / 1000).toFixed(1)}m`,
     groundPlacements: finalLayout.ground,
     level1Placements: finalLayout.level1,
-    buildingW: bW,
-    buildingD: bD,
+    buildingW: alignedBW,
+    buildingD: alignedBD,
     groupId,
     variantIdx,
     _debug: {
