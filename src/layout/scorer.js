@@ -103,10 +103,12 @@ export function computeDoorAccessPenalty(result) {
   const parking    = groundPlacements['parking']
   const repairZone = groundPlacements['repair_zone']
   if (parking && repairZone) {
-    const parkingOk = adjacent(parking, repairZone) || touchesExteriorNonSouth(parking, buildingW, buildingD)
-    const repairOk  = adjacent(parking, repairZone) || touchesExteriorNonSouth(repairZone, buildingW, buildingD)
-    if (!parkingOk) violations.push({ id: 'parking', source: 'parkingRepairAdjExt' })
-    if (!repairOk)  violations.push({ id: 'repair_zone', source: 'parkingRepairAdjExt' })
+    // Updated for b803908: parking/repair_zone upgraded to ADJACENCY_MUST
+    // They must be adjacent (no external wall escape route for either)
+    if (!adjacent(parking, repairZone)) {
+      violations.push({ id: 'parking', source: 'parkingRepairMust' })
+      violations.push({ id: 'repair_zone', source: 'parkingRepairMust' })
+    }
   }
 
   const corridor = level1Placements['corridor_l1']

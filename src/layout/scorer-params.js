@@ -5,6 +5,12 @@
  * touching source code.  scorer.js reads SCORER_PARAMS by reference each
  * call, so mutations made by the UI take effect immediately on the next
  * scoreLayout() invocation.
+ *
+ * Parameter Change History (b803908, Apr 2026):
+ * - aspectRatioThreshold: 4 → 3 (stricter shape constraints)
+ * - aspectRatioPenalty: 500 → 2000 (4x penalty increase)
+ *   ⚠️  Review impact: single room violations can now exceed 2000 points
+ *   Validation: ensure ≥60% of layouts pass Checkpoint A after this change
  */
 
 export const PARAM_GROUPS = [
