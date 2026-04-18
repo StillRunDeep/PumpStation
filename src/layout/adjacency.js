@@ -2,13 +2,13 @@ import { adjacent } from './placer.js'
 
 /**
  * Adjacency graph for the pump station building.
- * MUST pairs: violations reduce feasibility score (−50 each)
+ * MUST pairs: violations reduce feasibility score (−500 each per computeDoorAccessPenalty)
  * SHOULD pairs: satisfaction adds bonus points (+15 each)
  *
- * Revised per AG4建筑平面布局4_评价.md (v1.1):
- *   - trafo1/trafo2 upgraded SHOULD → MUST (shared wall, no internal door)
- *   - Removed MUST: meter_sub/fire_equip, fan_room/dock2, clean_pump/rainwater
- *   - Added SHOULD: fan_room/corridor_l1, fan_room/dock2, fire_equip/meter_sub
+ * History:
+ * - v1.1: trafo1/trafo2 upgraded SHOULD → MUST (shared wall, no internal door)
+ * - v1.8 (b803908): parking/repair_zone upgraded SHOULD → MUST (equipment transfer convenience)
+ *   This constrains parking and repair_zone to be mutually adjacent with no external wall escape.
  */
 export const ADJACENCY_MUST = [
   { pair: ['meter_main', 'meter_sub'], reason: '水表房并排，共用外墙区段' },
