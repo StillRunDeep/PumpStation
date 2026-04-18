@@ -1,3 +1,27 @@
+/**
+ * CONSTRAINT GROWTH ALGORITHM (AG4-1: 建筑平面布局生成)
+ *
+ * This module implements a three-phase room layout generation algorithm:
+ * - Phase 1: Seed placement (初始种子放置)
+ * - Phase 2: Polygon expansion (L/U 扩展)
+ * - Phase 3: Gap filling (空隙填充)
+ *
+ * IMPORTANT: See ALGORITHM_CONSTRAINT_GROWTH.md for detailed algorithm documentation,
+ * pseudocode, weight map definitions, Checkpoint A/B/C integration, and debugging guide.
+ *
+ * Key data structures:
+ * - Grid class: 2D grid with room occupancy tracking + bbox caching (O(1) lookups)
+ * - ADJACENCY_MUST: Hard constraints (parking↔repair_zone, trafo1↔trafo2, etc.)
+ * - Weight maps: Per-room priority maps for Phase 1 & 2 expansion
+ * - targetGridCount: Area targets per room (defined in room-defs.js)
+ *
+ * Performance targets (with Web Worker optimization):
+ * - Phase 1: 100ms (200ms currently)
+ * - Phase 2: 10s (25s currently) — bottleneck
+ * - Phase 3: 1s (3s currently)
+ * Total: 11s per variant × 9 variants = ~2 minutes for full generation
+ */
+
 import { ROOM_DEFS } from './room-defs.js';
 import { checkAdjacency, ADJACENCY_MUST } from './adjacency.js';
 import { placeDoors } from './door-placer.js';
