@@ -13,15 +13,25 @@ const yieldToEventLoop = () => new Promise(resolve => setTimeout(resolve, 0))
  */
 function applyCheckpointB(layouts, buildingW, buildingD) {
   for (const layout of layouts) {
-    const groundGrid = layout._debug.ground.gridBeforeGaps;
-    const level1Grid = layout._debug.level1.gridBeforeGaps;
-    const snapshot = buildPartialResult(groundGrid, level1Grid, buildingW, buildingD)
-    const relaxed = computeRelaxedDoorAccess(groundGrid, level1Grid)
-    const evaluated = { ...evaluateTemplate(snapshot), _relaxedDoorAccess: relaxed }
-    layout._checkpointBScore = scoreSpatialQuality(evaluated).partialScore
-    layout._relaxedDoorAccess = relaxed
+    try {
+      const groundGrid = layout?._debug?.ground?.gridBeforeGaps;
+      const level1Grid = layout?._debug?.level1?.gridBeforeGaps;
+      if (!groundGrid || !level1Grid) {
+        console.warn('applyCheckpointB: layout missing gridBeforeGaps, skipping score', layout);
+        layout._checkpointBScore = -Infinity;
+        continue;
+      }
+      const snapshot = buildPartialResult(groundGrid, level1Grid, buildingW, buildingD)
+      const relaxed = computeRelaxedDoorAccess(groundGrid, level1Grid)
+      const evaluated = { ...evaluateTemplate(snapshot), _relaxedDoorAccess: relaxed }
+      layout._checkpointBScore = scoreSpatialQuality(evaluated).partialScore ?? -Infinity
+      layout._relaxedDoorAccess = relaxed
+    } catch (e) {
+      console.error('applyCheckpointB failed for layout:', e);
+      layout._checkpointBScore = -Infinity;
+    }
   }
-  layouts.sort((a, b) => b._checkpointBScore - a._checkpointBScore)
+  layouts.sort((a, b) => (b._checkpointBScore ?? -Infinity) - (a._checkpointBScore ?? -Infinity))
 }
 
 /**
@@ -69,12 +79,12 @@ export async function runAG41(existingVariants = [], isCancelled = () => false) 
   // 2. 随机探索 (7个方案)
   const explorers = [
     // 组1: 对未验证房间进行智能优化 (3个)
-    { parent: sortedExisting[0], reRandomize: 'unverified_smart', count: 1, prefix: 'O1' },
-    { parent: sortedExisting[1], reRandomize: 'unverified_smart', count: 1, prefix: 'O2' },
-    { parent: sortedExisting[2], reRandomize: 'unverified_smart', count: 1, prefix: 'O3' },
+    { parent: sortedExisting[0] || null, reRandomize: 'unverified_smart', count: 1, prefix: 'O1' },
+    { parent: sortedExisting[1] || null, reRandomize: 'unverified_smart', count: 1, prefix: 'O2' },
+    { parent: sortedExisting[2] || null, reRandomize: 'unverified_smart', count: 1, prefix: 'O3' },
     // 组2: 仅保留通过验证的房间 (2个)
-    { parent: sortedExisting[3], reRandomize: 'all_but_verified', count: 1, prefix: 'M4' },
-    { parent: sortedExisting[4], reRandomize: 'all_but_verified', count: 1, prefix: 'M5' },
+    { parent: sortedExisting[3] || null, reRandomize: 'all_but_verified', count: 1, prefix: 'M4' },
+    { parent: sortedExisting[4] || null, reRandomize: 'all_but_verified', count: 1, prefix: 'M5' },
     // 组3: 纯随机 (2个)
     { parent: null, reRandomize: 'all', count: 2, prefix: 'RND' },
   ];
@@ -228,7 +238,7 @@ function generateHybridLayout(parentA, parentB, seed, bW, bD, roomAreas, groupId
       let placement = null;
       if (pA && pB) {
         const chosenParent = rng() < 0.5 ? parentA : parentB;
-        placement = chosenParent[`${floor}Placements`][roomId];
+        placement = chosenParent?.[`${floor}Placements`]?.[roomId] || pA || pB;
       } else {
         placement = pA || pB;
       }
