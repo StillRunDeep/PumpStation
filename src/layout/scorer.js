@@ -1,3 +1,29 @@
+/**
+ * SCORING AND CHECKPOINT SYSTEM (AG4-2: 平面布局评价)
+ *
+ * Three-tier scoring framework with Checkpoints A/B/C progression:
+ * - Tier 1 (Hard Redlines): Missing rooms, MUST adjacency, EXT_ACCESS
+ * - Tier 2 (Spatial Quality): Aspect ratio, space efficiency, corridor hits
+ * - Tier 3 (Optimization Bonuses): Growth success, trafo placement, fan room distance, diversity
+ *
+ * IMPORTANT: See ALGORITHM_SCORING.md for detailed scoring rules, Checkpoint definitions,
+ * parameter sensitivity analysis, verification test cases, and troubleshooting guide.
+ *
+ * Key functions:
+ * - scoreHardRedlines(result): Tier 1 evaluation (pass/fail at Checkpoint A)
+ * - scoreSpatialQuality(result): Tier 1+2 evaluation (ranking at Checkpoint B)
+ * - scoreLayout(result): Tier 1+2+3 evaluation (final ranking at Checkpoint C)
+ *
+ * Critical parameters (see scorer-params.js):
+ * - mustViolationPenalty: 500 (hard constraint violations)
+ * - aspectRatioPenalty: 2000 ⚠️ (4× increase per b803908 — needs validation)
+ * - doorAccessPenalty: 500 (external access violations)
+ * - diversityPenalty: 200 (duplicate layout penalties)
+ *
+ * ⚠️ Parameter change (b803908, Apr 2026):
+ *   aspectRatioPenalty: 500 → 2000 (verification in CODE_REVIEW_b803908.md)
+ */
+
 import { adjacent, centerX, centerY, touchesExteriorNonSouth } from './placer.js'
 import { SCORER_PARAMS } from './scorer-params.js'
 
@@ -103,10 +129,12 @@ export function computeDoorAccessPenalty(result) {
   const parking    = groundPlacements['parking']
   const repairZone = groundPlacements['repair_zone']
   if (parking && repairZone) {
-    const parkingOk = adjacent(parking, repairZone) || touchesExteriorNonSouth(parking, buildingW, buildingD)
-    const repairOk  = adjacent(parking, repairZone) || touchesExteriorNonSouth(repairZone, buildingW, buildingD)
-    if (!parkingOk) violations.push({ id: 'parking', source: 'parkingRepairAdjExt' })
-    if (!repairOk)  violations.push({ id: 'repair_zone', source: 'parkingRepairAdjExt' })
+    // Updated for b803908: parking/repair_zone upgraded to ADJACENCY_MUST
+    // They must be adjacent (no external wall escape route for either)
+    if (!adjacent(parking, repairZone)) {
+      violations.push({ id: 'parking', source: 'parkingRepairMust' })
+      violations.push({ id: 'repair_zone', source: 'parkingRepairMust' })
+    }
   }
 
   const corridor = level1Placements['corridor_l1']
