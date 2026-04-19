@@ -1,0 +1,35 @@
+{
+  "requestIdFieldName": "requestId",
+  "requiredParameters": [
+    "qTotal",
+    "vDesign"
+  ],
+  "requiredAnyOfGroups": [
+    [
+      "poolDepth",
+      "baseArea"
+    ],
+    [
+      "zBottom",
+      "zDischarge"
+    ]
+  ],
+  "requiredParameterExamples": {
+    "qTotal": 1.2,
+    "vDesign": 500.0,
+    "poolDepth": 4.5,
+    "baseArea": 120.0,
+    "zBottom": -3.2,
+    "zDischarge": 1.8
+  },
+  "fieldMappings": {
+    "qTotal": "qTotal",
+    "vDesign": "vDesign",
+    "poolDepth": "poolDepth",
+    "baseArea": "baseArea",
+    "zBottom": "zBottom",
+    "zDischarge": "zDischarge",
+    "workingPumpCount": "workingPumpCount",
+    "sparePumpCount": "sparePumpCount"
+  }
+}
