@@ -219,6 +219,8 @@ function insertEliminatedDetailRow(idx) {
   const v = _eliminatedVariants[idx]
   if (!v) return
 
+  _revitVariant = v
+
   const breakdownHtml = buildBreakdownHtml(v)
   const title = `方案 ${v.id}：${v.label}  —  得分 ${v.score}`
 
@@ -244,7 +246,7 @@ function insertEliminatedDetailRow(idx) {
   }
 
   const headers = `
-    <div class="grid-header">正式视图</div>
+    <div class="grid-header">正式视图 ${_revitButtonHtml()}</div>
     <div class="grid-header">阶段3 (FillGaps)</div>
     <div class="grid-header">阶段2 (L/U形生长)</div>
     <div class="grid-header">阶段1 (矩形生长)</div>`
@@ -405,12 +407,75 @@ function buildBreakdownHtml(v) {
     </table>`
 }
 
+// ── Revit message builder ─────────────────────────────────────────────
+
+let _revitVariant = null  // the variant whose detail row is currently open
+
+function buildRevitMessage(v) {
+  const WALL_THICK = 200
+  const GROUND_H = 3500
+  const LEVEL1_H = 3000
+
+  const rooms = []
+  const walls = []
+  let wallIdx = 0
+
+  const addRooms = (placements, floor) => {
+    const z = floor === 'ground' ? 0 : GROUND_H
+    const height = floor === 'ground' ? GROUND_H : LEVEL1_H
+    Object.entries(placements || {}).forEach(([roomId, p]) => {
+      const rid = `${floor}-${roomId}`
+      rooms.push({ id: rid, name: ROOM_DEFS[roomId]?.label || roomId })
+      const { x, y, w, d } = p
+      ;[
+        { start: { x, y, z },         end: { x: x + w, y,       z } },
+        { start: { x: x + w, y, z },  end: { x: x + w, y: y + d, z } },
+        { start: { x, y: y + d, z },  end: { x: x + w, y: y + d, z } },
+        { start: { x, y, z },         end: { x,         y: y + d, z } },
+      ].forEach(seg => {
+        walls.push({
+          id: `wall-${++wallIdx}`,
+          roomId: rid,
+          startMm: seg.start,
+          endMm: seg.end,
+          thicknessMm: WALL_THICK,
+          heightMm: height,
+        })
+      })
+    })
+  }
+
+  addRooms(v.groundPlacements, 'ground')
+  addRooms(v.level1Placements, 'level1')
+
+  return {
+    type: 'create-pump-room',
+    payload: {
+      requestId: (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : `req-${Date.now()}`,
+      rooms,
+      walls,
+    },
+  }
+}
+
+function _revitButtonHtml() {
+  return `<button onclick="window._ag41GenerateRevit()"
+    style="margin-left:8px;padding:2px 8px;font-size:10px;font-weight:600;
+           background:#1a5276;color:#fff;border:none;border-radius:3px;cursor:pointer;
+           vertical-align:middle"
+    title="发送 create-pump-room 消息到 Revit Host">生成 Revit 模型</button>`
+}
+
 function insertDetailRow(idx) {
   removeDetailRow()
 
   const sorted = _sortedVariants()
   const v = sorted[idx]
   if (!v) return
+
+  _revitVariant = v
 
   const CELL_H = 150;
   const breakdownHtml = buildBreakdownHtml(v)
@@ -441,7 +506,7 @@ function insertDetailRow(idx) {
   };
 
   const headers = `
-    <div class="grid-header">正式视图</div>
+    <div class="grid-header">正式视图 ${_revitButtonHtml()}</div>
     <div class="grid-header">阶段3 (FillGaps)</div>
     <div class="grid-header">阶段2 (L/U形生长)</div>
     <div class="grid-header">阶段1 (矩形生长)</div>
@@ -637,6 +702,19 @@ window._ag41SelectEliminated = (idx) => {
       ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   } else {
     removeDetailRow()
+  }
+}
+
+window._ag41GenerateRevit = () => {
+  if (!_revitVariant) return
+  const msg = buildRevitMessage(_revitVariant)
+  const json = JSON.stringify(msg)
+  if (window.chrome?.webview) {
+    window.chrome.webview.postMessage(json)
+    showAg41Notify('已发送 create-pump-room 消息到 Revit Host', true)
+  } else {
+    console.log('[Revit Message]', msg)
+    showAg41Notify('（开发模式）消息已输出到控制台，未检测到 WebView Host', false)
   }
 }
 
