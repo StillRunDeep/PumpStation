@@ -89,7 +89,7 @@ export const PARAM_STEPS = {
 }
 
 export const DEFAULT_SCORER_PARAMS = {
-  growthSuccessMaxBonus:  100,
+  growthSuccessMaxBonus:  5000,
   trafoExteriorBonus:     20,
   trafoSameSideBonus:     20,
   fanRoomMaxBonus:        30,
@@ -106,11 +106,11 @@ export const DEFAULT_SCORER_PARAMS = {
   convenienceMaxBonus:    30,
   diversityThreshold:     5.0,
   diversityPenalty:       200,
-  mustViolationPenalty:   500,
-  doorAccessPenalty:      500,
+  mustViolationPenalty:   5000,
+  doorAccessPenalty:      10000,
   missingRoomPenalty:     500,
   aspectRatioThreshold:   3,
-  aspectRatioPenalty:     2000,
+  aspectRatioPenalty:     5000,
   utilizationThreshold:   0.70,
   utilizationStep:        0.15,
   vertexThreshold:        6,
