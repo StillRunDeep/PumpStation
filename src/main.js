@@ -1,4 +1,8 @@
 import './style.css'
+import { initTokenVerification } from './auth.js'
+
+// 初始化token验证
+const isTokenValid = initTokenVerification()
 
 import { runUserParams } from './agents/user-params.js'
 import { runTopology } from './agents/topology.js'
