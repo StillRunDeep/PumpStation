@@ -2098,7 +2098,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     const level1Layout = finalizeLayout(level1GridAfterRect).level1;
     return {
       id: `${prefix}-${groupId}-${variantIdx}`,
-      label: `约束生长法 (未通过红线)`,
+      label: `约束生长法 (检查点A)`,
       desc: `建筑 ${(alignedBW / 1000).toFixed(1)}m×${(alignedBD / 1000).toFixed(1)}m`,
       groundPlacements: groundLayout,
       level1Placements: level1Layout,
@@ -2141,7 +2141,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     const level1Layout = finalizeLayout(level1GridBeforeGaps).level1;
     return {
       id: `${prefix}-${groupId}-${variantIdx}`,
-      label: `约束生长法 (未通过检查点B)`,
+      label: `约束生长法 (检查点B)`,
       desc: `建筑 ${(alignedBW / 1000).toFixed(1)}m×${(alignedBD / 1000).toFixed(1)}m`,
       groundPlacements: groundLayout,
       level1Placements: level1Layout,
