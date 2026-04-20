@@ -41,7 +41,7 @@ function _c(cx, cy, r, fill) {
 export function renderDebugGrid(debugData, width, height) {
   if (!debugData) return '';
 
-  const { grid, seeds } = debugData;
+  const { grid, seeds, seedsMeta, movementHints } = debugData;
   const gridW = grid.width;
   const gridH = grid.height;
 
@@ -103,10 +103,27 @@ export function renderDebugGrid(debugData, width, height) {
 
   // Draw seeds on top
   if (seeds) {
+    // seedsMeta layer: grey parent dot + red arrow for actually-replaced seeds (temporarily disabled)
+    // if (seedsMeta) { ... }
+    // movementHints layer: orange arrow showing potential movement targets
+    if (movementHints) {
+      for (const [id, hint] of Object.entries(movementHints)) {
+        if (!hint.from || !hint.to) continue;
+        const fx = ox + (hint.from.x + 0.5) * cellSize;
+        const fy = oy + (hint.from.y + 0.5) * cellSize;
+        const tx = ox + (hint.to.x + 0.5) * cellSize;
+        const ty = oy + (hint.to.y + 0.5) * cellSize;
+        s += _l(fx, fy, tx, ty, '#e67e22', 1.5, '4 2');
+        s += _c(tx, ty, cellSize * 0.25, '#e67e22');
+      }
+    }
+    // Child seed circles
     for (const [id, pos] of Object.entries(seeds)) {
       const cx = ox + (pos.x + 0.5) * cellSize;
       const cy = oy + (pos.y + 0.5) * cellSize;
-      s += _c(cx, cy, cellSize * 0.3, FgColors[id] || '#c0392b');
+      const replaced = seedsMeta?.[id]?.replaced;
+      const fill = replaced ? '#e74c3c' : (FgColors[id] || '#c0392b');
+      s += _c(cx, cy, cellSize * 0.3, fill);
       s += _t(cx, cy + 2, id.slice(0,3), 8, '#fff');
     }
   }

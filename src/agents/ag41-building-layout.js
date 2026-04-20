@@ -46,6 +46,7 @@ function applyCheckpointB(layouts, buildingW, buildingD) {
  * @returns {Promise<Array>} 经检查点 A 过滤、检查点 B 排序的 9 个方案
  */
 export async function optimizeVariant(parent) {
+  console.log('[optimizeVariant] called')
   const defaultUserParams = getDefaultUserParams()
   const userParams = await getUserConfirmedParams(defaultUserParams)
   const { buildingW, buildingD, roomTargetAreas } = userParams
@@ -60,6 +61,84 @@ export async function optimizeVariant(parent) {
   // Attach seedsMeta so callers can show placement arrows in debug view
   candidate._seedsMeta = rawChild._debug  // _debug contains per-floor seedsMeta
   return candidate
+}
+
+/**
+ * Compute potential movement hints for violating rooms in a variant.
+ * Does NOT generate a new layout — only calculates where each violating room's
+ * seed would ideally be placed using the weight map.
+ * Returns { ground: { roomId: { from, to } }, level1: { ... } }
+ */
+export function computeMutatedLayout(parent) {
+  const bW = parent.buildingW;
+  const bD = parent.buildingD;
+  const gridW = Math.floor(bW / GRID_SIZE);
+  const gridH = Math.floor(bD / GRID_SIZE);
+
+  const allViolatingRooms = new Set();
+  if (parent.violations) {
+    parent.violations.forEach(v => {
+      if (v.constraint === 'must_adjacent') {
+        v.room.split('↔').forEach(r => allViolatingRooms.add(r));
+      } else {
+        allViolatingRooms.add(v.room);
+      }
+    });
+  }
+  if (parent._relaxedDoorAccess?.ids) {
+    parent._relaxedDoorAccess.ids.forEach(id => allViolatingRooms.add(id));
+  }
+
+  // Only show hint for one room (mirrors generateMutatedLayout behavior)
+  const violatingRooms = new Set();
+  const allViolators = Array.from(allViolatingRooms);
+  if (allViolators.length > 0) {
+    violatingRooms.add(allViolators[Math.floor(Math.random() * allViolators.length)]);
+  }
+
+  const hints = { ground: {}, level1: {} };
+
+  ['ground', 'level1'].forEach(floor => {
+    const placedSeeds = {};
+    for (const [roomId, placement] of Object.entries(parent[`${floor}Placements`] ?? {})) {
+      placedSeeds[roomId] = placementToGridCenter(placement);
+    }
+
+    for (const roomId of violatingRooms) {
+      const roomDef = ROOM_DEFS[roomId];
+      if (!roomDef || roomDef.floor !== floor) continue;
+
+      const from = placedSeeds[roomId];
+      if (!from) continue;
+
+      const mockGrid = {
+        width: gridW, height: gridH,
+        getCell: (x, y) => {
+          for (const [id, s] of Object.entries(placedSeeds)) {
+            if (id !== roomId && s.x === x && s.y === y) return 1;
+          }
+          return 0;
+        },
+      };
+      const weightMap = generateWeightMapForRoom(mockGrid, { id: roomId, ...roomDef }, placedSeeds);
+
+      let bestPos = null;
+      let maxWeight = -1;
+      for (let i = 0; i < 500; i++) {
+        const x = Math.floor(Math.random() * gridW);
+        const y = Math.floor(Math.random() * gridH);
+        if (mockGrid.getCell(x, y) === 0 && weightMap[y][x] > maxWeight) {
+          maxWeight = weightMap[y][x];
+          bestPos = { x, y };
+        }
+      }
+      if (bestPos) {
+        hints[floor][roomId] = { from, to: bestPos };
+      }
+    }
+  });
+
+  return hints;
 }
 
 export async function generateMergedLayout(variantA, variantB) {
@@ -100,7 +179,7 @@ export async function runAG41(existingVariants = [], isCancelled = () => false, 
   let attempts = 0;
 
   // 调试开关：跳过 Checkpoint A（让所有方案直接进入阶段2/3）
-  const bypassCheckpointA = !!(document.getElementById('chk-bypass-ckA')?.checked);
+  const bypassCheckpointA = window._bypassCheckpointA;
 
   // 1. 交叉进化 (2个方案) — randomOnly 时跳过
   if (!randomOnly && sortedExisting.length >= 5) {
