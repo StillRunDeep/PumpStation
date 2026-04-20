@@ -87,7 +87,7 @@ export function runAG42(rawVariants) {
  *
  * @param {Array} existingVariants  Already-scored variants from a previous run
  * @param {Array} newRawTemplates   Raw template objects from runAG41()
- * @returns {{ variants: Array, improved: boolean, newScored: Array }}
+ * @returns {{ variants: Array, improved: boolean, newScored: Array, eliminated: Array }}
  */
 export function mergeVariants(existingVariants, newRawTemplates) {
   const newScored = newRawTemplates.map(t => ({ ...scoreVariant(t), _isNew: true }))
@@ -106,9 +106,11 @@ export function mergeVariants(existingVariants, newRawTemplates) {
   // Final sort and select top 9
   topCandidates.sort((a, b) => b.score - a.score)
   const top9 = topCandidates.slice(0, 9)
+  const eliminated = topCandidates.slice(9)
 
   const improved = top9.some(v => v._isNew)
   top9.forEach(v => delete v._isNew)
+  eliminated.forEach(v => delete v._isNew)
 
-  return { variants: top9, improved, newScored }
+  return { variants: top9, improved, newScored, eliminated }
 }

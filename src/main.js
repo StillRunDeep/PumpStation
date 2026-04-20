@@ -20,8 +20,8 @@ import { mergeVariants } from './agents/ag42-layout-eval.js'
  */
 function applyLayoutResult(newRaw, existing, isReset = false) {
   if (newRaw.length > 0) {
-    const { variants, improved, newScored } = mergeVariants(existing, newRaw)
-    renderLayoutPanel(variants)
+    const { variants, improved, newScored, eliminated } = mergeVariants(existing, newRaw)
+    renderLayoutPanel(variants, eliminated)
     if (isReset) {
       showAg41Notify('已生成初始方案', true)
     } else {

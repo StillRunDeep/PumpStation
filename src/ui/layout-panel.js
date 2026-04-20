@@ -9,6 +9,7 @@ import { ROOM_DEFS } from '../layout/room-defs.js'
 
 // Module-level state
 let _variants = []
+let _eliminatedVariants = []
 let _selectedIdx = 0       // row index in sorted order
 let _detailOpen = false    // whether the detail inline row is visible
 const VW = 1080, VH = 560
@@ -152,6 +153,56 @@ function renderComparisonTable(variants) {
         <tbody id="variant-tbody">
           ${rows}
         </tbody>
+      </table>
+    </div>`
+}
+
+// ── Eliminated variants section (debug) ──────────────────────────────
+
+function _renderEliminatedSection() {
+  const container = document.getElementById('eliminated-section')
+  if (!container) return
+
+  const show = document.getElementById('chk-bypass-ckA')?.checked && _eliminatedVariants.length > 0
+  if (!show) { container.innerHTML = ''; return }
+
+  const rows = _eliminatedVariants.map((v, i) => {
+    const cp = v.checkpointADiagnostic || {}
+    const mustSat = cp.mustAdjacency?.satisfied ?? 0
+    const mustTot = cp.mustAdjacency?.total ?? mustSat
+    const daCount = cp.doorAccessCount ?? v.breakdown?.doorAccessCount ?? 0
+    const daCell = daCount === 0
+      ? `<span style="color:#27ae60">✓</span>`
+      : `<span style="color:#c0392b;font-weight:700">⚠ ${daCount}</span>`
+    const eff = cp.spaceEfficiency != null ? (cp.spaceEfficiency * 100).toFixed(1) + '%'
+      : (v.spaceEfficiency != null ? (v.spaceEfficiency * 100).toFixed(1) + '%' : '—')
+    const rowBg = i % 2 === 0 ? '#f8fafc' : '#fff'
+    return `
+      <tr style="background:${rowBg};opacity:0.75">
+        <td style="text-align:center;font-weight:600;padding:6px 8px;color:#888">${i + 10}</td>
+        <td style="padding:6px 8px"><strong style="color:#888">${v.id}</strong><br>
+          <span style="font-size:11px;color:#aaa">${v.label}</span></td>
+        <td style="text-align:right;font-weight:700;color:#888;padding:6px 8px">${v.score}</td>
+        <td style="text-align:right;padding:6px 8px;color:#888">${eff}</td>
+        <td style="text-align:center;padding:6px 8px;color:#888">${mustSat} / ${mustTot}</td>
+        <td style="text-align:center;padding:6px 8px">${daCell}</td>
+      </tr>`
+  }).join('')
+
+  container.innerHTML = `
+    <div style="margin-top:8px">
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead>
+          <tr style="background:#5d6d7e;color:#fff;font-size:12px">
+            <th style="padding:6px 8px">排名</th>
+            <th style="padding:6px 8px;text-align:left">淘汰方案（调试）</th>
+            <th style="padding:6px 8px;text-align:right">综合得分</th>
+            <th style="padding:6px 8px;text-align:right">空间有效率</th>
+            <th style="padding:6px 8px">强邻近</th>
+            <th style="padding:6px 8px">可达性</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
       </table>
     </div>`
 }
@@ -449,18 +500,33 @@ function _rescoreAndRerender() {
  * expandable detail rows.  Preserves selected variant (by ID) and open/closed
  * state across re-renders.
  *
- * @param {Array} variants  Scored variants from runAG42()
+ * @param {Array} variants   Scored variants from runAG42()
+ * @param {Array} eliminated Variants ranked 10–18, shown in debug mode
  */
-export function renderLayoutPanel(variants) {
+export function renderLayoutPanel(variants, eliminated = []) {
   const prevId  = _sortedVariants()[_selectedIdx]?.id
   const wasOpen = _detailOpen
 
   _variants = variants
+  _eliminatedVariants = eliminated
 
   const cmp = document.getElementById('layout-comparison')
   if (!cmp) return
 
   cmp.innerHTML = renderComparisonTable(_sortedVariants())
+
+  // Ensure the eliminated section container exists right after the comparison table
+  let elimSection = document.getElementById('eliminated-section')
+  if (!elimSection) {
+    elimSection = document.createElement('div')
+    elimSection.id = 'eliminated-section'
+    cmp.parentNode.insertBefore(elimSection, cmp.nextSibling)
+
+    // Wire the checkbox once when the container is first created
+    document.getElementById('chk-bypass-ckA')
+      ?.addEventListener('change', _renderEliminatedSection)
+  }
+  _renderEliminatedSection()
 
   _restoreSelection(prevId, wasOpen)
 
