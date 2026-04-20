@@ -1212,7 +1212,7 @@ svg.section-drag-active [data-zoom-handle] {
 }
 
 /* Fix for layout shift on view toggle */
-#variant-tbody td {
+#variant-tbody > tr.variant-row > td {
   height: 74px; /* SVG height (60px) + padding (14px) */
   vertical-align: middle;
 }
