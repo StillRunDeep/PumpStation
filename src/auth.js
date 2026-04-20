@@ -1,10 +1,14 @@
 /**
  * 访问密码验证模块
- * 通过输入访问密码来访问页面
+ * 通过输入访问密码或URL token来访问页面
  */
 
 // 预设的访问密码
 const ACCESS_PASSWORD = 'pum123456';
+// 预设的有效token列表
+const VALID_TOKENS = [
+  'pum123456'
+];
 // sessionStorage 键名
 const SESSION_KEY = 'pump_station_verified';
 
@@ -16,6 +20,25 @@ const SESSION_KEY = 'pump_station_verified';
 function validatePassword(password) {
   if (!password) return false;
   return password === ACCESS_PASSWORD;
+}
+
+/**
+ * 验证token是否正确
+ * @param {string} token - 要验证的token
+ * @returns {boolean} 是否正确
+ */
+function validateToken(token) {
+  if (!token) return false;
+  return VALID_TOKENS.includes(token);
+}
+
+/**
+ * 从URL获取token参数
+ * @returns {string|null} token值或null
+ */
+function getTokenFromUrl() {
+  const urlParams = new URLSearchParams(window.location.search);
+  return urlParams.get('token');
 }
 
 /**
@@ -117,9 +140,19 @@ function showPasswordVerificationPage() {
  * 初始化密码验证
  */
 export function initTokenVerification() {
-  if (!isVerified()) {
-    showPasswordVerificationPage();
-    return false;
+  // 先检查是否已经验证过
+  if (isVerified()) {
+    return true;
   }
-  return true;
+  
+  // 检查URL中的token
+  const token = getTokenFromUrl();
+  if (validateToken(token)) {
+    setVerified();
+    return true;
+  }
+  
+  // 显示密码验证页面
+  showPasswordVerificationPage();
+  return false;
 }
