@@ -874,7 +874,7 @@ function _initFloatingBar() {
   if (!sentinel || !bar) return
 
   _floatBarObserver = new IntersectionObserver(([entry]) => {
-    bar.style.display = entry.isIntersecting ? 'none' : 'flex'
+    bar.style.display = entry.isIntersecting || entry.boundingClientRect.y >= 0 ? 'none' : 'flex'
     if (!entry.isIntersecting) _syncFloatingBar()
   }, { threshold: 0 })
   _floatBarObserver.observe(sentinel)
