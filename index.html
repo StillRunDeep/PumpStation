@@ -7,6 +7,8 @@
 </head>
 <body>
 
+<div id="ag41-floating-bar" style="display:none"></div>
+
 <header class="page-header">
   <h1>雨水泵站智能设计系统</h1>
   <p>基于多 Agent 协作的雨水泵站参数自动计算 Demo</p>
@@ -515,8 +517,10 @@
             <button id="btn-ag41-params" title="建筑平面参数设置">建筑平面参数</button>
             <button id="btn-ag41-scorer-params" title="评分参数设置">评分参数</button>
             <button id="btn-ag41-more" hidden>生成方案</button>
+            <button id="btn-ag41-optimize" hidden disabled>优化方案</button>
+            <button id="btn-ag41-merge" hidden disabled title="请选择两个方案进行合并">合并方案</button>
             <button id="btn-ag41-reset" hidden>重置方案</button>
-            <label id="lbl-bypass-ckA" hidden style="display:none;align-items:center;gap:4px;font-size:12px;color:#c0392b;cursor:pointer;user-select:none" title="调试模式：跳过 Checkpoint A，所有方案直接进入阶段2/3生长">
+            <label id="lbl-bypass-ckA" hidden style="display: none !important;" title="调试模式：跳过 Checkpoint A，所有方案直接进入阶段2/3生长">
               <input type="checkbox" id="chk-bypass-ckA" style="cursor:pointer">
               跳过检查点A
             </label>

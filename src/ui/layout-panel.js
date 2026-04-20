@@ -10,8 +10,8 @@ import { ROOM_DEFS } from '../layout/room-defs.js'
 // Module-level state
 let _variants = []
 let _eliminatedVariants = []
-let _selectedIdx = 0       // row index in sorted order
-let _detailOpen = false    // whether the detail inline row is visible
+let _expandedIds = new Set()   // Set of variant IDs currently expanded
+let _showDrawingInList = false; // Our new state variable
 const VW = 1080, VH = 560
 const COL_COUNT = 8
 
@@ -99,55 +99,62 @@ export function renderScorerParamsPanel(params) {
 function renderComparisonTable(variants) {
   const rows = variants.map((v, i) => {
     const cp = v.checkpointADiagnostic || {}
-    // Prefer Checkpoint A (Phase 1 snapshot) values for table display
     const mustSat = cp.mustAdjacency?.satisfied ?? (v.adjacency?.satisfied || []).filter(a => a.type === 'must').length
     const mustTot = cp.mustAdjacency?.total ?? mustSat + (v.adjacency?.violated || []).filter(a => a.type === 'must').length
-    
-    // Hard Redline Violations (General) — Filtered to avoid overlap with Adjacency/Accessibility
-    const uniqueViolations = (v.violations || []).filter(err => 
-      err.constraint !== 'must_adjacent' && err.constraint !== 'ext_access'
-    )
+    const uniqueViolations = (v.violations || []).filter(err => err.constraint !== 'must_adjacent' && err.constraint !== 'ext_access')
     const violCount = uniqueViolations.length
-    const violCell = violCount === 0
-      ? `<span style="color:#27ae60">✓</span>`
-      : `<span style="color:#c0392b">⚠ ${violCount}</span>`
-
-    // Accessibility / Door Access Violations (Specific subset)
+    const violCell = violCount === 0 ? `<span style="color:#27ae60">✓</span>` : `<span style="color:#c0392b">⚠ ${violCount}</span>`
     const daCount = cp.doorAccessCount ?? v.breakdown?.doorAccessCount ?? 0
-    const daCell = daCount === 0
-      ? `<span style="color:#27ae60">✓</span>`
-      : `<span style="color:#c0392b;font-weight:700">⚠ ${daCount}</span>`
-
+    const daCell = daCount === 0 ? `<span style="color:#27ae60">✓</span>` : `<span style="color:#c0392b;font-weight:700">⚠ ${daCount}</span>`
     const eff  = cp.spaceEfficiency != null ? (cp.spaceEfficiency * 100).toFixed(1) + '%' : (v.spaceEfficiency != null ? (v.spaceEfficiency * 100).toFixed(1) + '%' : '—')
-
     const rowBg = i % 2 === 0 ? '#f8fafc' : '#fff'
+
+    const solutionCellContent = _showDrawingInList
+      ? `<svg viewBox="0 0 480 180" style="width: 160px; height: 60px; background: #f4f6f8; vertical-align: middle;">
+           <g transform="translate(0, 0)">${renderLayoutSVG(v, 'ground', 240, 180, { showDims: false, forList: true })}</g>
+           <g transform="translate(240, 0)">${renderLayoutSVG(v, 'level1', 240, 180, { showDims: false, forList: true })}</g>
+         </svg>`
+      : `<strong>${v.id}</strong><br><span style="font-size:11px;color:#555">${v.label}</span>`;
 
     return `
       <tr class="variant-row" data-idx="${i}" data-vid="${v.id}"
           style="cursor:pointer;background:${rowBg}"
-          onclick="window._ag41SelectVariant(${i})">
-        <td class="vr-rank" style="text-align:center;font-weight:600;padding:7px 8px;
-            border-left:4px solid transparent;transition:border-color .15s">${i + 1}</td>
-        <td style="padding:7px 8px"><strong>${v.id}</strong><br>
-          <span style="font-size:11px;color:#555">${v.label}</span></td>
-        <td style="text-align:right;font-weight:700;color:#1a5276;padding:7px 8px">${v.score}</td>
-        <td style="text-align:right;padding:7px 8px">${eff}</td>
-        <td style="text-align:center;padding:7px 8px">${mustSat} / ${mustTot}</td>
-        <td style="text-align:center;padding:7px 8px">${daCell}</td>
+          onclick="window._ag41SelectVariant(${i})"
+          oncontextmenu="window._ag41CollapseAll(event)">
+        <td class="vr-rank" style="text-align:center;font-weight:600;">${i + 1}</td>
+        <td style="padding:7px 8px;">${solutionCellContent}</td>
+        <td style="text-align:right;font-weight:700;color:#1a5276;">${v.score}</td>
+        <td style="text-align:right;">${eff}</td>
+        <td style="text-align:center;">${mustSat} / ${mustTot}</td>
+        <td style="text-align:center;">${daCell}</td>
       </tr>`
   }).join('')
 
   return `
     <div id="comparison-table-wrap">
-      <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <table style="width:100%;border-collapse:collapse;font-size:13px; table-layout: fixed;">
+        <colgroup>
+          <col style="width: 8%;">
+          <col style="width: 32%;">
+          <col style="width: 15%;">
+          <col style="width: 15%;">
+          <col style="width: 15%;">
+          <col style="width: 15%;">
+        </colgroup>
         <thead>
           <tr style="background:#1a3a5c;color:#fff;font-size:12px">
-            <th class="th-tip" data-tip="按综合得分降序排列" style="padding:7px 8px">排名</th>
-            <th class="th-tip" data-tip="方案编号与描述" style="padding:7px 8px;text-align:left">方案</th>
+            <th class="th-tip" data-tip="按综合得分降序排列" style="padding:7px 8px; text-align: center;">排名</th>
+            <th class="th-tip" data-tip="方案编号与描述" style="padding:7px 8px;text-align:left;display:flex;align-items:center;justify-content:space-between">
+              <span>方案</span>
+              <div class="toggle-switch" onclick="window._toggleSolutionView()">
+                <span class="${!_showDrawingInList ? 'active' : ''}">名称</span>
+                <span class="${_showDrawingInList ? 'active' : ''}">图纸</span>
+              </div>
+            </th>
             <th class="th-tip" data-tip="三梯队全量评分总分（越高越好）" style="padding:7px 8px;text-align:right">综合得分</th>
             <th class="th-tip" data-tip="功能房间面积/楼层面积（Phase 1快照）" style="padding:7px 8px;text-align:right">空间有效率</th>
-            <th class="th-tip" data-tip="强邻近要求满足度 (Phase 1快照)" style="padding:7px 8px">强邻近</th>
-            <th class="th-tip" data-tip="未满足的可达性/门禁要求（Phase 1快照）" style="padding:7px 8px">可达性</th>
+            <th class="th-tip" data-tip="强邻近要求满足度 (Phase 1快照)" style="padding:7px 8px; text-align: center;">强邻近</th>
+            <th class="th-tip" data-tip="未满足的可达性/门禁要求（Phase 1快照）" style="padding:7px 8px; text-align: center;">可达性</th>
           </tr>
         </thead>
         <tbody id="variant-tbody">
@@ -165,7 +172,7 @@ function _renderEliminatedSection() {
   const container = document.getElementById('eliminated-section')
   if (!container) return
 
-  const show = document.getElementById('chk-bypass-ckA')?.checked && _eliminatedVariants.length > 0
+  const show = window._bypassCheckpointA && _eliminatedVariants.length > 0
   if (!show) { container.innerHTML = ''; _selectedElimIdx = -1; return }
 
   const rows = _eliminatedVariants.map((v, i) => {
@@ -353,34 +360,34 @@ function buildBreakdownHtml(v) {
     { label: '占地面积',  val: bd.footprint ?? 0 },
     { label: '变压器布置',val: bd.trafo ?? 0 },
     { label: '风机房距离',val: bd.fanRoom ?? 0 },
-    { 
-      label: '临近关系' + (bd.adjMustCount || bd.adjShouldCount ? ` <small style="color:#999;font-weight:normal">(M:${bd.adjMustCount || 0}, S:${bd.adjShouldCount || 0})</small>` : ''), 
-      val: bd.adjacency ?? 0 
+    {
+      label: '临近关系' + (bd.adjMustCount || bd.adjShouldCount ? ` <small style="color:#999;font-weight:normal">(M:${bd.adjMustCount || 0}, S:${bd.adjShouldCount || 0})</small>` : ''),
+      val: bd.adjacency ?? 0
     },
     { label: '走廊完整',  val: bd.corridor ?? 0 },
     { label: '空间有效率',val: bd.efficiency ?? 0 },
     { label: '便捷性',   val: bd.accessibility ?? 0 },
-    { 
-      label: '约束违反' + (bd.violationCount ? ` <small style="color:#999;font-weight:normal">(${bd.violationCount}项)</small>` : '') + fmtDetails(bd.violationDetails), 
-      val: bd.violations ?? 0 
+    {
+      label: '约束违反' + (bd.violationCount ? ` <small style="color:#999;font-weight:normal">(${bd.violationCount}项)</small>` : '') + fmtDetails(bd.violationDetails),
+      val: bd.violations ?? 0
     },
-    { 
-      label: '可达性违反' + (bd.doorAccessCount ? ` <small style="color:#999;font-weight:normal">(${bd.doorAccessCount}处)</small>` : '') + fmtDetails(bd.doorAccessDetails), 
-      val: bd.doorAccess ?? 0 
+    {
+      label: '可达性违反' + (bd.doorAccessCount ? ` <small style="color:#999;font-weight:normal">(${bd.doorAccessCount}处)</small>` : '') + fmtDetails(bd.doorAccessDetails),
+      val: bd.doorAccess ?? 0
     },
-    { 
-      label: '房间缺失' + (bd.missingRoomCount ? ` <small style="color:#999;font-weight:normal">(${bd.missingRoomCount}间)</small>` : '') + fmtDetails(bd.missingRoomDetails), 
-      val: bd.missingRooms ?? 0 
+    {
+      label: '房间缺失' + (bd.missingRoomCount ? ` <small style="color:#999;font-weight:normal">(${bd.missingRoomCount}间)</small>` : '') + fmtDetails(bd.missingRoomDetails),
+      val: bd.missingRooms ?? 0
     },
-    { 
-      label: '长宽比惩罚' + (bd.aspectRatioCount ? ` <small style="color:#999;font-weight:normal">(${bd.aspectRatioCount}项)</small>` : '') + fmtDetails(bd.aspectRatioDetails), 
-      val: bd.aspectRatio ?? 0 
+    {
+      label: '长宽比惩罚' + (bd.aspectRatioCount ? ` <small style="color:#999;font-weight:normal">(${bd.aspectRatioCount}项)</small>` : '') + fmtDetails(bd.aspectRatioDetails),
+      val: bd.aspectRatio ?? 0
     },
   ]
 
   const activeItems = items.filter(item => item.always || item.val !== 0)
   const rows = []
-  
+
   for (let i = 0; i < activeItems.length; i += 2) {
     const it1 = activeItems[i]
     const it2 = activeItems[i + 1]
@@ -468,173 +475,217 @@ function _revitButtonHtml() {
     title="发送 create-pump-room 消息到 Revit Host">生成 Revit 模型</button>`
 }
 
-function insertDetailRow(idx) {
-  removeDetailRow()
-
-  const sorted = _sortedVariants()
-  const v = sorted[idx]
-  if (!v) return
-
-  _revitVariant = v
-
-  const CELL_H = 150;
-  const breakdownHtml = buildBreakdownHtml(v)
-  const title = `方案 ${v.id}：${v.label}  —  ` +
-    `${(v.buildingW / 1000).toFixed(1)} m × ${(v.buildingD / 1000).toFixed(1)} m  得分 ${v.score}`
-
-  const failedA = !v.checkpointADiagnostic?.passes;
-  const failedB = !failedA && v.checkpointBDiagnostic?.partialScore < -1000;
+// Build the inner HTML for a detail row. debugVariant may differ from v when
+// showing a candidate (failed optimization) without replacing the stored variant.
+function _buildDetailInnerHtml(v, message = null, debugVariant = null) {
+  const dv = debugVariant || v
+  const failedA = !dv.checkpointADiagnostic?.passes
+  const failedB = !failedA && dv.checkpointBDiagnostic?.partialScore < -1000
   const renderFloorRow = (floor) => {
-    const debugData = v._debug?.[floor] ?? {};
-    const finalView = `<svg viewBox="0 0 240 180" style="background:#f4f6f8">${renderLayoutSVG(v, floor, 240, 180, { showDims: false })}</svg>`;
-    const bypassed = v.checkpointABypassed;
+    const debugData = dv._debug?.[floor] ?? {}
+    const seedsMeta = dv._debug?.[floor]?.seedsMeta ?? null
+    const finalView = `<svg viewBox="0 0 240 180" style="background:#f4f6f8">${renderLayoutSVG(v, floor, 240, 180, { showDims: false })}</svg>`
+    const bypassed = dv.checkpointABypassed
     const stage3 = bypassed ? '<span class="skipped-text">用户跳过</span>'
       : failedA ? '<span class="skipped-text">未通过红线，未执行</span>'
       : failedB ? '<span class="skipped-text">未通过检查点B，未执行</span>'
-      : (debugData.gridAfterGaps ? renderDebugGrid({ grid: debugData.gridAfterGaps, seeds: debugData.seeds }, 200, 150) : '无数据');
+      : (debugData.gridAfterGaps ? renderDebugGrid({ grid: debugData.gridAfterGaps, seeds: debugData.seeds, seedsMeta }, 200, 150) : '无数据')
     const stage2 = bypassed ? '<span class="skipped-text">用户跳过</span>'
       : failedA ? '<span class="skipped-text">未通过红线，未执行</span>'
-      : (debugData.gridBeforeGaps ? renderDebugGrid({ grid: debugData.gridBeforeGaps, seeds: debugData.seeds }, 200, 150) : '无数据');
-    const stage1 = debugData.gridAfterRect ? renderDebugGrid({ grid: debugData.gridAfterRect, seeds: debugData.seeds }, 200, 150) : '无数据';
-
+      : (debugData.gridBeforeGaps ? renderDebugGrid({ grid: debugData.gridBeforeGaps, seeds: debugData.seeds, seedsMeta }, 200, 150) : '无数据')
+    const stage1 = debugData.gridAfterRect ? renderDebugGrid({ grid: debugData.gridAfterRect, seeds: debugData.seeds, seedsMeta }, 200, 150) : '无数据'
     return `
       <div class="grid-cell final-view">${finalView}</div>
       <div class="grid-cell debug-view">${stage3}</div>
       <div class="grid-cell debug-view">${stage2}</div>
-      <div class="grid-cell debug-view">${stage1}</div>
-    `;
-  };
+      <div class="grid-cell debug-view">${stage1}</div>`
+  }
 
   const headers = `
     <div class="grid-header">正式视图 ${_revitButtonHtml()}</div>
     <div class="grid-header">阶段3 (FillGaps)</div>
     <div class="grid-header">阶段2 (L/U形生长)</div>
-    <div class="grid-header">阶段1 (矩形生长)</div>
-  `;
+    <div class="grid-header">阶段1 (矩形生长)</div>`
 
-  const detailHtml = `
-    <tr class="detail-inline-row" style="background:#f0f7ff">
-      <td colspan="${COL_COUNT}" style="padding:0;border-top:2px solid #2471a3;border-bottom:2px solid #2471a3">
-        <div style="width: 100%;">
-          <div style="overflow-x: auto; border-bottom: 1px solid #ccc; padding-bottom: 8px; margin-bottom: 8px;">
-            <div id="detail-grid-container" style="display: grid; grid-template-columns: repeat(4, 25%); grid-template-rows: auto repeat(2, 150px); gap: 1px; background-color: #aed6f1; padding: 1px; box-sizing: border-box;">
-              ${headers}
-              ${renderFloorRow('ground')}
-              ${renderFloorRow('level1')}
-            </div>
-          </div>
-          <div id="breakdown-container" style="padding: 12px; box-sizing: border-box; background: #fafbfc;">
-            ${breakdownHtml}
-          </div>
-        </div>
-        <style>
-          .grid-cell { background: #fff; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; }
-          .grid-header { font-size: 11px; font-weight: 600; color: #1a3a5c; background: #eaf2f8; text-align: center; padding: 4px; }
-          .grid-cell.final-view { background: #f4f6f8; }
-          .grid-cell.debug-view svg { width: 100%; height: 100%; }
-          .skipped-text { font-size: 11px; color: #95a5a6; font-style: italic; }
-        </style>
-      </td>
-    </tr>`;
+  const bannerHtml = message
+    ? `<div class="detail-msg-banner ${message.isWarning ? 'banner-warn' : 'banner-ok'}">${message.text}</div>`
+    : ''
 
-  const tbody = document.getElementById('variant-tbody');
-  if (!tbody) return;
-  const targetRow = tbody.querySelector(`.variant-row[data-idx="${idx}"]`);
-  if (targetRow) {
-    targetRow.insertAdjacentHTML('afterend', detailHtml);
-  } else {
-    tbody.insertAdjacentHTML('beforeend', detailHtml);
-  }
+  return `
+    ${bannerHtml}
+    <div style="overflow-x:auto;border-bottom:1px solid #ccc;padding-bottom:8px;margin-bottom:8px">
+      <div style="display:grid;grid-template-columns:repeat(4,25%);grid-template-rows:auto repeat(2,150px);gap:1px;background-color:#aed6f1;padding:1px;box-sizing:border-box">
+        ${headers}
+        ${renderFloorRow('ground')}
+        ${renderFloorRow('level1')}
+      </div>
+    </div>
+    <div style="padding:12px;box-sizing:border-box;background:#fafbfc">
+      ${buildBreakdownHtml(v)}
+    </div>`
 }
 
-function removeDetailRow() {
-  document.querySelectorAll('.detail-inline-row').forEach(el => el.remove())
+function insertDetailRow(idx) {
+  const sorted = _sortedVariants()
+  const v = sorted[idx]
+  if (!v) return
+  if (_expandedIds.has(v.id)) return   // already open
+
+  _revitVariant = v
+  _expandedIds.add(v.id)
+
+  const detailHtml = `
+    <tr class="detail-inline-row" data-detail-vid="${v.id}" style="background:#f0f7ff">
+      <td colspan="${COL_COUNT}" style="padding:0;border-top:2px solid #2471a3;border-bottom:2px solid #2471a3">
+        <div style="width:100%;padding:0 0 4px">
+          ${_buildDetailInnerHtml(v)}
+        </div>
+        <style>
+          .grid-cell{background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative}
+          .grid-header{font-size:11px;font-weight:600;color:#1a3a5c;background:#eaf2f8;text-align:center;padding:4px}
+          .grid-cell.final-view{background:#f4f6f8}
+          .grid-cell.debug-view svg{width:100%;height:100%}
+          .skipped-text{font-size:11px;color:#95a5a6;font-style:italic}
+          .detail-msg-banner{padding:6px 12px;font-size:12px;font-weight:600;border-bottom:1px solid #ccc}
+          .banner-warn{background:#fff3cd;color:#856404}
+          .banner-ok{background:#d4edda;color:#155724}
+        </style>
+      </td>
+    </tr>`
+
+  const tbody = document.getElementById('variant-tbody')
+  if (!tbody) return
+  const targetRow = tbody.querySelector(`.variant-row[data-idx="${idx}"]`)
+  if (targetRow) {
+    targetRow.insertAdjacentHTML('afterend', detailHtml)
+  } else {
+    tbody.insertAdjacentHTML('beforeend', detailHtml)
+  }
+  _syncButtonStates()
+}
+
+// Remove specific variant's detail row (by vid), or all main-variant detail rows (no arg).
+function removeDetailRow(vid = null) {
+  if (vid === null) {
+    document.querySelectorAll('.detail-inline-row[data-detail-vid]').forEach(el => el.remove())
+    _expandedIds.clear()
+  } else {
+    document.querySelector(`.detail-inline-row[data-detail-vid="${vid}"]`)?.remove()
+    _expandedIds.delete(vid)
+  }
+  _syncButtonStates()
+}
+
+// Re-render an open detail row in place with optional override display data and message.
+export function refreshDetailRow(variantId, displayVariant, message = null) {
+  const row = document.querySelector(`.detail-inline-row[data-detail-vid="${variantId}"]`)
+  if (!row) return
+  const v = _variants.find(x => x.id === variantId) || displayVariant
+  const inner = row.querySelector('div')
+  if (inner) inner.innerHTML = _buildDetailInnerHtml(v, message, displayVariant !== v ? displayVariant : null)
+}
+
+// ── Button state sync ─────────────────────────────────────────────────
+
+function _syncButtonStates() {
+  const optimizeBtn = document.getElementById('btn-ag41-optimize')
+  if (optimizeBtn) optimizeBtn.disabled = _expandedIds.size === 0
+  const mergeBtn = document.getElementById('btn-ag41-merge')
+  if (mergeBtn) {
+    const selectedCount = _expandedIds.size
+    mergeBtn.disabled = selectedCount !== 2
+    if (selectedCount > 2) {
+      mergeBtn.title = '只能选择两个方案进行合并'
+    } else if (selectedCount !== 2) {
+      mergeBtn.title = '请选择两个方案进行合并'
+    } else {
+      mergeBtn.title = ''
+    }
+  }
+  _syncFloatingBar()
+}
+
+function collapseAll() {
+  removeDetailRow()   // no arg → removes all main-variant detail rows
+  applyRowSelection()
 }
 
 // ── Row selection visual ──────────────────────────────────────────────
 
-function applyRowSelection(idx) {
+function applyRowSelection() {
   document.querySelectorAll('.variant-row').forEach(row => {
+    const vid = row.dataset.vid
     const i = parseInt(row.dataset.idx, 10)
-    const isSelected = (i === idx)
-    row.style.background = isSelected ? '#dceefb' : (i % 2 === 0 ? '#f8fafc' : '#fff')
+    const isExpanded = _expandedIds.has(vid)
+    row.style.background = isExpanded ? '#dceefb' : (i % 2 === 0 ? '#f8fafc' : '#fff')
     const rankCell = row.querySelector('.vr-rank')
-    if (rankCell) rankCell.style.borderLeft = isSelected ? '4px solid #2471a3' : '4px solid transparent'
+    if (rankCell) rankCell.style.borderLeft = isExpanded ? '4px solid #2471a3' : '4px solid transparent'
   })
 }
 
 // ── Core select logic ─────────────────────────────────────────────────
 
 function selectVariant(idx, { scroll = false, toggle = false } = {}) {
-  const alreadySelected = _selectedIdx === idx
-  _selectedIdx = idx
   // Deselect any eliminated row when selecting from main leaderboard
   if (_selectedElimIdx !== -1) { _selectedElimIdx = -1; _renderEliminatedSection() }
 
-  applyRowSelection(idx)
+  const sorted = _sortedVariants()
+  const v = sorted[idx]
+  if (!v) return
+  const vid = v.id
 
-  if (toggle && alreadySelected && _detailOpen) {
-    removeDetailRow()
-    _detailOpen = false
+  if (toggle && _expandedIds.has(vid)) {
+    removeDetailRow(vid)
+    applyRowSelection()
     return
   }
 
   insertDetailRow(idx)
-  _detailOpen = true
+  applyRowSelection()
 
   window.dispatchEvent(new CustomEvent('ag41-detail-opened'))
 
   if (scroll) {
-    const detailRow = document.querySelector('.detail-inline-row')
-    detailRow?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    document.querySelector(`.detail-inline-row[data-detail-vid="${vid}"]`)
+      ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   }
 }
 
 // ── Selection restoration ─────────────────────────────────────────────
 
-function _restoreSelection(prevId, wasOpen) {
+function _restoreSelection(prevExpandedIds) {
+  _expandedIds.clear()
+  document.querySelectorAll('.detail-inline-row[data-detail-vid]').forEach(el => el.remove())
+
   const sorted = _sortedVariants()
-  let newIdx = 0
-  if (prevId) {
-    const found = sorted.findIndex(v => v.id === prevId)
-    if (found !== -1) newIdx = found
-  }
-  _selectedIdx = newIdx
-  _detailOpen  = false
+  prevExpandedIds.forEach(vid => {
+    const idx = sorted.findIndex(v => v.id === vid)
+    if (idx !== -1) insertDetailRow(idx)
+  })
 
-  applyRowSelection(newIdx)
-
-  if (wasOpen) {
-    insertDetailRow(newIdx)
-    _detailOpen = true
-  }
+  applyRowSelection()
+  _syncButtonStates()
 }
 
 // ── Re-score all variants, then re-render table ───────────────────────
 
 function _rescoreAndRerender() {
-  // Grab previous state for restoration
-  const prevId  = _sortedVariants()[_selectedIdx]?.id
-  const wasOpen = _detailOpen
+  const prevExpandedIds = new Set(_expandedIds)
 
-  // Re-run scoreLayout on every stored variant using the updated SCORER_PARAMS
   _variants = _variants.map(v => {
     const { score, spaceEfficiency, efficiencyScore, accessibilityScore, diversityPenalty, breakdown } = scoreLayout(v)
     return { ...v, score, spaceEfficiency, efficiencyScore, accessibilityScore, diversityPenalty, breakdown }
   })
 
-  // Replace just the table wrapper (keep params panel intact above)
   const wrap = document.getElementById('comparison-table-wrap')
   if (wrap) {
     wrap.outerHTML = renderComparisonTable(_sortedVariants())
   } else {
     const cmp = document.getElementById('layout-comparison')
-    if (cmp) {
-      cmp.innerHTML = renderComparisonTable(_sortedVariants())
-    }
+    if (cmp) cmp.innerHTML = renderComparisonTable(_sortedVariants())
   }
 
-  _restoreSelection(prevId, wasOpen)
+  _restoreSelection(prevExpandedIds)
 }
 
 // ── Public render function ────────────────────────────────────────────
@@ -648,8 +699,7 @@ function _rescoreAndRerender() {
  * @param {Array} eliminated Variants ranked 10–18, shown in debug mode
  */
 export function renderLayoutPanel(variants, eliminated = []) {
-  const prevId  = _sortedVariants()[_selectedIdx]?.id
-  const wasOpen = _detailOpen
+  const prevExpandedIds = new Set(_expandedIds)
 
   _variants = variants
   _eliminatedVariants = eliminated
@@ -672,21 +722,26 @@ export function renderLayoutPanel(variants, eliminated = []) {
   }
   _renderEliminatedSection()
 
-  _restoreSelection(prevId, wasOpen)
+  _restoreSelection(prevExpandedIds)
 
   // Update badge + controls
   const badge = document.getElementById('ag41-badge')
   if (badge) badge.style.display = 'none'
   document.getElementById('card-ag41-wrap').hidden = false
-  const moreBtn = document.getElementById('btn-ag41-more')
-  if (moreBtn) moreBtn.hidden = false
-  const resetBtn = document.getElementById('btn-ag41-reset')
-  if (resetBtn) resetBtn.hidden = false
-  const bypassLbl = document.getElementById('lbl-bypass-ckA')
-  if (bypassLbl) { bypassLbl.hidden = false; bypassLbl.style.display = 'flex'; }
+  ;['btn-ag41-more','btn-ag41-optimize','btn-ag41-merge','btn-ag41-reset'].forEach(id => {
+    const btn = document.getElementById(id)
+    if (btn) btn.hidden = false
+  })
 
+  _initFloatingBar()
   showAg41Notify('已生成初始方案。可点击"生成方案"持续优化。', true)
 }
+
+function _toggleSolutionView() {
+  _showDrawingInList = !_showDrawingInList;
+  _rescoreAndRerender();
+}
+window._toggleSolutionView = _toggleSolutionView;
 
 // ── Global handlers ───────────────────────────────────────────────────
 
@@ -718,8 +773,12 @@ window._ag41GenerateRevit = () => {
   }
 }
 
+window._ag41CollapseAll = function(event) {
+  if (event) event.preventDefault()
+  collapseAll()
+}
+
 window._ag41ConfirmVariant = function(idx) {
-  _selectedIdx = idx
   const sorted = _sortedVariants()
   window.dispatchEvent(new CustomEvent('ag41-layout-confirmed', {
     detail: { variant: sorted[idx] },
@@ -737,35 +796,44 @@ window._ag41UpdateParam = function(key, value) {
 
 /** Reset all params to defaults, save, rebuild full panel. */
 window._ag41ResetParams = function() {
-  // Clear existing keys and re-assign defaults to ensure a clean reset
   Object.keys(SCORER_PARAMS).forEach(key => delete SCORER_PARAMS[key])
   Object.assign(SCORER_PARAMS, DEFAULT_SCORER_PARAMS)
   saveScorerParams(SCORER_PARAMS)
 
-  // Refresh the params panel UI if it exists (e.g., in a modal)
   const modalWrap = document.getElementById('modal-scorer-wrap')
-  if (modalWrap) {
-    modalWrap.innerHTML = renderScorerParamsPanel(SCORER_PARAMS)
-  }
+  if (modalWrap) modalWrap.innerHTML = renderScorerParamsPanel(SCORER_PARAMS)
 
   const cmp = document.getElementById('layout-comparison')
   if (!cmp) return
-  const prevId  = _sortedVariants()[_selectedIdx]?.id
-  const wasOpen = _detailOpen
+  const prevExpandedIds = new Set(_expandedIds)
 
-  // Re-score with reset params
   _variants = _variants.map(v => {
     const { score, spaceEfficiency, efficiencyScore, accessibilityScore, diversityPenalty, breakdown } = scoreLayout(v)
     return { ...v, score, spaceEfficiency, efficiencyScore, accessibilityScore, diversityPenalty, breakdown }
   })
 
-  // Full rebuild (so input values reset too)
   cmp.innerHTML = renderComparisonTable(_sortedVariants())
-  _restoreSelection(prevId, wasOpen)
+  _restoreSelection(prevExpandedIds)
 }
 
 export function getSelectedVariant() {
-  return _sortedVariants()[_selectedIdx] || null
+  const sorted = _sortedVariants()
+  return sorted.find(v => _expandedIds.has(v.id)) || null
+}
+
+export function getExpandedVariants() {
+  const sorted = _sortedVariants()
+  return sorted.filter(v => _expandedIds.has(v.id))
+}
+
+export function replaceVariant(oldId, newVariant) {
+  const idx = _variants.findIndex(v => v.id === oldId)
+  if (idx === -1) return
+  _variants[idx] = newVariant
+  const prevExpandedIds = new Set(_expandedIds)
+  const cmp = document.getElementById('layout-comparison')
+  if (cmp) cmp.innerHTML = renderComparisonTable(_sortedVariants())
+  _restoreSelection(prevExpandedIds)
 }
 
 export function getVariants() {
@@ -781,4 +849,42 @@ export function showAg41Notify(msg, isImproved) {
 
 export function rescoreAndRerender() {
   _rescoreAndRerender();
+}
+
+// ── Floating action bar ───────────────────────────────────────────────
+
+const FLOAT_BUTTON_IDS = ['btn-ag41-more','btn-ag41-optimize','btn-ag41-merge','btn-ag41-reset']
+let _floatBarObserver = null
+
+function _syncFloatingBar() {
+  const bar = document.getElementById('ag41-floating-bar')
+  if (!bar || bar.style.display === 'none') return
+  bar.innerHTML = FLOAT_BUTTON_IDS.map(id => {
+    const real = document.getElementById(id)
+    if (!real || real.hidden) return ''
+    return `<button class="float-btn" ${real.disabled ? 'disabled' : ''}
+      onclick="document.getElementById('${id}').click()">${real.textContent}</button>`
+  }).join('')
+}
+
+function _initFloatingBar() {
+  if (_floatBarObserver) return
+  const sentinel = document.querySelector('#card-ag41-wrap summary.card-header')
+  const bar = document.getElementById('ag41-floating-bar')
+  if (!sentinel || !bar) return
+
+  _floatBarObserver = new IntersectionObserver(([entry]) => {
+    bar.style.display = entry.isIntersecting ? 'none' : 'flex'
+    if (!entry.isIntersecting) _syncFloatingBar()
+  }, { threshold: 0 })
+  _floatBarObserver.observe(sentinel)
+
+  // Auto-sync whenever real buttons change text or disabled state
+  const headerBtns = document.querySelector('.card-header-buttons')
+  if (headerBtns) {
+    new MutationObserver(() => _syncFloatingBar()).observe(headerBtns, {
+      subtree: true, attributes: true, characterData: true,
+      attributeFilter: ['disabled', 'hidden'],
+    })
+  }
 }
