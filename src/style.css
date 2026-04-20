@@ -190,7 +190,7 @@ details .adv-grid { margin-top: 12px; }
   text-decoration: none; /* No underline on hover */
 }
 
-/* We can use a trick with a pseudo-element or just keep it simple with JS handling. 
+/* We can use a trick with a pseudo-element or just keep it simple with JS handling.
    Actually, the most intuitive way is to have the whole header NOT look like a giant button. */
 
 .card-header::before {
@@ -731,8 +731,9 @@ svg.zoom-active {
   border-left: 3px solid #117a65;
 }
 
-/* ── "更多方案" button ── */
-#btn-ag41-more, #btn-ag41-reset, #btn-ag41-params, #btn-ag41-scorer-params {
+/* ── AG4 header buttons ── */
+#btn-ag41-more, #btn-ag41-optimize, #btn-ag41-merge, #btn-ag41-reset,
+#btn-ag41-params, #btn-ag41-scorer-params {
   padding: 4px 12px;
   background: rgba(255,255,255,0.15);
   color: #fff;
@@ -742,8 +743,42 @@ svg.zoom-active {
   cursor: pointer;
   transition: background 0.2s, opacity 0.2s;
 }
-#btn-ag41-more:hover:not(:disabled), #btn-ag41-reset:hover:not(:disabled) { background: rgba(255,255,255,0.3); }
-#btn-ag41-more:disabled, #btn-ag41-reset:disabled { opacity: 0.6; cursor: not-allowed; }
+#btn-ag41-more:hover:not(:disabled), #btn-ag41-optimize:hover:not(:disabled),
+#btn-ag41-merge:hover:not(:disabled), #btn-ag41-reset:hover:not(:disabled) {
+  background: rgba(255,255,255,0.3);
+}
+#btn-ag41-more:disabled, #btn-ag41-optimize:disabled,
+#btn-ag41-merge:disabled, #btn-ag41-reset:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ── Floating action bar ── */
+#ag41-floating-bar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 1000;
+  background: #1a3a5c;
+  padding: 6px 16px;
+  gap: 8px;
+  align-items: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,.35);
+}
+#ag41-floating-bar::before {
+  content: 'AG4 布局';
+  font-size: 12px;
+  color: rgba(255,255,255,.6);
+  margin-right: 8px;
+}
+.float-btn {
+  padding: 4px 12px;
+  background: rgba(255,255,255,0.15);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.4);
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.2s, opacity 0.2s;
+}
+.float-btn:hover:not(:disabled) { background: rgba(255,255,255,0.3); }
+.float-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* ── AG4-1 inline notification ── */
 .notify-bar-wrap {
@@ -1149,3 +1184,36 @@ svg.section-drag-active [data-zoom-handle] {
   margin-bottom: 16px;
   border: 1px solid #fcc;
 }
+/* Toggle Switch for Table Header */
+.toggle-switch {
+  position: relative;
+  z-index: 2;
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background-color: rgba(255, 255, 255, 0.2);
+  border-radius: 15px;
+  padding: 3px;
+  cursor: pointer;
+}
+.toggle-switch span {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 12px;
+  transition: all 0.2s ease-in-out;
+  color: #fff;
+}
+.toggle-switch span.active {
+  background-color: #fff;
+  color: var(--color-primary);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+/* Fix for layout shift on view toggle */
+#variant-tbody td {
+  height: 74px; /* SVG height (60px) + padding (14px) */
+  vertical-align: middle;
+}
+

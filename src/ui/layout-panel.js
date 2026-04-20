@@ -11,6 +11,7 @@ import { ROOM_DEFS } from '../layout/room-defs.js'
 let _variants = []
 let _eliminatedVariants = []
 let _expandedIds = new Set()   // Set of variant IDs currently expanded
+let _showDrawingInList = false; // Our new state variable
 const VW = 1080, VH = 560
 const COL_COUNT = 8
 
@@ -98,56 +99,62 @@ export function renderScorerParamsPanel(params) {
 function renderComparisonTable(variants) {
   const rows = variants.map((v, i) => {
     const cp = v.checkpointADiagnostic || {}
-    // Prefer Checkpoint A (Phase 1 snapshot) values for table display
     const mustSat = cp.mustAdjacency?.satisfied ?? (v.adjacency?.satisfied || []).filter(a => a.type === 'must').length
     const mustTot = cp.mustAdjacency?.total ?? mustSat + (v.adjacency?.violated || []).filter(a => a.type === 'must').length
-    
-    // Hard Redline Violations (General) — Filtered to avoid overlap with Adjacency/Accessibility
-    const uniqueViolations = (v.violations || []).filter(err => 
-      err.constraint !== 'must_adjacent' && err.constraint !== 'ext_access'
-    )
+    const uniqueViolations = (v.violations || []).filter(err => err.constraint !== 'must_adjacent' && err.constraint !== 'ext_access')
     const violCount = uniqueViolations.length
-    const violCell = violCount === 0
-      ? `<span style="color:#27ae60">✓</span>`
-      : `<span style="color:#c0392b">⚠ ${violCount}</span>`
-
-    // Accessibility / Door Access Violations (Specific subset)
+    const violCell = violCount === 0 ? `<span style="color:#27ae60">✓</span>` : `<span style="color:#c0392b">⚠ ${violCount}</span>`
     const daCount = cp.doorAccessCount ?? v.breakdown?.doorAccessCount ?? 0
-    const daCell = daCount === 0
-      ? `<span style="color:#27ae60">✓</span>`
-      : `<span style="color:#c0392b;font-weight:700">⚠ ${daCount}</span>`
-
+    const daCell = daCount === 0 ? `<span style="color:#27ae60">✓</span>` : `<span style="color:#c0392b;font-weight:700">⚠ ${daCount}</span>`
     const eff  = cp.spaceEfficiency != null ? (cp.spaceEfficiency * 100).toFixed(1) + '%' : (v.spaceEfficiency != null ? (v.spaceEfficiency * 100).toFixed(1) + '%' : '—')
-
     const rowBg = i % 2 === 0 ? '#f8fafc' : '#fff'
+
+    const solutionCellContent = _showDrawingInList
+      ? `<svg viewBox="0 0 480 180" style="width: 160px; height: 60px; background: #f4f6f8; vertical-align: middle;">
+           <g transform="translate(0, 0)">${renderLayoutSVG(v, 'ground', 240, 180, { showDims: false, forList: true })}</g>
+           <g transform="translate(240, 0)">${renderLayoutSVG(v, 'level1', 240, 180, { showDims: false, forList: true })}</g>
+         </svg>`
+      : `<strong>${v.id}</strong><br><span style="font-size:11px;color:#555">${v.label}</span>`;
 
     return `
       <tr class="variant-row" data-idx="${i}" data-vid="${v.id}"
           style="cursor:pointer;background:${rowBg}"
           onclick="window._ag41SelectVariant(${i})"
           oncontextmenu="window._ag41CollapseAll(event)">
-        <td class="vr-rank" style="text-align:center;font-weight:600;padding:7px 8px;
-            border-left:4px solid transparent;transition:border-color .15s">${i + 1}</td>
-        <td style="padding:7px 8px"><strong>${v.id}</strong><br>
-          <span style="font-size:11px;color:#555">${v.label}</span></td>
-        <td style="text-align:right;font-weight:700;color:#1a5276;padding:7px 8px">${v.score}</td>
-        <td style="text-align:right;padding:7px 8px">${eff}</td>
-        <td style="text-align:center;padding:7px 8px">${mustSat} / ${mustTot}</td>
-        <td style="text-align:center;padding:7px 8px">${daCell}</td>
+        <td class="vr-rank" style="text-align:center;font-weight:600;">${i + 1}</td>
+        <td style="padding:7px 8px;">${solutionCellContent}</td>
+        <td style="text-align:right;font-weight:700;color:#1a5276;">${v.score}</td>
+        <td style="text-align:right;">${eff}</td>
+        <td style="text-align:center;">${mustSat} / ${mustTot}</td>
+        <td style="text-align:center;">${daCell}</td>
       </tr>`
   }).join('')
 
   return `
     <div id="comparison-table-wrap">
-      <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <table style="width:100%;border-collapse:collapse;font-size:13px; table-layout: fixed;">
+        <colgroup>
+          <col style="width: 8%;">
+          <col style="width: 32%;">
+          <col style="width: 15%;">
+          <col style="width: 15%;">
+          <col style="width: 15%;">
+          <col style="width: 15%;">
+        </colgroup>
         <thead>
           <tr style="background:#1a3a5c;color:#fff;font-size:12px">
-            <th class="th-tip" data-tip="按综合得分降序排列" style="padding:7px 8px">排名</th>
-            <th class="th-tip" data-tip="方案编号与描述" style="padding:7px 8px;text-align:left">方案</th>
+            <th class="th-tip" data-tip="按综合得分降序排列" style="padding:7px 8px; text-align: center;">排名</th>
+            <th class="th-tip" data-tip="方案编号与描述" style="padding:7px 8px;text-align:left;display:flex;align-items:center;justify-content:space-between">
+              <span>方案</span>
+              <div class="toggle-switch" onclick="window._toggleSolutionView()">
+                <span class="${!_showDrawingInList ? 'active' : ''}">名称</span>
+                <span class="${_showDrawingInList ? 'active' : ''}">图纸</span>
+              </div>
+            </th>
             <th class="th-tip" data-tip="三梯队全量评分总分（越高越好）" style="padding:7px 8px;text-align:right">综合得分</th>
             <th class="th-tip" data-tip="功能房间面积/楼层面积（Phase 1快照）" style="padding:7px 8px;text-align:right">空间有效率</th>
-            <th class="th-tip" data-tip="强邻近要求满足度 (Phase 1快照)" style="padding:7px 8px">强邻近</th>
-            <th class="th-tip" data-tip="未满足的可达性/门禁要求（Phase 1快照）" style="padding:7px 8px">可达性</th>
+            <th class="th-tip" data-tip="强邻近要求满足度 (Phase 1快照)" style="padding:7px 8px; text-align: center;">强邻近</th>
+            <th class="th-tip" data-tip="未满足的可达性/门禁要求（Phase 1快照）" style="padding:7px 8px; text-align: center;">可达性</th>
           </tr>
         </thead>
         <tbody id="variant-tbody">
@@ -165,7 +172,7 @@ function _renderEliminatedSection() {
   const container = document.getElementById('eliminated-section')
   if (!container) return
 
-  const show = document.getElementById('chk-bypass-ckA')?.checked && _eliminatedVariants.length > 0
+  const show = window._bypassCheckpointA && _eliminatedVariants.length > 0
   if (!show) { container.innerHTML = ''; _selectedElimIdx = -1; return }
 
   const rows = _eliminatedVariants.map((v, i) => {
@@ -353,34 +360,34 @@ function buildBreakdownHtml(v) {
     { label: '占地面积',  val: bd.footprint ?? 0 },
     { label: '变压器布置',val: bd.trafo ?? 0 },
     { label: '风机房距离',val: bd.fanRoom ?? 0 },
-    { 
-      label: '临近关系' + (bd.adjMustCount || bd.adjShouldCount ? ` <small style="color:#999;font-weight:normal">(M:${bd.adjMustCount || 0}, S:${bd.adjShouldCount || 0})</small>` : ''), 
-      val: bd.adjacency ?? 0 
+    {
+      label: '临近关系' + (bd.adjMustCount || bd.adjShouldCount ? ` <small style="color:#999;font-weight:normal">(M:${bd.adjMustCount || 0}, S:${bd.adjShouldCount || 0})</small>` : ''),
+      val: bd.adjacency ?? 0
     },
     { label: '走廊完整',  val: bd.corridor ?? 0 },
     { label: '空间有效率',val: bd.efficiency ?? 0 },
     { label: '便捷性',   val: bd.accessibility ?? 0 },
-    { 
-      label: '约束违反' + (bd.violationCount ? ` <small style="color:#999;font-weight:normal">(${bd.violationCount}项)</small>` : '') + fmtDetails(bd.violationDetails), 
-      val: bd.violations ?? 0 
+    {
+      label: '约束违反' + (bd.violationCount ? ` <small style="color:#999;font-weight:normal">(${bd.violationCount}项)</small>` : '') + fmtDetails(bd.violationDetails),
+      val: bd.violations ?? 0
     },
-    { 
-      label: '可达性违反' + (bd.doorAccessCount ? ` <small style="color:#999;font-weight:normal">(${bd.doorAccessCount}处)</small>` : '') + fmtDetails(bd.doorAccessDetails), 
-      val: bd.doorAccess ?? 0 
+    {
+      label: '可达性违反' + (bd.doorAccessCount ? ` <small style="color:#999;font-weight:normal">(${bd.doorAccessCount}处)</small>` : '') + fmtDetails(bd.doorAccessDetails),
+      val: bd.doorAccess ?? 0
     },
-    { 
-      label: '房间缺失' + (bd.missingRoomCount ? ` <small style="color:#999;font-weight:normal">(${bd.missingRoomCount}间)</small>` : '') + fmtDetails(bd.missingRoomDetails), 
-      val: bd.missingRooms ?? 0 
+    {
+      label: '房间缺失' + (bd.missingRoomCount ? ` <small style="color:#999;font-weight:normal">(${bd.missingRoomCount}间)</small>` : '') + fmtDetails(bd.missingRoomDetails),
+      val: bd.missingRooms ?? 0
     },
-    { 
-      label: '长宽比惩罚' + (bd.aspectRatioCount ? ` <small style="color:#999;font-weight:normal">(${bd.aspectRatioCount}项)</small>` : '') + fmtDetails(bd.aspectRatioDetails), 
-      val: bd.aspectRatio ?? 0 
+    {
+      label: '长宽比惩罚' + (bd.aspectRatioCount ? ` <small style="color:#999;font-weight:normal">(${bd.aspectRatioCount}项)</small>` : '') + fmtDetails(bd.aspectRatioDetails),
+      val: bd.aspectRatio ?? 0
     },
   ]
 
   const activeItems = items.filter(item => item.always || item.val !== 0)
   const rows = []
-  
+
   for (let i = 0; i < activeItems.length; i += 2) {
     const it1 = activeItems[i]
     const it2 = activeItems[i + 1]
@@ -725,13 +732,16 @@ export function renderLayoutPanel(variants, eliminated = []) {
     const btn = document.getElementById(id)
     if (btn) btn.hidden = false
   })
-  // The checkbox is now controlled by a shortcut, so we don't need to show it.
-  // const bypassLbl = document.getElementById('lbl-bypass-ckA')
-  // if (bypassLbl) { bypassLbl.hidden = false; bypassLbl.style.display = 'flex'; }
 
   _initFloatingBar()
   showAg41Notify('已生成初始方案。可点击"生成方案"持续优化。', true)
 }
+
+function _toggleSolutionView() {
+  _showDrawingInList = !_showDrawingInList;
+  _rescoreAndRerender();
+}
+window._toggleSolutionView = _toggleSolutionView;
 
 // ── Global handlers ───────────────────────────────────────────────────
 
