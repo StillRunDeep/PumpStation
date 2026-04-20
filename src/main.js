@@ -4,6 +4,8 @@ import { initTokenVerification } from './auth.js'
 // 初始化token验证
 const isTokenValid = initTokenVerification()
 
+window._bypassCheckpointA = false;
+
 import { runUserParams } from './agents/user-params.js'
 import { runTopology } from './agents/topology.js'
 import { runPoolDepth } from './agents/pool-depth.js'
@@ -12,7 +14,7 @@ import { SPACE_RULES_DEFAULT } from './data/fitting-dims.js'
 import { runPumpSpec } from './agents/pump-spec.js'
 import { runPipeSizing, PIPE_SCHEMES } from './agents/pipe-sizing.js'
 import { runDrawing } from './agents/drawing.js'
-import { runAG41 } from './agents/ag41-building-layout.js'
+import { runAG41, optimizeVariant, generateMergedLayout } from './agents/ag41-building-layout.js'
 import { mergeVariants } from './agents/ag42-layout-eval.js'
 
 /**
@@ -43,7 +45,7 @@ function applyLayoutResult(newRaw, existing, isReset = false) {
   return { variants, improved, newScored }
 }
 import { renderAG00, renderAG01, renderPoolDepth, renderPipeSizing, renderMaintenanceRoom, renderPumpSpec, renderRainfallCard, renderSchemeOptions } from './ui/results-panel.js'
-import { renderLayoutPanel, getVariants, showAg41Notify, renderScorerParamsPanel, rescoreAndRerender } from './ui/layout-panel.js'
+import { renderLayoutPanel, getVariants, getSelectedVariant, getExpandedVariants, replaceVariant, refreshDetailRow, showAg41Notify, renderScorerParamsPanel, rescoreAndRerender } from './ui/layout-panel.js'
 import { SCORER_PARAMS } from './layout/scorer-params.js'
 import { renderBuildingParamsPanel } from './ui/building-params-panel.js'
 import { getDefaultUserParams } from './layout/user-params.js'
@@ -696,53 +698,91 @@ window.addEventListener('ag41-detail-opened', () => {
 });
 
 document.getElementById('btn-ag41-more').addEventListener('click', () => {
-  const btn = document.getElementById('btn-ag41-more');
+  const btn = document.getElementById('btn-ag41-more')
 
   if (isGeneratingLayouts) {
-    // Stop generation
-    isGeneratingLayouts = false;
-    if (generationReqId) {
-      cancelAnimationFrame(generationReqId);
-      generationReqId = null;
-    }
-    btn.textContent = '生成更多方案';
-    showAg41Notify('已停止持续生成', false);
+    isGeneratingLayouts = false
+    if (generationReqId) { cancelAnimationFrame(generationReqId); generationReqId = null }
+    btn.textContent = '生成方案'
+    showAg41Notify('已停止生成', false)
   } else {
-    // Start generation
-    isGeneratingLayouts = true;
-    btn.textContent = '停止';
+    isGeneratingLayouts = true
+    btn.textContent = '停止生成'
 
     const generationLoop = async () => {
-      if (!isGeneratingLayouts) {
-        btn.textContent = '生成更多方案';
-        return;
-      }
-
+      if (!isGeneratingLayouts) { btn.textContent = '生成方案'; return }
       try {
-        const existing = getVariants();
-        const newRaw = await runAG41(existing, () => !isGeneratingLayouts);
-        if (newRaw === null) { // runAG41 might be cancelled
-          isGeneratingLayouts = false;
-          btn.textContent = '生成更多方案';
-          return;
-        }
-        applyLayoutResult(newRaw, existing, false);
+        const existing = getVariants()
+        const newRaw = await runAG41(existing, () => !isGeneratingLayouts, { randomOnly: false })
+        if (newRaw === null) { isGeneratingLayouts = false; btn.textContent = '生成方案'; return }
+        applyLayoutResult(newRaw, existing, false)
       } catch (error) {
-        console.error("Error during layout generation loop:", error);
-        showAg41Notify('生成新方案时出错', false);
-        isGeneratingLayouts = false;
-        btn.textContent = '生成更多方案';
-        return;
+        console.error('layout generation error:', error)
+        showAg41Notify('生成新方案时出错', false)
+        isGeneratingLayouts = false
+        btn.textContent = '生成方案'
+        return
       }
+      if (isGeneratingLayouts) generationReqId = requestAnimationFrame(generationLoop)
+    }
 
-      if (isGeneratingLayouts) {
-        generationReqId = requestAnimationFrame(generationLoop);
-      }
-    };
-
-    generationReqId = requestAnimationFrame(generationLoop);
+    generationReqId = requestAnimationFrame(generationLoop)
   }
-});
+})
+
+document.getElementById('btn-ag41-optimize').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-ag41-optimize')
+  const expanded = getExpandedVariants()
+  if (expanded.length === 0) return
+  btn.disabled = true
+  btn.textContent = '优化中…'
+  try {
+        // From the expanded variants, pick one to optimize at random
+    const selected = expanded[Math.floor(Math.random() * expanded.length)];
+    const candidate = await optimizeVariant(selected)
+    candidate.id = selected.id
+    if (candidate.score > selected.score) {
+      replaceVariant(selected.id, candidate)
+      showAg41Notify(`方案 ${selected.id} 已更新 (${selected.score} → ${candidate.score})`, true)
+    } else {
+      // 不替换，仅展示候选方案的种子箭头 + 消息
+      const msg = {
+        text: `本次优化：${candidate.score}分，未超过当前 ${selected.score}分，未替换`,
+        isWarning: true,
+      }
+      const displayVariant = { ...selected, _debug: candidate._debug }
+      refreshDetailRow(selected.id, displayVariant, msg)
+      showAg41Notify(msg.text, false)
+    }
+  } catch (e) {
+    console.error('optimizeVariant failed:', e)
+    showAg41Notify('优化失败', false)
+  } finally {
+    btn.disabled = false
+    btn.textContent = '优化方案'
+  }
+})
+
+document.getElementById('btn-ag41-merge').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-ag41-merge')
+  const expanded = getExpandedVariants()
+  if (expanded.length !== 2) return
+  btn.disabled = true
+  btn.textContent = '合并中…'
+  try {
+    const merged = await generateMergedLayout(expanded[0], expanded[1])
+    const existing = getVariants()
+    const { variants, eliminated } = mergeVariants(existing, [merged])
+    renderLayoutPanel(variants, eliminated)
+    showAg41Notify(`合并方案已生成：${merged.id}（得分 ${merged.score}）`, true)
+  } catch (e) {
+    console.error('merge failed:', e)
+    showAg41Notify('合并失败', false)
+  } finally {
+    btn.disabled = false
+    btn.textContent = '合并方案'
+  }
+})
 
 document.getElementById('btn-ag41-reset').addEventListener('click', async () => {
   const btn = document.getElementById('btn-ag41-reset')
@@ -911,3 +951,13 @@ function initSummaryToggleLogic() {
 
 document.getElementById('btn-rainfall-recalc').addEventListener('click', recalcRainfall)
 document.getElementById('btn-rainfall-downstream').addEventListener('click', runFromRainfall)
+
+// Keyboard shortcut for bypassing Checkpoint A
+window.addEventListener('keydown', (e) => {
+  if (e.ctrlKey && e.key.toLowerCase() === 'b') {
+    e.preventDefault();
+    window._bypassCheckpointA = !window._bypassCheckpointA;
+    const msg = `跳过检查点A: ${window._bypassCheckpointA ? '已开启' : '已关闭'}`;
+    showAg41Notify(msg, window._bypassCheckpointA);
+  }
+});

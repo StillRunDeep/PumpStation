@@ -2,7 +2,7 @@ import { generateConstrainedLayout, buildPartialResult, computeRelaxedDoorAccess
 import { ROOM_DEFS } from '../layout/room-defs.js';
 import { getDefaultUserParams, getUserConfirmedParams } from '../layout/user-params.js'
 import { centerX, centerY, evaluateTemplate } from '../layout/placer.js'
-import { scoreSpatialQuality } from '../layout/scorer.js'
+import { scoreLayout, scoreSpatialQuality } from '../layout/scorer.js'
 
 // 每生成一个方案后 yield，让浏览器处理积压的事件（点击等）
 const yieldToEventLoop = () => new Promise(resolve => setTimeout(resolve, 0))
@@ -45,7 +45,51 @@ function applyCheckpointB(layouts, buildingW, buildingD) {
  *
  * @returns {Promise<Array>} 经检查点 A 过滤、检查点 B 排序的 9 个方案
  */
-export async function runAG41(existingVariants = [], isCancelled = () => false) {
+export async function optimizeVariant(parent) {
+  const defaultUserParams = getDefaultUserParams()
+  const userParams = await getUserConfirmedParams(defaultUserParams)
+  const { buildingW, buildingD, roomTargetAreas } = userParams
+  const bypassCheckpointA = window._bypassCheckpointA
+  const seed = Math.floor(Math.random() * 100000)
+  const rawChild = generateMutatedLayout(parent, 'unverified_smart', seed, buildingW, buildingD, roomTargetAreas, 'Opt', 1, 'OPT', bypassCheckpointA)
+  const candidate = evaluateTemplate(rawChild)
+  const { score, breakdown } = scoreLayout(candidate)
+  candidate.score = score
+  candidate.breakdown = breakdown
+  applyCheckpointB([candidate], buildingW, buildingD)
+  // Attach seedsMeta so callers can show placement arrows in debug view
+  candidate._seedsMeta = rawChild._debug  // _debug contains per-floor seedsMeta
+  return candidate
+}
+
+export async function generateMergedLayout(variantA, variantB) {
+  const defaultUserParams = getDefaultUserParams()
+  const userParams = await getUserConfirmedParams(defaultUserParams)
+  const { buildingW, buildingD, roomTargetAreas } = userParams
+
+  const makeCandidate = (groundSrc, level1Src) => evaluateTemplate({
+    buildingW: groundSrc.buildingW,
+    buildingD: groundSrc.buildingD,
+    groundPlacements: { ...groundSrc.groundPlacements },
+    level1Placements: { ...level1Src.level1Placements },
+    _debug: {},
+    checkpointABypassed: groundSrc.checkpointABypassed || level1Src.checkpointABypassed,
+  })
+
+  const c1 = makeCandidate(variantA, variantB)
+  const c2 = makeCandidate(variantB, variantA)
+  applyCheckpointB([c1, c2], buildingW, buildingD)
+  const best = c1.score >= c2.score ? c1 : c2
+  const { score, breakdown } = scoreLayout(best)
+  best.score = score
+  best.breakdown = breakdown
+  best.id = `M-${Date.now().toString(36).toUpperCase()}`
+  best.label = `合并(${variantA.id}+${variantB.id})`
+  return best
+}
+
+export async function runAG41(existingVariants = [], isCancelled = () => false, options = {}) {
+  const { randomOnly = false } = options
   // 1. 获取用户确认的参数
   const defaultUserParams = getDefaultUserParams();
   const userParams = await getUserConfirmedParams(defaultUserParams);
@@ -58,8 +102,8 @@ export async function runAG41(existingVariants = [], isCancelled = () => false) 
   // 调试开关：跳过 Checkpoint A（让所有方案直接进入阶段2/3）
   const bypassCheckpointA = !!(document.getElementById('chk-bypass-ckA')?.checked);
 
-  // 1. 交叉进化 (2个方案)
-  if (sortedExisting.length >= 5) {
+  // 1. 交叉进化 (2个方案) — randomOnly 时跳过
+  if (!randomOnly && sortedExisting.length >= 5) {
     const rank9 = sortedExisting[8] || sortedExisting[0]; // Fallback for smaller populations
     const parentPairs = [
       { a: sortedExisting[0], b: sortedExisting[4], prefix: 'C15' },
@@ -76,18 +120,29 @@ export async function runAG41(existingVariants = [], isCancelled = () => false) 
     }
   }
 
-  // 2. 随机探索 (7个方案)
-  const explorers = [
-    // 组1: 对未验证房间进行智能优化 (3个)
-    { parent: sortedExisting[0] || null, reRandomize: 'unverified_smart', count: 1, prefix: 'O1' },
-    { parent: sortedExisting[1] || null, reRandomize: 'unverified_smart', count: 1, prefix: 'O2' },
-    { parent: sortedExisting[2] || null, reRandomize: 'unverified_smart', count: 1, prefix: 'O3' },
-    // 组2: 仅保留通过验证的房间 (2个)
+  // 2. 智能变异 (前3名，各生成1个)
+  if (!randomOnly && sortedExisting.length > 0) {
+    const top3 = sortedExisting.slice(0, 3);
+    for (let i = 0; i < top3.length; i++) {
+      if (isCancelled()) break;
+      const parent = top3[i];
+      const seed = Math.floor(Math.random() * 100000);
+      const child = generateMutatedLayout(parent, 'unverified_smart', seed, buildingW, buildingD, roomTargetAreas, 'Exp', results.length + 1, `O${i+1}`, bypassCheckpointA);
+      results.push(evaluateTemplate(child));
+      attempts++;
+      await yieldToEventLoop();
+    }
+  }
+
+  // 3. 随机探索 (剩余名额)
+  const explorers = randomOnly ? [
+    { parent: null, reRandomize: 'all', count: 9, prefix: 'RND' },
+  ] : [
+    // The top 3 are handled above, so we start from rank 4 for diversity
     { parent: sortedExisting[3] || null, reRandomize: 'all_but_verified', count: 1, prefix: 'M4' },
     { parent: sortedExisting[4] || null, reRandomize: 'all_but_verified', count: 1, prefix: 'M5' },
-    // 组3: 纯随机 (2个)
     { parent: null, reRandomize: 'all', count: 2, prefix: 'RND' },
-  ];
+  ]
 
   for (const { parent, reRandomize, count, prefix } of explorers) {
     for (let i = 0; i < count; i++) {
@@ -123,6 +178,7 @@ export async function runAG41(existingVariants = [], isCancelled = () => false) 
 
 function generateMutatedLayout(parent, reRandomize, seed, bW, bD, roomAreas, groupId, variantIdx, prefix, bypassCheckpointA = false) {
   const childSeeds = { ground: {}, level1: {} };
+  const seedsMeta = { ground: {}, level1: {} };
   const verifiedRooms = new Set();
 
   const allRoomIds = Object.keys(ROOM_DEFS);
@@ -132,14 +188,44 @@ function generateMutatedLayout(parent, reRandomize, seed, bW, bD, roomAreas, gro
   if (parent.violations) {
     parent.violations.forEach(v => {
       if (v.constraint === 'must_adjacent') {
-        v.room.split('↔').forEach(r => violatingRooms.add(r));
+        const rooms = v.room.split('↔');
+        // For adjacency, blame one of the two rooms involved
+        if (rooms.length > 0) {
+          violatingRooms.add(rooms[Math.floor(Math.random() * rooms.length)]);
+        }
       } else {
         violatingRooms.add(v.room);
       }
     });
   }
   if (parent._relaxedDoorAccess?.ids) {
-    parent._relaxedDoorAccess.ids.forEach(id => violatingRooms.add(id));
+    parent._relaxedDoorAccess.ids.forEach(id => {
+      // New logic: Blame corridor/lobby for accessibility issues
+      const roomDef = ROOM_DEFS[id];
+      if (roomDef) {
+        if (Math.random() < 0.5) {
+          violatingRooms.add(id); // Blame the room itself
+        } else {
+          // Blame the circulation space on the same floor
+          if (roomDef.floor === 'level1') {
+            violatingRooms.add('corridor_l1');
+          } else { // ground floor
+            const groundLobby = ['parking', 'repair_zone'];
+            violatingRooms.add(groundLobby[Math.floor(Math.random() * groundLobby.length)]);
+          }
+        }
+      } else {
+        violatingRooms.add(id); // Fallback for unknown rooms
+      }
+    })
+  }
+
+  // Final refinement: if there are multiple violators, pick only ONE to change.
+  const allViolators = Array.from(violatingRooms);
+  if (allViolators.length > 0) {
+    const singleTarget = allViolators[Math.floor(Math.random() * allViolators.length)];
+    violatingRooms.clear();
+    violatingRooms.add(singleTarget);
   }
 
   ['ground', 'level1'].forEach(floor => {
@@ -151,7 +237,7 @@ function generateMutatedLayout(parent, reRandomize, seed, bW, bD, roomAreas, gro
       const isVerified = !violatingRooms.has(roomId);
       let keepSeed = false;
 
-      if (reRandomize === 'unverified' && isVerified) {
+      if ((reRandomize === 'unverified' || reRandomize === 'unverified_smart') && isVerified) {
         keepSeed = true;
       } else if (reRandomize === 'all_but_verified' && isVerified) {
         keepSeed = true;
@@ -159,8 +245,11 @@ function generateMutatedLayout(parent, reRandomize, seed, bW, bD, roomAreas, gro
 
       const parentPlacement = parent?.[`${floor}Placements`]?.[roomId];
 
+      const parentSeed = parentPlacement ? placementToGridCenter(parentPlacement) : null;
+
       if (keepSeed && parentPlacement) {
         childSeeds[floor][roomId] = placementToGridCenter(parentPlacement);
+        seedsMeta[floor][roomId] = { parent: parentSeed, child: childSeeds[floor][roomId], replaced: false };
       } else {
         // This room's seed is not kept, so it gets a new random one.
         if (reRandomize === 'unverified_smart') {
@@ -194,11 +283,12 @@ function generateMutatedLayout(parent, reRandomize, seed, bW, bD, roomAreas, gro
             y: Math.floor(Math.random() * gridH),
           };
         }
+        seedsMeta[floor][roomId] = { parent: parentSeed, child: childSeeds[floor][roomId], replaced: true };
       }
     }
   });
 
-  return generateConstrainedLayout(seed, bW, bD, roomAreas, { enableAreaSwap: true, bypassCheckpointA }, groupId, variantIdx, prefix, childSeeds);
+  return generateConstrainedLayout(seed, bW, bD, roomAreas, { enableAreaSwap: true, bypassCheckpointA, seedsMeta }, groupId, variantIdx, prefix, childSeeds);
 }
 
 /**
