@@ -1271,9 +1271,9 @@ function fillGaps(grid, rooms) {
                 }
 
                 // --- 2a. 阶段一：优先填充凹角 (方案C) ---
-                const 凹角Score = calculateConcaveScore(grid, seg, roomId);
-                if (凹角Score > 0) {
-                    const score = 10000 + 凹角Score + seg.cells.length;
+                const reflexAngleScore = calculateConcaveScore(grid, seg, roomId);
+                if (reflexAngleScore > 0) {
+                    const score = 10000 + reflexAngleScore + seg.cells.length;
                      if (score > bestScore) {
                         bestScore = score;
                         bestSegment = seg;
