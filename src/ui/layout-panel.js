@@ -159,12 +159,14 @@ function renderComparisonTable(variants) {
 
 // ── Eliminated variants section (debug) ──────────────────────────────
 
+let _selectedElimIdx = -1
+
 function _renderEliminatedSection() {
   const container = document.getElementById('eliminated-section')
   if (!container) return
 
   const show = document.getElementById('chk-bypass-ckA')?.checked && _eliminatedVariants.length > 0
-  if (!show) { container.innerHTML = ''; return }
+  if (!show) { container.innerHTML = ''; _selectedElimIdx = -1; return }
 
   const rows = _eliminatedVariants.map((v, i) => {
     const cp = v.checkpointADiagnostic || {}
@@ -176,9 +178,13 @@ function _renderEliminatedSection() {
       : `<span style="color:#c0392b;font-weight:700">⚠ ${daCount}</span>`
     const eff = cp.spaceEfficiency != null ? (cp.spaceEfficiency * 100).toFixed(1) + '%'
       : (v.spaceEfficiency != null ? (v.spaceEfficiency * 100).toFixed(1) + '%' : '—')
-    const rowBg = i % 2 === 0 ? '#f8fafc' : '#fff'
+    const isSelected = i === _selectedElimIdx
+    const rowBg = isSelected ? '#e8f4f8' : (i % 2 === 0 ? '#f8fafc' : '#fff')
+    const borderLeft = isSelected ? 'border-left:4px solid #5d6d7e' : 'border-left:4px solid transparent'
     return `
-      <tr style="background:${rowBg};opacity:0.75">
+      <tr class="elim-row" data-elim-idx="${i}"
+          style="cursor:pointer;background:${rowBg};${borderLeft}"
+          onclick="window._ag41SelectEliminated(${i})">
         <td style="text-align:center;font-weight:600;padding:6px 8px;color:#888">${i + 10}</td>
         <td style="padding:6px 8px"><strong style="color:#888">${v.id}</strong><br>
           <span style="font-size:11px;color:#aaa">${v.label}</span></td>
@@ -202,9 +208,80 @@ function _renderEliminatedSection() {
             <th style="padding:6px 8px">可达性</th>
           </tr>
         </thead>
-        <tbody>${rows}</tbody>
+        <tbody id="elim-tbody">${rows}</tbody>
       </table>
     </div>`
+}
+
+function insertEliminatedDetailRow(idx) {
+  removeDetailRow()
+
+  const v = _eliminatedVariants[idx]
+  if (!v) return
+
+  const breakdownHtml = buildBreakdownHtml(v)
+  const title = `方案 ${v.id}：${v.label}  —  得分 ${v.score}`
+
+  const failedA = !v.checkpointADiagnostic?.passes
+  const failedB = !failedA && v.checkpointBDiagnostic?.partialScore < -1000
+  const renderFloorRow = (floor) => {
+    const debugData = v._debug?.[floor] ?? {}
+    const finalView = `<svg viewBox="0 0 240 180" style="background:#f4f6f8">${renderLayoutSVG(v, floor, 240, 180, { showDims: false })}</svg>`
+    const bypassed = v.checkpointABypassed
+    const stage3 = bypassed ? '<span class="skipped-text">用户跳过</span>'
+      : failedA ? '<span class="skipped-text">未通过红线，未执行</span>'
+      : failedB ? '<span class="skipped-text">未通过检查点B，未执行</span>'
+      : (debugData.gridAfterGaps ? renderDebugGrid({ grid: debugData.gridAfterGaps, seeds: debugData.seeds }, 200, 150) : '无数据')
+    const stage2 = bypassed ? '<span class="skipped-text">用户跳过</span>'
+      : failedA ? '<span class="skipped-text">未通过红线，未执行</span>'
+      : (debugData.gridBeforeGaps ? renderDebugGrid({ grid: debugData.gridBeforeGaps, seeds: debugData.seeds }, 200, 150) : '无数据')
+    const stage1 = debugData.gridAfterRect ? renderDebugGrid({ grid: debugData.gridAfterRect, seeds: debugData.seeds }, 200, 150) : '无数据'
+    return `
+      <div class="grid-cell final-view">${finalView}</div>
+      <div class="grid-cell debug-view">${stage3}</div>
+      <div class="grid-cell debug-view">${stage2}</div>
+      <div class="grid-cell debug-view">${stage1}</div>`
+  }
+
+  const headers = `
+    <div class="grid-header">正式视图</div>
+    <div class="grid-header">阶段3 (FillGaps)</div>
+    <div class="grid-header">阶段2 (L/U形生长)</div>
+    <div class="grid-header">阶段1 (矩形生长)</div>`
+
+  const detailHtml = `
+    <tr class="detail-inline-row" style="background:#f0f7ff">
+      <td colspan="6" style="padding:0;border-top:2px solid #5d6d7e;border-bottom:2px solid #5d6d7e">
+        <div style="width:100%">
+          <div style="overflow-x:auto;border-bottom:1px solid #ccc;padding-bottom:8px;margin-bottom:8px">
+            <div id="detail-grid-container" style="display:grid;grid-template-columns:repeat(4,25%);grid-template-rows:auto repeat(2,150px);gap:1px;background-color:#aed6f1;padding:1px;box-sizing:border-box">
+              ${headers}
+              ${renderFloorRow('ground')}
+              ${renderFloorRow('level1')}
+            </div>
+          </div>
+          <div id="breakdown-container" style="padding:12px;box-sizing:border-box;background:#fafbfc">
+            ${breakdownHtml}
+          </div>
+        </div>
+        <style>
+          .grid-cell { background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative; }
+          .grid-header { font-size:11px;font-weight:600;color:#1a3a5c;background:#eaf2f8;text-align:center;padding:4px; }
+          .grid-cell.final-view { background:#f4f6f8; }
+          .grid-cell.debug-view svg { width:100%;height:100%; }
+          .skipped-text { font-size:11px;color:#95a5a6;font-style:italic; }
+        </style>
+      </td>
+    </tr>`
+
+  const tbody = document.getElementById('elim-tbody')
+  if (!tbody) return
+  const targetRow = tbody.querySelector(`.elim-row[data-elim-idx="${idx}"]`)
+  if (targetRow) {
+    targetRow.insertAdjacentHTML('afterend', detailHtml)
+  } else {
+    tbody.insertAdjacentHTML('beforeend', detailHtml)
+  }
 }
 
 // ── Inline detail row ─────────────────────────────────────────────────
@@ -426,6 +503,8 @@ function applyRowSelection(idx) {
 function selectVariant(idx, { scroll = false, toggle = false } = {}) {
   const alreadySelected = _selectedIdx === idx
   _selectedIdx = idx
+  // Deselect any eliminated row when selecting from main leaderboard
+  if (_selectedElimIdx !== -1) { _selectedElimIdx = -1; _renderEliminatedSection() }
 
   applyRowSelection(idx)
 
@@ -547,6 +626,19 @@ export function renderLayoutPanel(variants, eliminated = []) {
 // ── Global handlers ───────────────────────────────────────────────────
 
 window._ag41SelectVariant = (idx) => selectVariant(idx, { toggle: true })
+
+window._ag41SelectEliminated = (idx) => {
+  const alreadySelected = _selectedElimIdx === idx
+  _selectedElimIdx = alreadySelected ? -1 : idx
+  _renderEliminatedSection()
+  if (!alreadySelected) {
+    insertEliminatedDetailRow(idx)
+    document.querySelector(`#elim-tbody .elim-row[data-elim-idx="${idx}"]`)
+      ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  } else {
+    removeDetailRow()
+  }
+}
 
 window._ag41ConfirmVariant = function(idx) {
   _selectedIdx = idx
