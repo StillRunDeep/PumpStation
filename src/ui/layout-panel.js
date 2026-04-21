@@ -666,10 +666,6 @@ export function renderLayoutPanel(variants, eliminated = []) {
     elimSection = document.createElement('div')
     elimSection.id = 'eliminated-section'
     cmp.parentNode.insertBefore(elimSection, cmp.nextSibling)
-
-    // Wire the checkbox once when the container is first created
-    document.getElementById('chk-bypass-ckA')
-      ?.addEventListener('change', _renderEliminatedSection)
   }
   _renderEliminatedSection()
 
@@ -783,7 +779,17 @@ export function showAg41Notify(msg, isImproved) {
   const el = document.getElementById('ag41-notify')
   if (!el) return
   el.textContent = msg
-  el.className = 'header-notify ' + (isImproved ? 'notify-ok' : 'notify-warn')
+  
+  const isDebug = window._bypassCheckpointA
+  const wrap = el.closest('.notify-bar-wrap')
+  
+  if (isDebug) {
+    el.className = 'header-notify notify-debug'
+    if (wrap) wrap.classList.add('notify-debug')
+  } else {
+    el.className = 'header-notify ' + (isImproved ? 'notify-ok' : 'notify-warn')
+    if (wrap) wrap.classList.remove('notify-debug')
+  }
 }
 
 export function rescoreAndRerender() {

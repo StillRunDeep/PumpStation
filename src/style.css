@@ -787,6 +787,14 @@ svg.zoom-active {
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: background 0.3s;
+}
+.notify-bar-wrap.notify-debug {
+  background: #fff3e0; /* 浅橘色背景 */
+  border-bottom: 1px solid #ffe0b2;
+}
+.header-notify.notify-debug {
+  color: #e65100; /* 深橘色文字 */
 }
 
 .header-notify {
