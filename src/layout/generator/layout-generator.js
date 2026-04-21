@@ -2274,17 +2274,23 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     const { mergedRooms: mergedLevel1Rooms, superRoomMap: level1SuperRoomMap } = mergeMustPairsForFloor(level1Rooms);
 
     // Step 6A: 无面积限制 L/U 生长
-    console.log('[Phase3Debug] 开始无面积限制生长');
-    console.log('[Phase3Debug] 优化前 ground rooms:', mergedGroundRooms.map(r => ({ id: r.id, currentArea: groundGrid.roomData[r.id]?.length || 0, targetGridCount: r.targetGridCount })));
-    console.log('[Phase3Debug] 优化前 level1 rooms:', mergedLevel1Rooms.map(r => ({ id: r.id, currentArea: level1Grid.roomData[r.id]?.length || 0, targetGridCount: r.targetGridCount })));
+    const variantTag = `[Var${variantIdx}]`;
+    console.log(`${variantTag}[Phase3] 开始无面积限制生长`);
+    const groundBefore = Object.fromEntries(mergedGroundRooms.map(r => [r.id, groundGrid.roomData[r.id]?.length || 0]));
+    const level1Before = Object.fromEntries(mergedLevel1Rooms.map(r => [r.id, level1Grid.roomData[r.id]?.length || 0]));
+    console.log(`${variantTag}[Phase3] 优化前: ground=${Object.values(groundBefore).reduce((a,b)=>a+b,0)}, level1=${Object.values(level1Before).reduce((a,b)=>a+b,0)}`);
 
     const groundCtx = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: buildSuperRoomMeta(groundSuperRoomMap) };
     expandRooms(groundGrid, mergedGroundRooms, rng, groundCtx, false, true);
-    console.log('[Phase3Debug] 优化后 ground rooms:', mergedGroundRooms.map(r => ({ id: r.id, currentArea: groundGrid.roomData[r.id]?.length || 0 })));
+    const groundAfter = Object.fromEntries(mergedGroundRooms.map(r => [r.id, groundGrid.roomData[r.id]?.length || 0]));
 
     const level1Ctx = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: buildSuperRoomMeta(level1SuperRoomMap) };
     expandRooms(level1Grid, mergedLevel1Rooms, rng, level1Ctx, false, true);
-    console.log('[Phase3Debug] 优化后 level1 rooms:', mergedLevel1Rooms.map(r => ({ id: r.id, currentArea: level1Grid.roomData[r.id]?.length || 0 })));
+    const level1After = Object.fromEntries(mergedLevel1Rooms.map(r => [r.id, level1Grid.roomData[r.id]?.length || 0]));
+
+    const gGrowth = Object.values(groundAfter).reduce((a,b)=>a+b,0) - Object.values(groundBefore).reduce((a,b)=>a+b,0);
+    const l1Growth = Object.values(level1After).reduce((a,b)=>a+b,0) - Object.values(level1Before).reduce((a,b)=>a+b,0);
+    console.log(`${variantTag}[Phase3] 优化后: ground增长${gGrowth}, level1增长${l1Growth}`);
 
 
     splitAllSuperRooms(groundGrid, groundSuperRoomMap);
