@@ -2280,6 +2280,14 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     const level1Before = Object.fromEntries(mergedLevel1Rooms.map(r => [r.id, level1Grid.roomData[r.id]?.length || 0]));
     console.log(`${variantTag}[Phase3] 优化前: ground=${Object.values(groundBefore).reduce((a,b)=>a+b,0)}, level1=${Object.values(level1Before).reduce((a,b)=>a+b,0)}`);
 
+    // 样本房间扩展前的位置
+    const sampleRoom = mergedGroundRooms[0];
+    let sampleBefore = null;
+    if (sampleRoom) {
+      const beforeBbox = groundGrid.getBoundingBox(sampleRoom.id);
+      sampleBefore = beforeBbox ? `(${beforeBbox.minX},${beforeBbox.minY}) ${beforeBbox.maxX - beforeBbox.minX + 1}x${beforeBbox.maxY - beforeBbox.minY + 1}` : 'N/A';
+    }
+
     const groundCtx = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: buildSuperRoomMeta(groundSuperRoomMap) };
     expandRooms(groundGrid, mergedGroundRooms, rng, groundCtx, false, true);
     const groundAfter = Object.fromEntries(mergedGroundRooms.map(r => [r.id, groundGrid.roomData[r.id]?.length || 0]));
@@ -2295,11 +2303,11 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     const level1Usage = ((Object.values(level1After).reduce((a,b)=>a+b,0) / totalGridCells) * 100).toFixed(1);
     console.log(`${variantTag}[Phase3] 优化后: ground增长${gGrowth}(占${groundUsage}%), level1增长${l1Growth}(占${level1Usage}%)`);
 
-    // 输出某个房间的位置变化用于排查（分割前）
-    const sampleRoom = mergedGroundRooms[0];
+    // 输出样本房间的前后对比
     if (sampleRoom) {
       const afterBbox = groundGrid.getBoundingBox(sampleRoom.id);
-      console.log(`${variantTag}[Phase3] 样本房间${sampleRoom.id}扩展后: (${afterBbox?.minX},${afterBbox?.minY}) 尺寸${afterBbox?.maxX - afterBbox?.minX + 1}x${afterBbox?.maxY - afterBbox?.minY + 1}`);
+      const sampleAfter = afterBbox ? `(${afterBbox.minX},${afterBbox.minY}) ${afterBbox.maxX - afterBbox.minX + 1}x${afterBbox.maxY - afterBbox.minY + 1}` : 'N/A';
+      console.log(`${variantTag}[Phase3] 房间${sampleRoom.id}: ${sampleBefore} → ${sampleAfter}`);
     }
 
 
