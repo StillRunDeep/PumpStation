@@ -712,6 +712,8 @@ document.addEventListener('DOMContentLoaded', () => {
   persistCollapseState();
   initSummaryToggleLogic();
   initFocusMode();
+  // 默认执行一次 AG0-0 及后续计算，确保初始参数可用
+  runCalculation();
 });
 
 let isFocusMode = false;
