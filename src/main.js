@@ -14,7 +14,7 @@ import { SPACE_RULES_DEFAULT } from './data/fitting-dims.js'
 import { runPumpSpec } from './agents/pump-spec.js'
 import { runPipeSizing, PIPE_SCHEMES } from './agents/pipe-sizing.js'
 import { runDrawing } from './agents/drawing.js'
-import { runAG41, optimizeVariant, generateMergedLayout } from './agents/ag41-building-layout.js'
+import { runAG41, optimizeVariant, generateMergedLayout, computeMutatedLayout } from './agents/ag41-building-layout.js'
 import { mergeVariants } from './agents/ag42-layout-eval.js'
 
 /**
@@ -46,9 +46,9 @@ function applyLayoutResult(newRaw, existing, isReset = false) {
 }
 import { renderAG00, renderAG01, renderPoolDepth, renderPipeSizing, renderMaintenanceRoom, renderPumpSpec, renderRainfallCard, renderSchemeOptions } from './ui/results-panel.js'
 import { renderLayoutPanel, getVariants, getSelectedVariant, getExpandedVariants, replaceVariant, refreshDetailRow, showAg41Notify, renderScorerParamsPanel, rescoreAndRerender } from './ui/layout-panel.js'
-import { SCORER_PARAMS } from './layout/scorer-params.js'
+import { SCORER_PARAMS } from './layout/evaluation/scorer-params.js'
 import { renderBuildingParamsPanel } from './ui/building-params-panel.js'
-import { getDefaultUserParams } from './layout/user-params.js'
+import { getDefaultUserParams } from './layout/model/user-params.js'
 import { initTopologyEditor, setTopologyFromN, getCurrentTopology } from './ui/topology-editor.js'
 
 let _lastTopoN     = null
@@ -734,18 +734,32 @@ document.getElementById('btn-ag41-optimize').addEventListener('click', async () 
   const btn = document.getElementById('btn-ag41-optimize')
   const expanded = getExpandedVariants()
   if (expanded.length === 0) return
+  const selected = expanded[Math.floor(Math.random() * expanded.length)];
+
+  const listenerCount = (window._optimizeListenerCount = (window._optimizeListenerCount || 0) + 1)
+  console.log(`[optimize] click #${listenerCount}, _bypassCheckpointA=${window._bypassCheckpointA}`)
+
+  if (window._bypassCheckpointA) {
+    // 排查阶段1：只展示移动提示箭头，验证目标位置是否合理
+    // 排查完成后改为调用 generateMutatedLayout，验证实际移动效果
+    const hints = computeMutatedLayout(selected);
+    const debugWithHints = {
+      ground: { ...selected._debug?.ground, movementHints: hints.ground },
+      level1: { ...selected._debug?.level1, movementHints: hints.level1 },
+    };
+    refreshDetailRow(selected.id, { ...selected, _debug: debugWithHints });
+    return;
+  }
+
   btn.disabled = true
   btn.textContent = '优化中…'
   try {
-        // From the expanded variants, pick one to optimize at random
-    const selected = expanded[Math.floor(Math.random() * expanded.length)];
     const candidate = await optimizeVariant(selected)
     candidate.id = selected.id
     if (candidate.score > selected.score) {
       replaceVariant(selected.id, candidate)
       showAg41Notify(`方案 ${selected.id} 已更新 (${selected.score} → ${candidate.score})`, true)
     } else {
-      // 不替换，仅展示候选方案的种子箭头 + 消息
       const msg = {
         text: `本次优化：${candidate.score}分，未超过当前 ${selected.score}分，未替换`,
         isWarning: true,

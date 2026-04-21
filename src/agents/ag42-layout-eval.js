@@ -1,7 +1,7 @@
-import { scoreLayout } from '../layout/scorer.js'
-import { evaluateTemplate, centerX, centerY } from '../layout/placer.js'
-import { GRID_SIZE } from '../layout/layout-generator.js'
-import { SCORER_PARAMS } from '../layout/scorer-params.js'
+import { scoreLayout } from '../layout/evaluation/scorer.js'
+import { evaluateTemplate, centerX, centerY } from '../layout/generator/placer.js'
+import { GRID_SIZE } from '../layout/generator/layout-generator.js'
+import { SCORER_PARAMS } from '../layout/evaluation/scorer-params.js'
 
 /**
  * Compute average centroid distance (in grid cells) between two layouts.

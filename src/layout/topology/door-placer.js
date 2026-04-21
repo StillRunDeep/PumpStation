@@ -1,5 +1,5 @@
 
-import { ROOM_DEFS } from './room-defs.js';
+import { ROOM_DEFS } from '../model/room-defs.js';
 
 const DOOR_WIDTH = 900; // Standard door width in mm
 

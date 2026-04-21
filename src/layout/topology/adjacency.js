@@ -1,4 +1,4 @@
-import { adjacent } from './placer.js'
+import { adjacent } from '../generator/placer.js'
 
 /**
  * Adjacency graph for the pump station building.
