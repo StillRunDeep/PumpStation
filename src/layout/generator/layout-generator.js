@@ -1331,6 +1331,13 @@ function expandRooms(grid, rooms, rng, { buildingW, buildingD, superRoomMeta }, 
       currentArea: grid.roomData[r.id] ? grid.roomData[r.id].length : 0
     }));
 
+    if (ignoreAreaLimit) {
+      console.log('[expandRooms] ignoreAreaLimit=true 模式', { stage, roomCount: growingRooms.length, stopAfterStage1 });
+      growingRooms.forEach(r => {
+        if (!r.targetGridCount) console.warn(`[expandRooms] 房间${r.id}缺少targetGridCount`, r);
+      });
+    }
+
     let needsSort = true;
 
     // 性能累计计时（仅 debugModeEnabled 时启用）
@@ -1421,7 +1428,10 @@ function expandRooms(grid, rooms, rng, { buildingW, buildingD, superRoomMeta }, 
 
             // If no room could grow rectangularly, Stage 1 is complete
             if (!growthHappenedThisCycle) {
-                                // If stopAfterStage1 is enabled, stop here; otherwise proceed to Phase 2
+                if (ignoreAreaLimit) {
+                  console.log('[expandRooms] Stage1无矩形扩展，进入Stage2进行L/U形扩展', { iterations, activeRoomsCount: activeRooms.length });
+                }
+                // If stopAfterStage1 is enabled, stop here; otherwise proceed to Phase 2
                 if (!stopAfterStage1) {
                     stage = 2; // Proceed to L/U shape phase
                     continue; // Restart the while loop for Stage 2
@@ -1431,6 +1441,9 @@ function expandRooms(grid, rooms, rng, { buildingW, buildingD, superRoomMeta }, 
             }
         } else if (stage === 2) {
             // Stage 2: Allow all types of expansion
+            if (ignoreAreaLimit && iterations === 0) {
+              console.log('[expandRooms] Stage2开始，activeRooms数量:', activeRooms.map(r => r.id).join(','));
+            }
             for (const roomToGrow of activeRooms) {
                 const isCorridor = roomToGrow.id === 'corridor_l1';
 
@@ -1452,6 +1465,10 @@ function expandRooms(grid, rooms, rng, { buildingW, buildingD, superRoomMeta }, 
                     // findSmartLineExpansion: concave-fill logic is self-converging; no dir bias needed
                     expansionCells = findSmartLineExpansion(grid, roomToGrow.id);
                     if (_t) _t.findSmartLine += performance.now() - _t2;
+                }
+
+                if (ignoreAreaLimit && expansionCells && expansionCells.length > 0) {
+                  console.log(`[expandRooms] ${roomToGrow.id}找到${expansionIsRect ? '矩形' : 'L/U'}扩展:${expansionCells.length}个格子`);
                 }
 
                 if (expansionCells && expansionCells.length > 0) {
@@ -1515,7 +1532,11 @@ function expandRooms(grid, rooms, rng, { buildingW, buildingD, superRoomMeta }, 
             }
 
             if (!growthHappenedThisCycle) {
-                console.warn("Expansion stuck. No rooms could grow in Stage 2.");
+                if (ignoreAreaLimit) {
+                  console.warn(`[expandRooms] Stage2卡住，无法继续扩展。迭代次数:${iterations}`);
+                } else {
+                  console.warn("Expansion stuck. No rooms could grow in Stage 2.");
+                }
                 break;
             }
         }
@@ -1524,7 +1545,16 @@ function expandRooms(grid, rooms, rng, { buildingW, buildingD, superRoomMeta }, 
     }
 
     if (iterations === MAX_EXPANSION_ITERATIONS) {
-        console.warn("Expansion reached max iterations.");
+        const msg = `Expansion reached max iterations (${MAX_EXPANSION_ITERATIONS}).`;
+        if (ignoreAreaLimit) {
+          console.warn(`[expandRooms] ${msg}`);
+        } else {
+          console.warn(msg);
+        }
+    }
+
+    if (ignoreAreaLimit) {
+      console.log('[expandRooms] 完成，最终迭代次数:', iterations);
     }
 
     // Capture the final grid state (always fires regardless of exit path)
