@@ -121,7 +121,12 @@ export function initLayoutController() {
     btn.textContent = '优化中…'
     try {
       const optimized = await runPhase3Optimization(existing)
-      applyLayoutResult(optimized, existing, false)
+      // 直接替换原方案，不重新排序（优化应该替换，而不是重新参与竞争）
+      const replaced = existing.map(orig => {
+        const opt = optimized.find(o => o.variantIdx === orig.variantIdx);
+        return opt ? { ...orig, ...opt, groundPlacements: opt.groundPlacements, level1Placements: opt.level1Placements } : orig;
+      });
+      renderLayoutPanel(replaced, _eliminatedVariants)
       showAg41Notify(`对 ${existing.length} 个方案完成优化`, true)
     } catch (e) {
       console.error('runPhase3Optimization failed:', e)
