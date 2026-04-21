@@ -2245,16 +2245,19 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
 
   if (detailedLayout && initialGrid) {
     // --- 终极防御性检查 ---
-    if (!initialGrid._debug) initialGrid._debug = {};
-    const groundGrid = (initialGrid.ground.gridBeforeGaps || initialGrid.ground.gridAfterRect).clone();
-    const level1Grid = (initialGrid.level1.gridBeforeGaps || initialGrid.level1.gridAfterRect).clone();
+    // initialGrid 可能是 variant 对象（包含_debug），或直接是_debug对象
+    const debugInfo = initialGrid._debug || initialGrid;
+    if (!debugInfo) throw new Error('detailedLayout: initialGrid._debug或initialGrid不存在');
 
-    const allRooms = initialGrid._debug.roomTargets || [];
+    const groundGrid = (debugInfo.ground?.gridBeforeGaps || debugInfo.ground?.gridAfterRect).clone();
+    const level1Grid = (debugInfo.level1?.gridBeforeGaps || debugInfo.level1?.gridAfterRect).clone();
+
+    const allRooms = debugInfo.roomTargets || [];
     let alignedBW, alignedBD;
 
-    if (initialGrid._debug.alignedBW) {
-      alignedBW = initialGrid._debug.alignedBW;
-      alignedBD = initialGrid._debug.alignedBD;
+    if (debugInfo.alignedBW) {
+      alignedBW = debugInfo.alignedBW;
+      alignedBD = debugInfo.alignedBD;
     } else {
       // 回退：重新计算
       const gridW = Math.floor(bW / GRID_SIZE);
@@ -2302,7 +2305,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
       buildingD: alignedBD,
       groupId,
       variantIdx,
-      _debug: { ...initialGrid._debug, ground: { ...initialGrid.ground, gridAfterGaps: groundGrid }, level1: { ...initialGrid.level1, gridAfterGaps: level1Grid } },
+      _debug: { ...debugInfo, ground: { ...debugInfo.ground, gridAfterGaps: groundGrid }, level1: { ...debugInfo.level1, gridAfterGaps: level1Grid } },
       checkpointADiagnostic: initialGrid.checkpointADiagnostic,
       _relaxedDoorAccess: initialGrid._relaxedDoorAccess,
     };
