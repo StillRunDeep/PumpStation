@@ -88,9 +88,11 @@ export function initLayoutController() {
 
   document.getElementById('btn-ag41-optimize')?.addEventListener('click', async () => {
     const btn = document.getElementById('btn-ag41-optimize')
-    const expanded = getExpandedVariants()
-    if (expanded.length === 0) return
-    const selected = expanded[Math.floor(Math.random() * expanded.length)];
+    const selected = getSelectedVariant();
+    if (!selected) {
+      showAg41Notify('请展开一个方案进行优化', false);
+      return;
+    }
 
     if (window._bypassCheckpointA) {
       const hints = computeMutatedLayout(selected);
