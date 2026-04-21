@@ -94,7 +94,7 @@ export function initLayoutController() {
       return;
     }
 
-    if (window._bypassCheckpointA) {
+    if (window.debugModeEnabled) {
       const hints = computeMutatedLayout(selected);
       const debugWithHints = {
         ground: { ...selected._debug?.ground, movementHints: hints.ground },
