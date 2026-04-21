@@ -1,4 +1,4 @@
-import { runAG41, optimizeVariant, generateMergedLayout, computeMutatedLayout } from '../agents/layout-build.js'
+import { runAG41, optimizeVariant, computeMutatedLayout, runPhase3Optimization } from '../agents/layout-build.js'
 import { mergeVariants } from '../agents/layout-eval.js'
 import {
   renderLayoutPanel, getVariants, getSelectedVariant, getExpandedVariants,
@@ -9,6 +9,8 @@ import { renderBuildingParamsPanel } from './building-params-panel.js'
 import { getDefaultUserParams } from '../layout/model/user-params.js'
 import { SCORER_PARAMS } from '../layout/evaluation/scorer-params.js'
 
+let schemaLayout = true;
+let detailedLayout = false;
 let isGeneratingLayouts = false;
 let generationReqId = null;
 
@@ -62,6 +64,15 @@ export function initLayoutController() {
       btn.textContent = '生成方案'
       showAg41Notify('已停止生成', false)
     } else {
+      const variants = getVariants();
+      const top9 = variants.slice(0, 9);
+      if (top9.length === 9 && top9.every(v => v.checkpointADiagnostic?.passes)) {
+        showAg41Notify('方案已生成，请重置方案', false);
+        return;
+      }
+
+      schemaLayout = true;
+      detailedLayout = false;
       isGeneratingLayouts = true
       btn.textContent = '停止生成'
 
@@ -69,9 +80,20 @@ export function initLayoutController() {
         if (!isGeneratingLayouts) { btn.textContent = '生成方案'; return }
         try {
           const existing = getVariants()
-          const newRaw = await runAG41(existing, () => !isGeneratingLayouts, { randomOnly: false })
+          const newRaw = await runAG41(existing, () => !isGeneratingLayouts, { schemaLayout: schemaLayout })
           if (newRaw === null) { isGeneratingLayouts = false; btn.textContent = '生成方案'; return }
           applyLayoutResult(newRaw, existing, false)
+
+          const variants = getVariants();
+          const top9 = variants.slice(0, 9);
+          if (schemaLayout && top9.length === 9 && top9.every(v => v.checkpointADiagnostic?.passes)) {
+            isGeneratingLayouts = false;
+            schemaLayout = false;
+            if (generationReqId) { cancelAnimationFrame(generationReqId); generationReqId = null; }
+            btn.textContent = '生成方案';
+            showAg41Notify('已生成9个通过检查点的草图，自动停止', true);
+            return;
+          }
         } catch (error) {
           console.error('layout generation error:', error)
           showAg41Notify('生成新方案时出错', false)
@@ -88,66 +110,26 @@ export function initLayoutController() {
 
   document.getElementById('btn-ag41-optimize')?.addEventListener('click', async () => {
     const btn = document.getElementById('btn-ag41-optimize')
-    const selected = getSelectedVariant();
-    if (!selected) {
-      showAg41Notify('请展开一个方案进行优化', false);
+    const existing = getVariants()
+    if (existing.length === 0) {
+      showAg41Notify('请先生成方案，再进行优化', false);
       return;
     }
 
-    if (window.debugModeEnabled) {
-      const hints = computeMutatedLayout(selected);
-      const debugWithHints = {
-        ground: { ...selected._debug?.ground, movementHints: hints.ground },
-        level1: { ...selected._debug?.level1, movementHints: hints.level1 },
-      };
-      refreshDetailRow(selected.id, { ...selected, _debug: debugWithHints });
-      return;
-    }
-
+    detailedLayout = true;
     btn.disabled = true
     btn.textContent = '优化中…'
     try {
-      const candidate = await optimizeVariant(selected)
-      candidate.id = selected.id
-      if (candidate.score > selected.score) {
-        replaceVariant(selected.id, candidate)
-        showAg41Notify(`方案 ${selected.id} 已更新 (${selected.score} → ${candidate.score})`, true)
-      } else {
-        const msg = {
-          text: `本次优化：${candidate.score}分，未超过当前 ${selected.score}分，未替换`,
-          isWarning: true,
-        }
-        const displayVariant = { ...selected, _debug: candidate._debug }
-        refreshDetailRow(selected.id, displayVariant, msg)
-        showAg41Notify(msg.text, false)
-      }
+      const optimized = await runPhase3Optimization(existing)
+      applyLayoutResult(optimized, existing, false)
+      showAg41Notify(`对 ${existing.length} 个方案完成优化`, true)
     } catch (e) {
-      console.error('optimizeVariant failed:', e)
+      console.error('runPhase3Optimization failed:', e)
       showAg41Notify('优化失败', false)
     } finally {
       btn.disabled = false
       btn.textContent = '优化方案'
-    }
-  })
-
-  document.getElementById('btn-ag41-merge')?.addEventListener('click', async () => {
-    const btn = document.getElementById('btn-ag41-merge')
-    const expanded = getExpandedVariants()
-    if (expanded.length !== 2) return
-    btn.disabled = true
-    btn.textContent = '合并中…'
-    try {
-      const merged = await generateMergedLayout(expanded[0], expanded[1])
-      const existing = getVariants()
-      const { variants, eliminated } = mergeVariants(existing, [merged])
-      renderLayoutPanel(variants, eliminated)
-      showAg41Notify(`合并方案已生成：${merged.id}（得分 ${merged.score}）`, true)
-    } catch (e) {
-      console.error('merge failed:', e)
-      showAg41Notify('合并失败', false)
-    } finally {
-      btn.disabled = false
-      btn.textContent = '合并方案'
+      detailedLayout = false
     }
   })
 

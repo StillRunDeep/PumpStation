@@ -2291,8 +2291,49 @@ function timedGen(name, fn) {
 }
 
 export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParams = {}, groupId = 'CG', variantIdx = 1, prefix = 'R', initialSeeds = null) {
-  const { enableAreaSwap = false, bypassCheckpointA = false } = runParams;
+  const { enableAreaSwap = false, bypassCheckpointA = false, schemaLayout = false, detailedLayout = false, initialGrid = null } = runParams;
   const rng = makeRng(seed);
+
+  if (detailedLayout && initialGrid) {
+    const groundGrid = initialGrid.ground.gridBeforeGaps.clone();
+    const level1Grid = initialGrid.level1.gridBeforeGaps.clone();
+
+    const allRooms = Object.values(ROOM_DEFS).filter(r => !r.isOpening).map(r => {
+      const targetAreaMm2 = (roomAreas[r.id] * 1e6) || (r.w * r.d);
+      return { id: r.id, label: r.label, floor: r.floor, targetGridCount: Math.round(targetAreaMm2 / (GRID_SIZE * GRID_SIZE)) };
+    }).filter(r => r.targetGridCount >= 1);
+    const groundRooms = allRooms.filter(r => r.floor === 'ground');
+    const level1Rooms = allRooms.filter(r => r.floor === 'level1');
+    const { mergedRooms: mergedGroundRooms, superRoomMap: groundSuperRoomMap } = mergeMustPairsForFloor(groundRooms);
+    const { mergedRooms: mergedLevel1Rooms, superRoomMap: level1SuperRoomMap } = mergeMustPairsForFloor(level1Rooms);
+
+    runPhase3Growth(groundGrid, mergedGroundRooms, rng);
+    runPhase3Growth(level1Grid, mergedLevel1Rooms, rng);
+
+    splitAllSuperRooms(groundGrid, groundSuperRoomMap);
+    splitAllSuperRooms(level1Grid, level1SuperRoomMap);
+
+    const finalLayout = {
+      ground: timedGen('finalizeLayout_ground', () => finalizeLayout(groundGrid).ground),
+      level1: timedGen('finalizeLayout_level1', () => finalizeLayout(level1Grid).level1),
+    };
+
+    return {
+      id: `${prefix}-${groupId}-${variantIdx}`,
+      label: `约束生长法 (优化)`,
+      desc: `建筑 ${(bW / 1000).toFixed(1)}m×${(bD / 1000).toFixed(1)}m`,
+      groundPlacements: finalLayout.ground,
+      level1Placements: finalLayout.level1,
+      buildingW: bW,
+      buildingD: bD,
+      groupId,
+      variantIdx,
+      _debug: { ...initialGrid, ground: { ...initialGrid.ground, gridAfterGaps: groundGrid }, level1: { ...initialGrid.level1, gridAfterGaps: level1Grid } },
+      checkpointADiagnostic: initialGrid.checkpointADiagnostic,
+      _relaxedDoorAccess: initialGrid._relaxedDoorAccess,
+    };
+  }
+
 
   const gridW = Math.floor(bW / GRID_SIZE);
   const gridH = Math.floor(bD / GRID_SIZE);
@@ -2379,7 +2420,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     groundGridBeforeGaps = gridState.clone();
   }, (gridState) => {
     groundGridAfterRect = gridState.clone();
-  }, true, groundSuperMeta)); // stopAfterStage1 = true, superRoomMeta
+  }, schemaLayout, groundSuperMeta)); // stopAfterStage1 = schemaLayout, superRoomMeta
    if (!groundGridAfterRect) groundGridAfterRect = groundGrid.clone();
    if (!groundGridBeforeGaps) groundGridBeforeGaps = groundGrid.clone();
 
@@ -2387,7 +2428,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     level1GridBeforeGaps = gridState.clone();
   }, (gridState) => {
     level1GridAfterRect = gridState.clone();
-  }, true, level1SuperMeta)); // stopAfterStage1 = true, superRoomMeta
+  }, schemaLayout, level1SuperMeta)); // stopAfterStage1 = schemaLayout, superRoomMeta
   if (!level1GridAfterRect) level1GridAfterRect = level1Grid.clone();
   if (!level1GridBeforeGaps) level1GridBeforeGaps = level1Grid.clone();
 
