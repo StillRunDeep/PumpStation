@@ -2290,7 +2290,10 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
 
     const gGrowth = Object.values(groundAfter).reduce((a,b)=>a+b,0) - Object.values(groundBefore).reduce((a,b)=>a+b,0);
     const l1Growth = Object.values(level1After).reduce((a,b)=>a+b,0) - Object.values(level1Before).reduce((a,b)=>a+b,0);
-    console.log(`${variantTag}[Phase3] 优化后: ground增长${gGrowth}, level1增长${l1Growth}`);
+    const totalGridCells = (alignedBW / GRID_SIZE) * (alignedBD / GRID_SIZE);
+    const groundUsage = ((Object.values(groundAfter).reduce((a,b)=>a+b,0) / totalGridCells) * 100).toFixed(1);
+    const level1Usage = ((Object.values(level1After).reduce((a,b)=>a+b,0) / totalGridCells) * 100).toFixed(1);
+    console.log(`${variantTag}[Phase3] 优化后: ground增长${gGrowth}(占${groundUsage}%), level1增长${l1Growth}(占${level1Usage}%)`);
 
 
     splitAllSuperRooms(groundGrid, groundSuperRoomMap);
