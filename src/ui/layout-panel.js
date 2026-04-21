@@ -583,6 +583,9 @@ function selectVariant(idx, { scroll = false, toggle = false } = {}) {
     return
   }
 
+  // Clear other expanded variants before selecting this one
+  if (toggle) removeDetailRow()
+
   insertDetailRow(idx)
   applyRowSelection()
 
