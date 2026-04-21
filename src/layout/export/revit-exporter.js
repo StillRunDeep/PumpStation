@@ -28,8 +28,8 @@ export function buildRevitMessage(v) {
 
     Object.entries(placements || {}).forEach(([roomId, p]) => {
       const rid = `${floor}-${roomId}`
-      // Optional: Passing the floor level hint
-      rooms.push({ id: rid, name: ROOM_DEFS[roomId]?.label || roomId, level: floor })
+      // Explicitly link the room to its levelId
+      rooms.push({ id: rid, name: ROOM_DEFS[roomId]?.label || roomId, levelId: floor })
       const { x, y, w, d } = p
 
       // Update floor boundary
@@ -114,6 +114,10 @@ export function buildRevitMessage(v) {
       requestId: (typeof crypto !== 'undefined' && crypto.randomUUID)
         ? crypto.randomUUID()
         : `req-${Date.now()}`,
+      levels: [
+        { id: 'ground', name: 'Ground Floor', elevationMm: 0 },
+        { id: 'level1', name: 'Level 1', elevationMm: GROUND_H }
+      ],
       rooms,
       walls,
       doors,

@@ -94,6 +94,18 @@
   "type": "create-pump-room",
   "payload": {
     "requestId": "uuid-string",
+    "levels": [
+      {
+        "id": "ground",
+        "name": "Ground Floor",
+        "elevationMm": 0
+      },
+      {
+        "id": "level1",
+        "name": "Level 1",
+        "elevationMm": 8500
+      }
+    ],
     "rooms": [ ... ],
     "walls": [ ... ],
     "doors": [ ... ],
@@ -102,21 +114,35 @@
 }
 ```
 
-### 3.1 Room (房间)
+### 3.1 Level (标高)
+
+定义建筑内的楼层标高，供其他构件引用。
 
 ```json
-{ "id": "ground-trafo1", "name": "中电变压器房1", "level": "ground" }
+{ "id": "level1", "name": "Level 1", "elevationMm": 8500 }
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+| :--- | :--- | :--- | :--- |
+| id | string | 是 | 唯一标高 ID (如 "ground", "level1") |
+| name | string | 是 | 标高名称 |
+| elevationMm | number | 是 | 标高的绝对绝对高度 (mm) |
+
+### 3.2 Room (房间)
+
+```json
+{ "id": "ground-trafo1", "name": "中电变压器房1", "levelId": "ground" }
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
 | :--- | :--- | :--- | :--- |
 | id | string | 是 | 唯一房间 ID |
 | name | string | 是 | Revit 中的房间名称 |
-| level | string | 是 | 所属楼层 (如 "ground", "level1") |
+| levelId | string | 是 | 关联的标高 ID |
 
-### 3.2 Wall (墙体)
+### 3.3 Wall (墙体)
 
-坐标单位均为毫米 (mm)。Z 轴为相对于所在楼层标高的基础偏移。
+坐标单位均为毫米 (mm)。Z 轴为相对于关联标高的基础偏移。
 
 ```json
 {
@@ -138,7 +164,7 @@
 | thicknessMm | number | 是 | 墙体厚度 (mm) |
 | heightMm | number | 是 | 墙体高度 (mm) |
 
-### 3.3 Door (门)
+### 3.4 Door (门)
 
 ```json
 {
@@ -158,7 +184,7 @@
 | heightMm | number | 是 | 门高度 (mm) |
 | locationMm | Point3 | 是 | 在墙体上的插入点 (mm)，Z 为 Sill Height |
 
-### 3.4 Slab (楼板)
+### 3.5 Slab (楼板)
 
 楼板由 XY 平面上的闭合边界多边形定义。
 
@@ -182,18 +208,19 @@
 | :--- | :--- | :--- | :--- |
 | id | string | 是 | 唯一楼板 ID |
 | roomId | string | 是 | 关联房间 ID（用于标高定位参考） |
-| elevationMm | number | 是 | 相对于楼层标高的顶面高度偏移 (mm) |
+| elevationMm | number | 是 | 相对于关联标高的顶面高度偏移 (mm) |
 | thicknessMm | number | 是 | 楼板厚度 (mm) |
 | boundaryMm | Point3[] | 是 | 有序边界顶点（至少3个点） |
 | openings | Opening[] | 否 | 楼板上的开洞（孔洞） |
 
 ---
 
-### 3.5 几何生成规则
+### 3.6 几何生成规则
 
 - **坐标系:** 统一使用毫米 (mm)。
-- **相对高程 (Relative Z-Offset):** 所有几何元素（墙体、楼板、门）的 Z 坐标均相对于其所在楼层的基础标高。目前默认偏移量均为 `0`。
-- **标高分配:** 插件应根据房间或对象的 `level` 属性（"ground" / "level1"）将其分配到 Revit 中对应的 Level。
+- **显式标高定义:** 传输协议中通过 `levels` 数组显式定义各楼层的绝对高度，避免 Revit 插件预定义的硬编码错误。
+- **相对高程 (Relative Z-Offset):** 所有几何元素（墙体、楼板、门）的 Z 坐标均相对于其所在房间关联的标高。目前默认偏移量均为 `0`。
+- **标高分配:** 插件应根据 `levels` 定义在 Revit 中创建或匹配标高，并根据房间对象的 `levelId` 将其及下属构件分配到对应的标高上。
 - **楼板生成:** 每一层会自动生成一个楼板，其边界 `boundaryMm` 为该层所有房间的最小外接矩形（Bounding Box）。
 - **门墙匹配:** 门与其宿主墙的关联必须保证在同一楼层（通过 `roomId` 前缀校验）。
 

@@ -722,16 +722,6 @@ let isFocusMode = false;
  * 2. Non-open cards are hidden when in focus mode.
  */
 function initFocusMode() {
-  const allCards = document.querySelectorAll('.agent-card');
-  const openCard = Array.from(allCards).find(c => c.open);
-  
-  if (openCard) {
-    isFocusMode = true;
-    document.body.classList.add('focus-mode');
-    document.body.classList.add('has-open-card');
-    // Ensure only one is open
-    allCards.forEach(c => { if (c !== openCard) c.removeAttribute('open'); });
-  }
 
   // Inject Navigation Bar
   const navBar = document.createElement('div');
