@@ -1,4 +1,4 @@
-import { ROOM_DEFS } from '../layout/room-defs.js';
+import { ROOM_DEFS } from '../layout/model/room-defs.js';
 
 // SVG string-building helpers (coordinate-system agnostic)
 

@@ -1,8 +1,8 @@
-import { generateConstrainedLayout, buildPartialResult, computeRelaxedDoorAccess, GRID_SIZE, generateWeightMapForRoom } from '../layout/layout-generator.js'
-import { ROOM_DEFS } from '../layout/room-defs.js';
-import { getDefaultUserParams, getUserConfirmedParams } from '../layout/user-params.js'
-import { centerX, centerY, evaluateTemplate } from '../layout/placer.js'
-import { scoreLayout, scoreSpatialQuality } from '../layout/scorer.js'
+import { generateConstrainedLayout, buildPartialResult, computeRelaxedDoorAccess, GRID_SIZE, generateWeightMapForRoom } from '../layout/generator/layout-generator.js'
+import { ROOM_DEFS } from '../layout/model/room-defs.js';
+import { getDefaultUserParams, getUserConfirmedParams } from '../layout/model/user-params.js'
+import { centerX, centerY, evaluateTemplate } from '../layout/generator/placer.js'
+import { scoreLayout, scoreSpatialQuality } from '../layout/evaluation/scorer.js'
 
 // 每生成一个方案后 yield，让浏览器处理积压的事件（点击等）
 const yieldToEventLoop = () => new Promise(resolve => setTimeout(resolve, 0))

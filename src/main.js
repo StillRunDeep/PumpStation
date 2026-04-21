@@ -46,9 +46,9 @@ function applyLayoutResult(newRaw, existing, isReset = false) {
 }
 import { renderAG00, renderAG01, renderPoolDepth, renderPipeSizing, renderMaintenanceRoom, renderPumpSpec, renderRainfallCard, renderSchemeOptions } from './ui/results-panel.js'
 import { renderLayoutPanel, getVariants, getSelectedVariant, getExpandedVariants, replaceVariant, refreshDetailRow, showAg41Notify, renderScorerParamsPanel, rescoreAndRerender } from './ui/layout-panel.js'
-import { SCORER_PARAMS } from './layout/scorer-params.js'
+import { SCORER_PARAMS } from './layout/evaluation/scorer-params.js'
 import { renderBuildingParamsPanel } from './ui/building-params-panel.js'
-import { getDefaultUserParams } from './layout/user-params.js'
+import { getDefaultUserParams } from './layout/model/user-params.js'
 import { initTopologyEditor, setTopologyFromN, getCurrentTopology } from './ui/topology-editor.js'
 
 let _lastTopoN     = null
