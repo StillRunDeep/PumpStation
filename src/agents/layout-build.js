@@ -94,18 +94,36 @@ function getViolatingRooms(variant) {
   return violators;
 }
 
-/** 为指定房间生成新种子（智能或随机） */
-function getNewSeed(roomId, ctx, currentSeeds, isSmart = false) {
+/** 为指定房间生成新种子（智能或随机）
+ *  parentPlacements: 父代该楼层所有房间的实际 placement，用于构建真实占用格子
+ */
+function getNewSeed(roomId, ctx, currentSeeds, isSmart = false, parentPlacements = null) {
   if (!isSmart) {
     return { x: Math.floor(Math.random() * ctx.gridW), y: Math.floor(Math.random() * ctx.gridH) };
   }
 
   const roomDef = { id: roomId, ...ROOM_DEFS[roomId] };
-  const mockGrid = {
-    width: ctx.gridW, height: ctx.gridH,
-    getCell: (x, y) => Object.values(currentSeeds).some(s => s.x === x && s.y === y) ? 1 : 0
-  };
-  
+
+  // 用实际轮廓建 occupied set，避免新种子落入已有房间内部
+  let getCell;
+  if (parentPlacements) {
+    const occupied = new Set();
+    for (const [id, p] of Object.entries(parentPlacements)) {
+      if (id === roomId) continue; // 目标房间本身不阻挡——允许在原地附近重新生长
+      const x0 = Math.floor(p.x / GRID_SIZE);
+      const y0 = Math.floor(p.y / GRID_SIZE);
+      const x1 = Math.ceil((p.x + p.w) / GRID_SIZE);
+      const y1 = Math.ceil((p.y + p.d) / GRID_SIZE);
+      for (let gy = y0; gy < y1; gy++)
+        for (let gx = x0; gx < x1; gx++)
+          occupied.add(`${gx},${gy}`);
+    }
+    getCell = (x, y) => occupied.has(`${x},${y}`) ? 1 : 0;
+  } else {
+    getCell = (x, y) => Object.values(currentSeeds).some(s => s.x === x && s.y === y) ? 1 : 0;
+  }
+
+  const mockGrid = { width: ctx.gridW, height: ctx.gridH, getCell };
   const weightMap = generateWeightMapForRoom(mockGrid, roomDef, currentSeeds);
   let bestPos = null;
   let maxWeight = -1;
@@ -129,13 +147,13 @@ function getNewSeed(roomId, ctx, currentSeeds, isSmart = false) {
 export async function optimizeVariant(parent) {
   const ctx = await getGenerationContext();
   const seed = Math.floor(Math.random() * 100000);
-  
+
   const rawChild = generateMutatedLayout(parent, 'unverified_smart', seed, ctx, 'Opt', 1, 'OPT');
   const candidate = evaluateTemplate(rawChild);
-  
+
   Object.assign(candidate, scoreLayout(candidate));
   candidate._seedsMeta = rawChild._debug;
-  
+
   applyCheckpointB([candidate], ctx);
   return candidate;
 }
@@ -246,22 +264,31 @@ function generateMutatedLayout(parent, mode, seed, ctx, groupId, idx, prefix) {
 
   ['ground', 'level1'].forEach(floor => {
     const rooms = Object.keys(ROOM_DEFS).filter(id => ROOM_DEFS[id].floor === floor && !ROOM_DEFS[id].isOpening);
-    
+    const floorPlacements = parent?.[`${floor}Placements`] ?? {};
+
+    // 预先汇总所有父代种子中心，让权重图拥有完整上下文（不依赖循环顺序）
+    const allParentSeeds = {};
+    for (const id of rooms) {
+      const p = floorPlacements[id];
+      if (p) allParentSeeds[id] = placementToGridCenter(p);
+    }
+
     for (const id of rooms) {
       const isTarget = (id === targetRoomId);
       const isVerified = !violatingRooms.has(id);
-      
+
       let keepParent = false;
       if (mode === 'all_but_verified') keepParent = isVerified;
       else if (mode === 'unverified' || mode === 'unverified_smart') keepParent = !isTarget;
 
-      const parentPlacement = parent?.[`${floor}Placements`]?.[id];
+      const parentPlacement = floorPlacements[id];
       if (keepParent && parentPlacement) {
         childSeeds[floor][id] = placementToGridCenter(parentPlacement);
         seedsMeta[floor][id] = { parent: childSeeds[floor][id], child: childSeeds[floor][id], replaced: false };
       } else {
         const isSmart = (mode === 'unverified_smart');
-        childSeeds[floor][id] = getNewSeed(id, ctx, childSeeds[floor], isSmart);
+        childSeeds[floor][id] = getNewSeed(id, ctx, allParentSeeds, isSmart,
+          isSmart ? floorPlacements : null);
         seedsMeta[floor][id] = { parent: parentPlacement ? placementToGridCenter(parentPlacement) : null, child: childSeeds[floor][id], replaced: true };
       }
     }
