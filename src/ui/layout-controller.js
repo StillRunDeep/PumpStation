@@ -95,18 +95,14 @@ export function initLayoutController() {
     }
 
     if (window._bypassCheckpointA) {
-      console.log('[DEBUG bypass] computeMutatedLayout path — NO layout generation');
       const hints = computeMutatedLayout(selected);
-      console.log('[DEBUG bypass] hints computed:', JSON.stringify(hints));
       const debugWithHints = {
         ground: { ...selected._debug?.ground, movementHints: hints.ground },
         level1: { ...selected._debug?.level1, movementHints: hints.level1 },
       };
       refreshDetailRow(selected.id, { ...selected, _debug: debugWithHints });
-      console.log('[DEBUG bypass] refreshDetailRow done, returning');
       return;
     }
-    console.log('[DEBUG normal] optimizeVariant path');
 
     btn.disabled = true
     btn.textContent = '优化中…'

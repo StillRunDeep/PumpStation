@@ -192,6 +192,7 @@
 {
   "id":          "slab-ground",
   "roomId":      "ground-trafo1",
+  "levelId":     "ground",
   "elevationMm": 0,
   "thicknessMm": 300,
   "boundaryMm": [
@@ -208,6 +209,7 @@
 | :--- | :--- | :--- | :--- |
 | id | string | 是 | 唯一楼板 ID |
 | roomId | string | 是 | 关联房间 ID（用于标高定位参考） |
+| levelId | string | 是 | 关联的标高 ID |
 | elevationMm | number | 是 | 相对于关联标高的顶面高度偏移 (mm) |
 | thicknessMm | number | 是 | 楼板厚度 (mm) |
 | boundaryMm | Point3[] | 是 | 有序边界顶点（至少3个点） |

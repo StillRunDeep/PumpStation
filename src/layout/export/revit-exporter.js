@@ -59,6 +59,7 @@ export function buildRevitMessage(v) {
     slabs.push({
       id: `slab-${floor}`,
       roomId: Object.keys(placements)[0] ? `${floor}-${Object.keys(placements)[0]}` : '',
+      levelId: floor,
       elevationMm: zOffset,
       thicknessMm: SLAB_THICK,
       boundaryMm: [
