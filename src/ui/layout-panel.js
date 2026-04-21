@@ -156,7 +156,7 @@ function renderComparisonTable(variants) {
             <th class="th-tip" data-tip="三梯队全量评分总分（越高越好）" style="padding:7px 8px;text-align:right">综合得分</th>
             <th class="th-tip" data-tip="功能房间面积/楼层面积（Phase 1快照）" style="padding:7px 8px;text-align:right">空间效率</th>
             <th class="th-tip" data-tip="强邻近要求满足度 (Phase 1快照)" style="padding:7px 8px; text-align: center;">强邻近</th>
-            <th class="th-tip" data-tip="未满足的可达性/门禁要求（Phase 1快照）" style="padding:7px 8px; text-align: center;">可达性</th>
+            <th class="th-tip" data-tip="未满足的可达性/门禁要求（Phase 1快照）" style="padding:7px 8px; text-align: center;">可达性/出口</th>
           </tr>
         </thead>
         <tbody id="variant-tbody">

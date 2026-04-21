@@ -402,7 +402,7 @@ export async function runPhase3Optimization(variants) {
   for (const variant of variants) {
     const runParams = {
       detailedLayout: true,
-      initialGrid: variant._debug,
+      initialGrid: variant,
     };
     const optimized = generateConstrainedLayout(Math.random() * 1000, ctx.buildingW, ctx.buildingD, ctx.roomTargetAreas, runParams, 'Opt', variant.variantIdx, variant.id.slice(0, 3));
     results.push(evaluateTemplate(optimized));

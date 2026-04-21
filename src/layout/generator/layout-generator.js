@@ -1322,7 +1322,7 @@ function getPreferredDirection(roomId, grid, buildingW, buildingD, superRoomMeta
   return null;
 }
 
-function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionComplete = null, onRectExpansionComplete = null, stopAfterStage1 = false, superRoomMeta = null) {
+function expandRooms(grid, rooms, rng, { buildingW, buildingD, superRoomMeta }, stopAfterStage1 = false, ignoreAreaLimit = false) {
     let iterations = 0;
     let stage = 1; // Stage 1: Rectangular only, Stage 2: All types allowed
     // currentArea is now in grid cell counts
@@ -1330,6 +1330,13 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
       ...r,
       currentArea: grid.roomData[r.id] ? grid.roomData[r.id].length : 0
     }));
+
+    if (ignoreAreaLimit) {
+      console.log('[expandRooms] ignoreAreaLimit=true 模式', { stage, roomCount: growingRooms.length, stopAfterStage1 });
+      growingRooms.forEach(r => {
+        if (!r.targetGridCount) console.warn(`[expandRooms] 房间${r.id}缺少targetGridCount`, r);
+      });
+    }
 
     let needsSort = true;
 
@@ -1345,7 +1352,9 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
         // Stage 2: also include rooms that haven't met accessibility, even if they've reached
         // their area target — they need to keep growing toward the exterior wall / corridor.
         let activeRooms;
-        if (stage === 2) {
+        if (ignoreAreaLimit) {
+          activeRooms = growingRooms; // Grow all rooms regardless of area
+        } else if (stage === 2) {
           activeRooms = growingRooms.filter(room => {
             if (room.currentArea < room.targetGridCount) return true;
             const t0 = _t ? performance.now() : 0;
@@ -1360,8 +1369,7 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
         // If all rooms reached their target area (and accessibility in Stage 2)
         if (activeRooms.length === 0) {
             if (stage === 1) {
-                if (onRectExpansionComplete) onRectExpansionComplete(grid);
-            }
+                            }
             break;
         }
 
@@ -1420,8 +1428,8 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
 
             // If no room could grow rectangularly, Stage 1 is complete
             if (!growthHappenedThisCycle) {
-                if (onRectExpansionComplete) {
-                    onRectExpansionComplete(grid); // Take snapshot AFTER all possible rect growths are done
+                if (ignoreAreaLimit) {
+                  console.log('[expandRooms] Stage1无矩形扩展，进入Stage2进行L/U形扩展', { iterations, activeRoomsCount: activeRooms.length });
                 }
                 // If stopAfterStage1 is enabled, stop here; otherwise proceed to Phase 2
                 if (!stopAfterStage1) {
@@ -1433,6 +1441,9 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
             }
         } else if (stage === 2) {
             // Stage 2: Allow all types of expansion
+            if (ignoreAreaLimit && iterations === 0) {
+              console.log('[expandRooms] Stage2开始，activeRooms数量:', activeRooms.map(r => r.id).join(','));
+            }
             for (const roomToGrow of activeRooms) {
                 const isCorridor = roomToGrow.id === 'corridor_l1';
 
@@ -1454,6 +1465,10 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
                     // findSmartLineExpansion: concave-fill logic is self-converging; no dir bias needed
                     expansionCells = findSmartLineExpansion(grid, roomToGrow.id);
                     if (_t) _t.findSmartLine += performance.now() - _t2;
+                }
+
+                if (ignoreAreaLimit && expansionCells && expansionCells.length > 0) {
+                  console.log(`[expandRooms] ${roomToGrow.id}找到${expansionIsRect ? '矩形' : 'L/U'}扩展:${expansionCells.length}个格子`);
                 }
 
                 if (expansionCells && expansionCells.length > 0) {
@@ -1503,7 +1518,7 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
                     }
 
                     for (const cell of expansionCells) {
-                        if (roomToGrow.currentArea < roomToGrow.targetGridCount) {
+                        if (ignoreAreaLimit || roomToGrow.currentArea < roomToGrow.targetGridCount) {
                             grid.addRoomCell(roomToGrow.id, cell.x, cell.y);
                             roomToGrow.currentArea++; // Increment by 1 grid cell
                         } else {
@@ -1517,7 +1532,11 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
             }
 
             if (!growthHappenedThisCycle) {
-                console.warn("Expansion stuck. No rooms could grow in Stage 2.");
+                if (ignoreAreaLimit) {
+                  console.warn(`[expandRooms] Stage2卡住，无法继续扩展。迭代次数:${iterations}`);
+                } else {
+                  console.warn("Expansion stuck. No rooms could grow in Stage 2.");
+                }
                 break;
             }
         }
@@ -1526,12 +1545,20 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
     }
 
     if (iterations === MAX_EXPANSION_ITERATIONS) {
-        console.warn("Expansion reached max iterations.");
+        const msg = `Expansion reached max iterations (${MAX_EXPANSION_ITERATIONS}).`;
+        if (ignoreAreaLimit) {
+          console.warn(`[expandRooms] ${msg}`);
+        } else {
+          console.warn(msg);
+        }
+    }
+
+    if (ignoreAreaLimit) {
+      console.log('[expandRooms] 完成，最终迭代次数:', iterations);
     }
 
     // Capture the final grid state (always fires regardless of exit path)
-    if (onRegularExpansionComplete) onRegularExpansionComplete(grid);
-
+    
     if (_t) {
       if (!window.timeCostLog) window.timeCostLog = [];
       for (const [k, v] of Object.entries(_t)) {
@@ -1806,84 +1833,6 @@ const PHASE3_AREA_DEVIATION = 0.15  // 面积偏差阈值：超过 15% 视为候
 const SWAP_MAX_CELLS = 4            // 单次转让的最大格子数
 const MAX_SWAP_ROUNDS = 30          // 空间交换最大协商轮数
 
-/**
- * Phase 3a: 无面积限制的 L/U 形继续生长。
- * 复用 Stage 2 的扩展逻辑，但移除 targetGridCount 限制，让所有房间持续生长直到无法再扩展。
- */
-function runPhase3Growth(grid, rooms, rng) {
-  let iterations = 0
-  while (iterations < MAX_EXPANSION_ITERATIONS) {
-    let grew = false
-    // 按完成比例排序（面积最小的优先）
-    const sorted = [...rooms].sort((a, b) => {
-      const aA = grid.roomData[a.id]?.length || 0
-      const bA = grid.roomData[b.id]?.length || 0
-      return (aA / (a.targetGridCount || 1)) - (bA / (b.targetGridCount || 1))
-    })
-
-    for (const room of sorted) {
-      const isCorridor = room.id === 'corridor_l1'
-      let cells = findBestRectangleExpansion(grid, room.id, isCorridor)
-      if (!cells) cells = findBestFillExpansion(grid, room.id)
-      if (!cells) cells = findSmartLineExpansion(grid, room.id)
-      if (!cells || cells.length === 0) continue
-
-      // 走廊宽度守护
-      if (isCorridor) {
-        const currentMinWidth = getRoomMinCrossWidth(grid, room.id);
-
-        // 创建一个 testGrid 来模拟生长后的状态
-        const origCells = [...(grid.roomData[room.id] || [])];
-        const testGrid = {
-          getCell: (x, y) => cells.some(c => c.x === x && c.y === y) ? room.id : grid.getCell(x, y),
-          getBoundingBox: (id) => {
-            if (id !== room.id) return grid.getBoundingBox(id);
-            const combined = [...origCells, ...cells];
-            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-            for (const c of combined) {
-              if (c.x < minX) minX = c.x; if (c.x > maxX) maxX = c.x;
-              if (c.y < minY) minY = c.y; if (c.y > maxY) maxY = c.y;
-            }
-            return { minX, minY, maxX, maxY };
-          }
-        };
-
-        const newMinWidth = getRoomMinCrossWidth(testGrid, room.id);
-
-        // 只有当宽度变得更窄，且仍低于标准时，才阻止
-        if (newMinWidth < currentMinWidth && newMinWidth < CORRIDOR_MIN_WIDTH_CELLS) {
-          continue;
-        }
-      }
-
-      // 非走廊房间形态约束（最多 8 顶点）
-      if (!isCorridor) {
-        const origCells = [...(grid.roomData[room.id] || [])]
-        const testGrid = {
-          getCell: (x, y) => cells.some(c => c.x === x && c.y === y) ? room.id : grid.getCell(x, y),
-          getBoundingBox: (id) => {
-            if (id !== room.id) return grid.getBoundingBox(id)
-            const combined = [...origCells, ...cells]
-            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-            for (const c of combined) {
-              if (c.x < minX) minX = c.x; if (c.x > maxX) maxX = c.x
-              if (c.y < minY) minY = c.y; if (c.y > maxY) maxY = c.y
-            }
-            return { minX, minY, maxX, maxY }
-          }
-        }
-        if (countRoomVertices(testGrid, room.id) > 8) continue
-      }
-
-      cells.forEach(c => grid.addRoomCell(room.id, c.x, c.y))
-      grew = true
-      break
-    }
-
-    if (!grew) break
-    iterations++
-  }
-}
 
 /**
  * 单房间轻量质量评分（用于交换决策，不调用 evaluateTemplate）。
@@ -2295,20 +2244,48 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
   const rng = makeRng(seed);
 
   if (detailedLayout && initialGrid) {
-    const groundGrid = initialGrid.ground.gridBeforeGaps.clone();
-    const level1Grid = initialGrid.level1.gridBeforeGaps.clone();
+    // --- 终极防御性检查 ---
+    // initialGrid 可能是 variant 对象（包含_debug），或直接是_debug对象
+    const debugInfo = initialGrid._debug || initialGrid;
+    if (!debugInfo) throw new Error('detailedLayout: initialGrid._debug或initialGrid不存在');
 
-    const allRooms = Object.values(ROOM_DEFS).filter(r => !r.isOpening).map(r => {
-      const targetAreaMm2 = (roomAreas[r.id] * 1e6) || (r.w * r.d);
-      return { id: r.id, label: r.label, floor: r.floor, targetGridCount: Math.round(targetAreaMm2 / (GRID_SIZE * GRID_SIZE)) };
-    }).filter(r => r.targetGridCount >= 1);
+    const groundGrid = (debugInfo.ground?.gridBeforeGaps || debugInfo.ground?.gridAfterRect).clone();
+    const level1Grid = (debugInfo.level1?.gridBeforeGaps || debugInfo.level1?.gridAfterRect).clone();
+
+    const allRooms = debugInfo.roomTargets || [];
+    let alignedBW, alignedBD;
+
+    if (debugInfo.alignedBW) {
+      alignedBW = debugInfo.alignedBW;
+      alignedBD = debugInfo.alignedBD;
+    } else {
+      // 回退：重新计算
+      const gridW = Math.floor(bW / GRID_SIZE);
+      const gridH = Math.floor(bD / GRID_SIZE);
+      alignedBW = gridW * GRID_SIZE;
+      alignedBD = gridH * GRID_SIZE;
+    }
+    // --- 检查结束 ---
+
+
     const groundRooms = allRooms.filter(r => r.floor === 'ground');
     const level1Rooms = allRooms.filter(r => r.floor === 'level1');
     const { mergedRooms: mergedGroundRooms, superRoomMap: groundSuperRoomMap } = mergeMustPairsForFloor(groundRooms);
     const { mergedRooms: mergedLevel1Rooms, superRoomMap: level1SuperRoomMap } = mergeMustPairsForFloor(level1Rooms);
 
-    runPhase3Growth(groundGrid, mergedGroundRooms, rng);
-    runPhase3Growth(level1Grid, mergedLevel1Rooms, rng);
+    // Step 6A: 无面积限制 L/U 生长
+    console.log('[Phase3Debug] 开始无面积限制生长');
+    console.log('[Phase3Debug] 优化前 ground rooms:', mergedGroundRooms.map(r => ({ id: r.id, currentArea: groundGrid.roomData[r.id]?.length || 0, targetGridCount: r.targetGridCount })));
+    console.log('[Phase3Debug] 优化前 level1 rooms:', mergedLevel1Rooms.map(r => ({ id: r.id, currentArea: level1Grid.roomData[r.id]?.length || 0, targetGridCount: r.targetGridCount })));
+
+    const groundCtx = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: buildSuperRoomMeta(groundSuperRoomMap) };
+    expandRooms(groundGrid, mergedGroundRooms, rng, groundCtx, false, true);
+    console.log('[Phase3Debug] 优化后 ground rooms:', mergedGroundRooms.map(r => ({ id: r.id, currentArea: groundGrid.roomData[r.id]?.length || 0 })));
+
+    const level1Ctx = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: buildSuperRoomMeta(level1SuperRoomMap) };
+    expandRooms(level1Grid, mergedLevel1Rooms, rng, level1Ctx, false, true);
+    console.log('[Phase3Debug] 优化后 level1 rooms:', mergedLevel1Rooms.map(r => ({ id: r.id, currentArea: level1Grid.roomData[r.id]?.length || 0 })));
+
 
     splitAllSuperRooms(groundGrid, groundSuperRoomMap);
     splitAllSuperRooms(level1Grid, level1SuperRoomMap);
@@ -2321,14 +2298,14 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     return {
       id: `${prefix}-${groupId}-${variantIdx}`,
       label: `约束生长法 (优化)`,
-      desc: `建筑 ${(bW / 1000).toFixed(1)}m×${(bD / 1000).toFixed(1)}m`,
+      desc: `建筑 ${(alignedBW / 1000).toFixed(1)}m×${(alignedBD / 1000).toFixed(1)}m`,
       groundPlacements: finalLayout.ground,
       level1Placements: finalLayout.level1,
-      buildingW: bW,
-      buildingD: bD,
+      buildingW: alignedBW,
+      buildingD: alignedBD,
       groupId,
       variantIdx,
-      _debug: { ...initialGrid, ground: { ...initialGrid.ground, gridAfterGaps: groundGrid }, level1: { ...initialGrid.level1, gridAfterGaps: level1Grid } },
+      _debug: { ...debugInfo, ground: { ...debugInfo.ground, gridAfterGaps: groundGrid }, level1: { ...debugInfo.level1, gridAfterGaps: level1Grid } },
       checkpointADiagnostic: initialGrid.checkpointADiagnostic,
       _relaxedDoorAccess: initialGrid._relaxedDoorAccess,
     };
@@ -2413,24 +2390,29 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
   }
   level1GridAfterSeeds = level1Grid.clone();
 
+  const debugData = {
+    roomTargets: allRooms,
+    alignedBW,
+    alignedBD,
+    ground: { seeds: groundSeeds, gridAfterSeeds: groundGridAfterSeeds },
+    level1: { seeds: level1Seeds, gridAfterSeeds: level1GridAfterSeeds },
+  };
+
   // --- Checkpoint A (Phase 1 snapshot evaluation) ---
+  const groundCtx = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: groundSuperMeta };
+  timedGen('phase1_expandRooms_ground', () => expandRooms(groundGrid, mergedGroundRooms, rng, groundCtx, schemaLayout));
+  groundGridAfterRect = groundGrid.clone();
+  debugData.ground.gridAfterRect = groundGridAfterRect;
+  groundGridBeforeGaps = groundGrid.clone();
+  debugData.ground.gridBeforeGaps = groundGridBeforeGaps;
 
-  // 先用 stopAfterStage1=true 跑 Phase 1 来评估 Checkpoint A
-  timedGen('phase1_expandRooms_ground', () => expandRooms(groundGrid, mergedGroundRooms, rng, alignedBW, alignedBD, (gridState) => {
-    groundGridBeforeGaps = gridState.clone();
-  }, (gridState) => {
-    groundGridAfterRect = gridState.clone();
-  }, schemaLayout, groundSuperMeta)); // stopAfterStage1 = schemaLayout, superRoomMeta
-   if (!groundGridAfterRect) groundGridAfterRect = groundGrid.clone();
-   if (!groundGridBeforeGaps) groundGridBeforeGaps = groundGrid.clone();
+  const level1Ctx = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: level1SuperMeta };
+  timedGen('phase1_expandRooms_level1', () => expandRooms(level1Grid, mergedLevel1Rooms, rng, level1Ctx, schemaLayout));
+  level1GridAfterRect = level1Grid.clone();
+  debugData.level1.gridAfterRect = level1GridAfterRect;
+  level1GridBeforeGaps = level1Grid.clone();
+  debugData.level1.gridBeforeGaps = level1GridBeforeGaps;
 
-  timedGen('phase1_expandRooms_level1', () => expandRooms(level1Grid, mergedLevel1Rooms, rng, alignedBW, alignedBD, (gridState) => {
-    level1GridBeforeGaps = gridState.clone();
-  }, (gridState) => {
-    level1GridAfterRect = gridState.clone();
-  }, schemaLayout, level1SuperMeta)); // stopAfterStage1 = schemaLayout, superRoomMeta
-  if (!level1GridAfterRect) level1GridAfterRect = level1Grid.clone();
-  if (!level1GridBeforeGaps) level1GridBeforeGaps = level1Grid.clone();
 
   // Split super-rooms in snapshots before Checkpoint A evaluation
   const groundAfterRectForEval = groundGridAfterRect.clone();
@@ -2491,11 +2473,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
       buildingD: alignedBD,
       groupId,
       variantIdx,
-      _debug: {
-        roomTargets: allRooms,
-        ground: { seeds: groundSeeds, gridAfterSeeds: groundGridAfterSeeds, gridAfterRect: groundGridAfterRect, gridBeforeGaps: groundGridAfterRect, gridAfterGaps: groundGridAfterRect },
-        level1: { seeds: level1Seeds, gridAfterSeeds: level1GridAfterSeeds, gridAfterRect: level1GridAfterRect, gridBeforeGaps: level1GridAfterRect, gridAfterGaps: level1GridAfterRect },
-      },
+      _debug: debugData,
       checkpointADiagnostic,
       _relaxedDoorAccess: relaxedDoorAccess,
     };
@@ -2503,16 +2481,17 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
 
   // ── Phase 2 (Step 6A): 对通过 Checkpoint A 的方案，继续跑有面积约束的 L/U 形扩展 ────────
   //调试模式：window.debugModeEnabled 默认false，单模块屏蔽：debugCurrentModuleEnabled 默认 true
-  if (debugCurrentModuleEnabled) {        
-    timedGen('phase2_expandRooms_ground', () => expandRooms(groundGrid, mergedGroundRooms, rng, alignedBW, alignedBD, (gridState) => {
-      groundGridBeforeGaps = gridState.clone();
-    }, null, false, groundSuperMeta)); // stopAfterStage1 = false，完整执行 Phase 2，superRoomMeta
-    timedGen('phase2_expandRooms_level1', () => expandRooms(level1Grid, mergedLevel1Rooms, rng, alignedBW, alignedBD, (gridState) => {
-      level1GridBeforeGaps = gridState.clone();
-    }, null, false, level1SuperMeta)); // stopAfterStage1 = false，完整执行 Phase 2，superRoomMeta
+  if (window.debugCurrentModuleEnabled) {
+    const groundCtx = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: groundSuperMeta };
+    timedGen('phase2_expandRooms_ground', () => expandRooms(groundGrid, mergedGroundRooms, rng, groundCtx, false));
+    groundGridBeforeGaps = groundGrid.clone();
+    debugData.ground.gridBeforeGaps = groundGridBeforeGaps;
+
+    const level1Ctx = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: level1SuperMeta };
+    timedGen('phase2_expandRooms_level1', () => expandRooms(level1Grid, mergedLevel1Rooms, rng, level1Ctx, false));
+    level1GridBeforeGaps = level1Grid.clone();
+    debugData.level1.gridBeforeGaps = level1GridBeforeGaps;
   }
-  if (!groundGridBeforeGaps) groundGridBeforeGaps = groundGrid.clone();
-  if (!level1GridBeforeGaps) level1GridBeforeGaps = level1Grid.clone();
 
   // Split super-rooms before Checkpoint B evaluation
   const groundBeforeGapsForEval = groundGridBeforeGaps.clone();
@@ -2545,34 +2524,14 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
       buildingD: alignedBD,
       groupId,
       variantIdx,
-      _debug: {
-        roomTargets: allRooms,
-        ground: { seeds: groundSeeds, gridAfterSeeds: groundGridAfterSeeds, gridAfterRect: groundGridAfterRect, gridBeforeGaps: groundGridBeforeGaps, gridAfterGaps: groundGridBeforeGaps },
-        level1: { seeds: level1Seeds, gridAfterSeeds: level1GridAfterSeeds, gridAfterRect: level1GridAfterRect, gridBeforeGaps: level1GridBeforeGaps, gridAfterGaps: level1GridBeforeGaps },
-      },
+      _debug: debugData,
       checkpointADiagnostic,
       checkpointBDiagnostic,
       _relaxedDoorAccess: relaxedB,
     };
   }
   //调试模式：window.debugModeEnabled 默认false，单模块屏蔽：debugCurrentModuleEnabled 默认 true
-  if (window.debugModeEnabled) {
-    // ── Step 6B: 无面积限制 L/U 生长 ──────────────────────────────────
-    timedGen('phase3_growth_ground', () => runPhase3Growth(groundGrid, mergedGroundRooms, rng))
-    
-    // // ── Step 7a: 边界清理与空隙填充 ────────────────────────────────────
-    // if (enableAreaSwap) timedGen('phase3_areaSwap_ground', () => runAreaSwap(groundGrid, mergedGroundRooms))
-    // timedGen('phase3_fillGaps_ground', () => fillGaps(groundGrid, mergedGroundRooms));
-    // // ── Step 7b: 平滑房间交界线 ────────────────────────────────────────
-    // timedGen('phase3_spaceSwap_ground', () => runSpaceSwap(groundGrid, mergedGroundRooms))
-
-    // // ── Step 6B: 无面积限制 L/U 生长 ──────────────────────────────────
-    // timedGen('phase3_growth_level1', () => runPhase3Growth(level1Grid, mergedLevel1Rooms, rng))
-    // // ── Step 7a: 边界清理与空隙填充 ────────────────────────────────────
-    // if (enableAreaSwap) timedGen('phase3_areaSwap_level1', () => runAreaSwap(level1Grid, mergedLevel1Rooms))
-    // timedGen('phase3_fillGaps_level1', () => fillGaps(level1Grid, mergedLevel1Rooms));
-    // // ── Step 7b: 平滑房间交界线 ────────────────────────────────────────
-    // timedGen('phase3_spaceSwap_level1', () => runSpaceSwap(level1Grid, mergedLevel1Rooms))
+  if (window.debugCurrentModuleEnabled) {
   }
 
   // ── Super-room splitting: convert super-rooms back to constituent rooms ──
@@ -2581,6 +2540,8 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
   console.error(`[CoGrow] Before split - level1 roomData keys: ${Object.keys(level1Grid.roomData).join(',')}`);
   splitAllSuperRooms(groundGrid, groundSuperRoomMap);
   splitAllSuperRooms(level1Grid, level1SuperRoomMap);
+  debugData.ground.gridAfterGaps = groundGrid;
+  debugData.level1.gridAfterGaps = level1Grid;
   console.error(`[CoGrow] After split - ground roomData keys: ${Object.keys(groundGrid.roomData).join(',')}`);
   console.error(`[CoGrow] After split - level1 roomData keys: ${Object.keys(level1Grid.roomData).join(',')}`);
 
@@ -2603,11 +2564,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     buildingD: alignedBD,
     groupId,
     variantIdx,
-    _debug: {
-      roomTargets: allRooms,
-      ground: { seeds: groundSeeds, gridAfterSeeds: groundGridAfterSeeds, gridAfterRect: groundGridAfterRect, gridBeforeGaps: groundGridBeforeGaps, gridAfterGaps: groundGrid },
-      level1: { seeds: level1Seeds, gridAfterSeeds: level1GridAfterSeeds, gridAfterRect: level1GridAfterRect, gridBeforeGaps: level1GridBeforeGaps, gridAfterGaps: level1Grid },
-    },
+    _debug: debugData,
     checkpointADiagnostic,
     checkpointBDiagnostic,
     _relaxedDoorAccess: relaxedFinal,
