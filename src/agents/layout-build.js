@@ -132,10 +132,8 @@ export async function optimizeVariant(parent) {
   
   const rawChild = generateMutatedLayout(parent, 'unverified_smart', seed, ctx, 'Opt', 1, 'OPT');
   const candidate = evaluateTemplate(rawChild);
-  const { score, breakdown } = scoreLayout(candidate);
   
-  candidate.score = score;
-  candidate.breakdown = breakdown;
+  Object.assign(candidate, scoreLayout(candidate));
   candidate._seedsMeta = rawChild._debug;
   
   applyCheckpointB([candidate], ctx);
@@ -161,9 +159,7 @@ export async function generateMergedLayout(variantA, variantB) {
   applyCheckpointB([c1, c2], ctx);
   
   const best = c1.score >= c2.score ? c1 : c2;
-  const { score, breakdown } = scoreLayout(best);
-  Object.assign(best, {
-    score, breakdown,
+  Object.assign(best, scoreLayout(best), {
     id: `M-${Date.now().toString(36).toUpperCase()}`,
     label: `合并(${variantA.id}+${variantB.id})`
   });

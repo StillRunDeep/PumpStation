@@ -4,8 +4,8 @@ import { GRID_SIZE } from '../layout/generator/layout-generator.js'
 import { SCORER_PARAMS } from '../layout/evaluation/scorer-params.js'
 
 /**
- * Compute average centroid distance (in grid cells) between two layouts.
- * Lower value = more similar layouts.
+ * 计算两个方案之间房间重心的平均欧几里得距离（以网格为单位）。
+ * 值越小表示方案越相似。
  */
 function computeLayoutSimilarity(varA, varB) {
   const allA = { ...(varA.groundPlacements || {}), ...(varA.level1Placements || {}) }
@@ -26,11 +26,10 @@ function computeLayoutSimilarity(varA, varB) {
 }
 
 /**
- * Apply diversity penalty to a ranked list (mutates in place).
- * A variant is penalised if it is too similar (avg centroid dist < threshold)
- * to any higher-ranked variant already in the list.
+ * 对排序后的列表应用多样性惩罚（原地修改）。
+ * 如果一个方案与排名更高的方案过于相似，则扣分。
  */
-function applyDiversityPenalty(variants) {
+export function applyDiversityPenalty(variants) {
   const threshold = SCORER_PARAMS.diversityThreshold ?? 5.0
   const penaltyPts = SCORER_PARAMS.diversityPenalty ?? 200
 
@@ -39,71 +38,57 @@ function applyDiversityPenalty(variants) {
       if (computeLayoutSimilarity(variants[j], variants[i]) < threshold) {
         variants[i].score -= penaltyPts
         variants[i].diversityPenalty = (variants[i].diversityPenalty || 0) - penaltyPts
-        // Keep breakdown in sync so UI can show why score differs from raw scorer output
         if (variants[i].breakdown) {
           variants[i].breakdown.diversityPenalty = variants[i].diversityPenalty
         }
-        break // penalise at most once per variant
+        break // 每个方案最多惩罚一次
       }
     }
   }
 }
 
-/** Score and enrich a single raw variant. */
+/** 评分并丰富单个原始方案 */
 function scoreVariant(template) {
   const evaluated = evaluateTemplate(template)
-  const { score, spaceEfficiency, efficiencyScore, accessibilityScore, aspectRatio, diversityPenalty, breakdown } = scoreLayout(evaluated)
-  return { ...evaluated, score, spaceEfficiency, efficiencyScore, accessibilityScore, aspectRatio, diversityPenalty, breakdown }
+  return { ...evaluated, ...scoreLayout(evaluated) }
 }
 
 /**
- * AG4-3: Building Layout Evaluation
- *
- * Receives the raw layout variants from AG4-2, scores each one,
- * and returns them enriched with score, spaceEfficiency, accessibilityScore,
- * variantType, diversityPenalty and breakdown, sorted best-first.
- *
- * @param {Array} rawVariants  Raw output of generateConstrainedLayout() for each template
- * @returns {Array} Scored and sorted variants
+ * 重新评分一组已生成的方案，并应用多样性惩罚。
+ * 常用于用户调整评分参数后。
  */
-export function runAG42(rawVariants) {
-  const evaluatedAndScored = rawVariants.map(scoreVariant)
-
-  // Unified scoring: just sort by score descending
-  evaluatedAndScored.sort((a, b) => b.score - a.score)
-
-  // Apply diversity penalty to the pool
-  applyDiversityPenalty(evaluatedAndScored)
-
-  // Re-sort after penalty to ensure final order is correct
-  evaluatedAndScored.sort((a, b) => b.score - a.score)
-
-  return evaluatedAndScored.slice(0, 9)
+export function rescoreVariants(variants) {
+  const scored = variants.map(v => ({ ...v, ...scoreLayout(v) }))
+  scored.sort((a, b) => b.score - a.score)
+  applyDiversityPenalty(scored)
+  scored.sort((a, b) => b.score - a.score)
+  return scored
 }
 
 /**
- * Merge existing scored variants with newly generated raw templates.
- * Combines all candidates, re-ranks, keeps top 9.
- *
- * @param {Array} existingVariants  Already-scored variants from a previous run
- * @param {Array} newRawTemplates   Raw template objects from runAG41()
- * @returns {{ variants: Array, improved: boolean, newScored: Array, eliminated: Array }}
+ * 将现有的已评分方案与新生成的原始模板合并。
+ * 1. 对存量方案重评分（清除旧的多样性惩罚）。
+ * 2. 对新方案评分。
+ * 3. 统一排序并应用多样性惩罚。
+ * 4. 返回前 9 名。
  */
 export function mergeVariants(existingVariants, newRawTemplates) {
+  // 1. 重评分存量方案，确保没有遗留的旧惩罚分
+  const reScoredExisting = existingVariants.map(v => ({ ...v, ...scoreLayout(v) }))
+
+  // 2. 评分新生成的模板
   const newScored = newRawTemplates.map(t => ({ ...scoreVariant(t), _isNew: true }))
 
-  // Combine all candidates into one pool
-  const combined = [...existingVariants, ...newScored]
-
-  // Unified ranking: no more feasible/unfeasible buckets
+  // 3. 合并池
+  const combined = [...reScoredExisting, ...newScored]
   combined.sort((a, b) => b.score - a.score)
 
-  // Apply diversity penalty to a larger pool to ensure top 9 are diverse and the best
+  // 4. 对前 18 名应用多样性惩罚
   const poolSize = Math.min(combined.length, 18)
   const topCandidates = combined.slice(0, poolSize)
   applyDiversityPenalty(topCandidates)
 
-  // Final sort and select top 9
+  // 5. 最终排序并取 Top 9
   topCandidates.sort((a, b) => b.score - a.score)
   const top9 = topCandidates.slice(0, 9)
   const eliminated = topCandidates.slice(9)
