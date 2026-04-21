@@ -539,6 +539,7 @@ function countRoomVertices(grid, roomId) {
                     vertices += 2;
                 }
             }
+            if (vertices > 8) return vertices; // 早退：超限后无需继续
         }
     }
     return vertices;
@@ -1063,22 +1064,33 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
     let iterations = 0;
     let stage = 1; // Stage 1: Rectangular only, Stage 2: All types allowed
     // currentArea is now in grid cell counts
-    let growingRooms = rooms.map(r => ({ 
-      ...r, 
-      currentArea: grid.roomData[r.id] ? grid.roomData[r.id].length : 0 
+    let growingRooms = rooms.map(r => ({
+      ...r,
+      currentArea: grid.roomData[r.id] ? grid.roomData[r.id].length : 0
     }));
-    
+
     let needsSort = true;
+
+    // 性能累计计时（仅 debugModeEnabled 时启用）
+    const _t = window.debugModeEnabled ? {
+      isAccessibilityMet: 0, findBestRect: 0, findBestFill: 0,
+      findSmartLine: 0, expansionCellsSome: 0, countVertices: 0,
+    } : null;
+    const _label = stopAfterStage1 ? 'phase1' : 'phase2';
+    const _floor = rooms[0]?.floor ?? 'unknown';
 
     while (iterations < MAX_EXPANSION_ITERATIONS) {
         // Stage 2: also include rooms that haven't met accessibility, even if they've reached
         // their area target — they need to keep growing toward the exterior wall / corridor.
         let activeRooms;
         if (stage === 2) {
-          activeRooms = growingRooms.filter(room =>
-            room.currentArea < room.targetGridCount ||
-            !isAccessibilityMet(room.id, grid, buildingW, buildingD)
-          );
+          activeRooms = growingRooms.filter(room => {
+            if (room.currentArea < room.targetGridCount) return true;
+            const t0 = _t ? performance.now() : 0;
+            const r = !isAccessibilityMet(room.id, grid, buildingW, buildingD);
+            if (_t) _t.isAccessibilityMet += performance.now() - t0;
+            return r;
+          });
         } else {
           activeRooms = growingRooms.filter(room => room.currentArea < room.targetGridCount);
         }
@@ -1086,8 +1098,6 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
         // If all rooms reached their target area (and accessibility in Stage 2)
         if (activeRooms.length === 0) {
             if (stage === 1) {
-                // Stage 1 finished perfectly — capture rect snapshot before exiting.
-                // onRegularExpansionComplete is called after the loop regardless.
                 if (onRectExpansionComplete) onRectExpansionComplete(grid);
             }
             break;
@@ -1099,16 +1109,19 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
         if (needsSort) {
           if (stage === 2) {
             activeRooms.sort((a, b) => {
+              const t0 = _t ? performance.now() : 0;
               const aOk = isAccessibilityMet(a.id, grid, buildingW, buildingD);
               const bOk = isAccessibilityMet(b.id, grid, buildingW, buildingD);
-              if (aOk !== bOk) return aOk ? 1 : -1; // unmet comes first
+              if (_t) _t.isAccessibilityMet += performance.now() - t0;
+              if (aOk !== bOk) return aOk ? 1 : -1;
               return (a.currentArea / a.targetGridCount) - (b.currentArea / b.targetGridCount);
             });
           } else {
-            // Stage 1: MUST 邻接未满足的房间优先，其次按面积完成率排序
             activeRooms.sort((a, b) => {
+              const t0 = _t ? performance.now() : 0;
               const aOk = isAccessibilityMet(a.id, grid, buildingW, buildingD);
               const bOk = isAccessibilityMet(b.id, grid, buildingW, buildingD);
+              if (_t) _t.isAccessibilityMet += performance.now() - t0;
               if (aOk !== bOk) return aOk ? 1 : -1;
               return (a.currentArea / a.targetGridCount) - (b.currentArea / b.targetGridCount);
             });
@@ -1125,7 +1138,9 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
                 // 若 MUST 邻接未满足，加方向偏置朝向伙伴
                 const mustOk = isAccessibilityMet(roomToGrow.id, grid, buildingW, buildingD);
                 const prefDir = mustOk ? null : getPreferredDirection(roomToGrow.id, grid, buildingW, buildingD);
+                const _t1 = _t ? performance.now() : 0;
                 let expansionCells = findBestRectangleExpansion(grid, roomToGrow.id, isCorridor, prefDir);
+                if (_t) _t.findBestRect += performance.now() - _t1;
                 if (expansionCells && expansionCells.length > 0) {
                     // To keep it a rectangle, we MUST add the entire line.
                     // If adding the entire line makes us overgrow significantly, 
@@ -1163,23 +1178,29 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
                 const accessOk = isAccessibilityMet(roomToGrow.id, grid, buildingW, buildingD);
                 const prefDir = accessOk ? null : getPreferredDirection(roomToGrow.id, grid, buildingW, buildingD);
 
+                let _t2 = _t ? performance.now() : 0;
                 let expansionCells = findBestRectangleExpansion(grid, roomToGrow.id, isCorridor, prefDir);
+                const expansionIsRect = !!expansionCells;
+                if (_t) { _t.findBestRect += performance.now() - _t2; _t2 = performance.now(); }
 
                 if (!expansionCells) {
                     expansionCells = findBestFillExpansion(grid, roomToGrow.id, prefDir);
+                    if (_t) { _t.findBestFill += performance.now() - _t2; _t2 = performance.now(); }
                 }
 
                 if (!expansionCells) {
                     // findSmartLineExpansion: concave-fill logic is self-converging; no dir bias needed
                     expansionCells = findSmartLineExpansion(grid, roomToGrow.id);
+                    if (_t) _t.findSmartLine += performance.now() - _t2;
                 }
 
                 if (expansionCells && expansionCells.length > 0) {
                     // Build a lightweight dry-run test grid (shared by all guards below)
                     const originalCells = [...(grid.roomData[roomToGrow.id] || [])];
+                    const expansionSet = new Set(expansionCells.map(c => c.x * 100000 + c.y));
                     const testGrid = {
                         getCell: (x, y) => {
-                            if (expansionCells.some(c => c.x === x && c.y === y)) return roomToGrow.id;
+                            if (expansionSet.has(x * 100000 + y)) return roomToGrow.id;
                             return grid.getCell(x, y);
                         },
                         getBoundingBox: (id) => {
@@ -1206,8 +1227,14 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
                     }
 
                     // Morphological constraint: limit non-corridor rooms to 8 vertices (U-shape)
-                    if (!isCorridor) {
-                        if (countRoomVertices(testGrid, roomToGrow.id) > 8) {
+                    // 矩形扩展不可能增加顶点数，跳过检查；
+                    // 单次扩展最多增加 2 个顶点，当前 ≤ 6 时扩展后必然 ≤ 8，也跳过检查。
+                    if (!isCorridor && !expansionIsRect) {
+                        const _tv = _t ? performance.now() : 0;
+                        const currentVertices = countRoomVertices(grid, roomToGrow.id);
+                        const vcount = currentVertices > 6 ? countRoomVertices(testGrid, roomToGrow.id) : currentVertices;
+                        if (_t) _t.countVertices += performance.now() - _tv;
+                        if (vcount > 8) {
                             // Expansion would make the room too complex, try next room
                             continue;
                         }
@@ -1242,6 +1269,13 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
 
     // Capture the final grid state (always fires regardless of exit path)
     if (onRegularExpansionComplete) onRegularExpansionComplete(grid);
+
+    if (_t) {
+      if (!window.timeCostLog) window.timeCostLog = [];
+      for (const [k, v] of Object.entries(_t)) {
+        window.timeCostLog.push({ fn: `expandRooms/${_label}_${_floor}/${k}`, duration: v / 1000 });
+      }
+    }
 }
 
 function fillGaps(grid, rooms) {
@@ -1984,6 +2018,16 @@ export function buildPartialResult(groundGrid, level1Grid, buildingW, buildingD)
 
 
 
+function timedGen(name, fn) {
+  if (!window.debugModeEnabled) return fn();
+  const t0 = performance.now();
+  const result = fn();
+  const duration = (performance.now() - t0) / 1000;
+  if (!window.timeCostLog) window.timeCostLog = [];
+  window.timeCostLog.push({ fn: `generateConstrainedLayout/${name}`, duration });
+  return result;
+}
+
 export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParams = {}, groupId = 'CG', variantIdx = 1, prefix = 'R', initialSeeds = null) {
   const { enableAreaSwap = false, bypassCheckpointA = false } = runParams;
   const rng = makeRng(seed);
@@ -2062,28 +2106,28 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
   // --- Checkpoint A (Phase 1 snapshot evaluation) ---
 
   // 先用 stopAfterStage1=true 跑 Phase 1 来评估 Checkpoint A
-  expandRooms(groundGrid, groundRooms, rng, alignedBW, alignedBD, (gridState) => {
+  timedGen('phase1_expandRooms_ground', () => expandRooms(groundGrid, groundRooms, rng, alignedBW, alignedBD, (gridState) => {
     groundGridBeforeGaps = gridState.clone();
   }, (gridState) => {
     groundGridAfterRect = gridState.clone();
-  }, true); // stopAfterStage1 = true
+  }, true)); // stopAfterStage1 = true
    if (!groundGridAfterRect) groundGridAfterRect = groundGrid.clone();
    if (!groundGridBeforeGaps) groundGridBeforeGaps = groundGrid.clone();
 
-  expandRooms(level1Grid, level1Rooms, rng, alignedBW, alignedBD, (gridState) => {
+  timedGen('phase1_expandRooms_level1', () => expandRooms(level1Grid, level1Rooms, rng, alignedBW, alignedBD, (gridState) => {
     level1GridBeforeGaps = gridState.clone();
   }, (gridState) => {
     level1GridAfterRect = gridState.clone();
-  }, true); // stopAfterStage1 = true
+  }, true)); // stopAfterStage1 = true
   if (!level1GridAfterRect) level1GridAfterRect = level1Grid.clone();
   if (!level1GridBeforeGaps) level1GridBeforeGaps = level1Grid.clone();
 
-  const snapshot = buildPartialResult(groundGridAfterRect, level1GridAfterRect, alignedBW, alignedBD);
-  const evaluated = evaluateTemplate(snapshot, { skipDoors: true });
+  const snapshot = timedGen('checkpointA_buildPartialResult', () => buildPartialResult(groundGridAfterRect, level1GridAfterRect, alignedBW, alignedBD));
+  const evaluated = timedGen('checkpointA_evaluateTemplate', () => evaluateTemplate(snapshot, { skipDoors: true }));
   // Use relaxed door-access for Checkpoint A: rooms adjacent to an unclaimed empty region
   // that bridges to the exterior wall / corridor are considered virtually connected.
   // Strict door-access is still used in Checkpoint B and full scoring (Step 9).
-  const relaxedDoorAccess = computeRelaxedDoorAccess(groundGridAfterRect, level1GridAfterRect);
+  const relaxedDoorAccess = timedGen('checkpointA_relaxedDoorAccess', () => computeRelaxedDoorAccess(groundGridAfterRect, level1GridAfterRect));
 
   // 在过滤前，将桥接调试信息附加到 must_adjacent 违规项上
   const violationsWithDebug = evaluated.violations.map(v => {
@@ -2139,21 +2183,22 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
   }
 
   // ── Phase 2 (Step 6A): 对通过 Checkpoint A 的方案，继续跑有面积约束的 L/U 形扩展 ────────
-  expandRooms(groundGrid, groundRooms, rng, alignedBW, alignedBD, (gridState) => {
-    groundGridBeforeGaps = gridState.clone();
-  }, null, false); // stopAfterStage1 = false，完整执行 Phase 2
+  if (!window.debugCurrentModuleEnabled) {
+    timedGen('phase2_expandRooms_ground', () => expandRooms(groundGrid, groundRooms, rng, alignedBW, alignedBD, (gridState) => {
+      groundGridBeforeGaps = gridState.clone();
+    }, null, false)); // stopAfterStage1 = false，完整执行 Phase 2
+    timedGen('phase2_expandRooms_level1', () => expandRooms(level1Grid, level1Rooms, rng, alignedBW, alignedBD, (gridState) => {
+      level1GridBeforeGaps = gridState.clone();
+    }, null, false)); // stopAfterStage1 = false，完整执行 Phase 2
+  }
   if (!groundGridBeforeGaps) groundGridBeforeGaps = groundGrid.clone();
-
-  expandRooms(level1Grid, level1Rooms, rng, alignedBW, alignedBD, (gridState) => {
-    level1GridBeforeGaps = gridState.clone();
-  }, null, false); // stopAfterStage1 = false，完整执行 Phase 2
   if (!level1GridBeforeGaps) level1GridBeforeGaps = level1Grid.clone();
 
   // ▼ Checkpoint B（Step 6A 结束后）：第一梯队 + 第二梯队评价，分数 > -1000 才进入后续生长
   // 与 Checkpoint A 一致，使用宽松可达性检查（_relaxedDoorAccess）
-  const relaxedB = computeRelaxedDoorAccess(groundGridBeforeGaps, level1GridBeforeGaps);
-  const snapshotB = buildPartialResult(groundGridBeforeGaps, level1GridBeforeGaps, alignedBW, alignedBD);
-  const evaluatedB = { ...evaluateTemplate(snapshotB, { skipDoors: true }), _relaxedDoorAccess: relaxedB };
+  const relaxedB = timedGen('checkpointB_relaxedDoorAccess', () => computeRelaxedDoorAccess(groundGridBeforeGaps, level1GridBeforeGaps));
+  const snapshotB = timedGen('checkpointB_buildPartialResult', () => buildPartialResult(groundGridBeforeGaps, level1GridBeforeGaps, alignedBW, alignedBD));
+  const evaluatedB = { ...timedGen('checkpointB_evaluateTemplate', () => evaluateTemplate(snapshotB, { skipDoors: true })), _relaxedDoorAccess: relaxedB };
   const checkpointBDiagnostic = scoreSpatialQuality(evaluatedB);
   const CHECKPOINT_B_THRESHOLD = -1000; // 总惩罚绝对值 < 1000 才通过
 
@@ -2182,30 +2227,32 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     };
   }
 
-  // ── Step 6B: 无面积限制 L/U 生长 ──────────────────────────────────
-  runPhase3Growth(groundGrid, groundRooms, rng)
-  // ── Step 7a: 边界清理与空隙填充 ────────────────────────────────────
-  if (enableAreaSwap) runAreaSwap(groundGrid, groundRooms)
-  fillGaps(groundGrid, groundRooms);
-  // ── Step 7b: 平滑房间交界线 ────────────────────────────────────────
-  runSpaceSwap(groundGrid, groundRooms)
+  if (!window.debugCurrentModuleEnabled) {
+    // ── Step 6B: 无面积限制 L/U 生长 ──────────────────────────────────
+    timedGen('phase3_growth_ground', () => runPhase3Growth(groundGrid, groundRooms, rng))
+    // ── Step 7a: 边界清理与空隙填充 ────────────────────────────────────
+    if (enableAreaSwap) timedGen('phase3_areaSwap_ground', () => runAreaSwap(groundGrid, groundRooms))
+    timedGen('phase3_fillGaps_ground', () => fillGaps(groundGrid, groundRooms));
+    // ── Step 7b: 平滑房间交界线 ────────────────────────────────────────
+    timedGen('phase3_spaceSwap_ground', () => runSpaceSwap(groundGrid, groundRooms))
 
-  // ── Step 6B: 无面积限制 L/U 生长 ──────────────────────────────────
-  runPhase3Growth(level1Grid, level1Rooms, rng)
-  // ── Step 7a: 边界清理与空隙填充 ────────────────────────────────────
-  if (enableAreaSwap) runAreaSwap(level1Grid, level1Rooms)
-  fillGaps(level1Grid, level1Rooms);
-  // ── Step 7b: 平滑房间交界线 ────────────────────────────────────────
-  runSpaceSwap(level1Grid, level1Rooms)
+    // ── Step 6B: 无面积限制 L/U 生长 ──────────────────────────────────
+    timedGen('phase3_growth_level1', () => runPhase3Growth(level1Grid, level1Rooms, rng))
+    // ── Step 7a: 边界清理与空隙填充 ────────────────────────────────────
+    if (enableAreaSwap) timedGen('phase3_areaSwap_level1', () => runAreaSwap(level1Grid, level1Rooms))
+    timedGen('phase3_fillGaps_level1', () => fillGaps(level1Grid, level1Rooms));
+    // ── Step 7b: 平滑房间交界线 ────────────────────────────────────────
+    timedGen('phase3_spaceSwap_level1', () => runSpaceSwap(level1Grid, level1Rooms))
+  }
 
   // 3. Finalize layouts from both grids
   const finalLayout = {
-    ground: finalizeLayout(groundGrid).ground,
-    level1: finalizeLayout(level1Grid).level1,
+    ground: timedGen('finalizeLayout_ground', () => finalizeLayout(groundGrid).ground),
+    level1: timedGen('finalizeLayout_level1', () => finalizeLayout(level1Grid).level1),
   };
 
   // 计算 Phase 3 完成后的宽松可达性（供全量评分使用）
-  const relaxedFinal = computeRelaxedDoorAccess(groundGrid, level1Grid);
+  const relaxedFinal = timedGen('final_relaxedDoorAccess', () => computeRelaxedDoorAccess(groundGrid, level1Grid));
 
   return {
     id: `${prefix}-${groupId}-${variantIdx}`,
