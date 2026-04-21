@@ -154,7 +154,7 @@ function renderComparisonTable(variants) {
               </div>
             </th>
             <th class="th-tip" data-tip="三梯队全量评分总分（越高越好）" style="padding:7px 8px;text-align:right">综合得分</th>
-            <th class="th-tip" data-tip="功能房间面积/楼层面积（Phase 1快照）" style="padding:7px 8px;text-align:right">空间有效率</th>
+            <th class="th-tip" data-tip="功能房间面积/楼层面积（Phase 1快照）" style="padding:7px 8px;text-align:right">空间效率</th>
             <th class="th-tip" data-tip="强邻近要求满足度 (Phase 1快照)" style="padding:7px 8px; text-align: center;">强邻近</th>
             <th class="th-tip" data-tip="未满足的可达性/门禁要求（Phase 1快照）" style="padding:7px 8px; text-align: center;">可达性</th>
           </tr>
@@ -212,7 +212,7 @@ function _renderEliminatedSection() {
             <th style="padding:6px 8px">排名</th>
             <th style="padding:6px 8px;text-align:left">淘汰方案（调试）</th>
             <th style="padding:6px 8px;text-align:right">综合得分</th>
-            <th style="padding:6px 8px;text-align:right">空间有效率</th>
+            <th style="padding:6px 8px;text-align:right">空间效率</th>
             <th style="padding:6px 8px">强邻近</th>
             <th style="padding:6px 8px">可达性</th>
           </tr>
@@ -368,7 +368,7 @@ function buildBreakdownHtml(v) {
       val: bd.adjacency ?? 0
     },
     { label: '走廊完整',  val: bd.corridor ?? 0 },
-    { label: '空间有效率',val: bd.efficiency ?? 0 },
+    { label: '空间效率',val: bd.efficiency ?? 0 },
     { label: '便捷性',   val: bd.accessibility ?? 0 },
     {
       label: '约束违反' + (bd.violationCount ? ` <small style="color:#999;font-weight:normal">(${bd.violationCount}项)</small>` : '') + fmtDetails(bd.violationDetails),
