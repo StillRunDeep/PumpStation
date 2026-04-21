@@ -2295,6 +2295,13 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     const level1Usage = ((Object.values(level1After).reduce((a,b)=>a+b,0) / totalGridCells) * 100).toFixed(1);
     console.log(`${variantTag}[Phase3] 优化后: ground增长${gGrowth}(占${groundUsage}%), level1增长${l1Growth}(占${level1Usage}%)`);
 
+    // 输出某个房间的位置变化用于排查（分割前）
+    const sampleRoom = mergedGroundRooms[0];
+    if (sampleRoom) {
+      const afterBbox = groundGrid.getBoundingBox(sampleRoom.id);
+      console.log(`${variantTag}[Phase3] 样本房间${sampleRoom.id}扩展后: (${afterBbox?.minX},${afterBbox?.minY}) 尺寸${afterBbox?.maxX - afterBbox?.minX + 1}x${afterBbox?.maxY - afterBbox?.minY + 1}`);
+    }
+
 
     splitAllSuperRooms(groundGrid, groundSuperRoomMap);
     splitAllSuperRooms(level1Grid, level1SuperRoomMap);
