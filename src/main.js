@@ -4,7 +4,10 @@ import { initTokenVerification } from './auth.js'
 // 初始化token验证
 const isTokenValid = initTokenVerification()
 
-window._bypassCheckpointA = false;
+window.debugModeEnabled = false;
+window.timeCostThreshold = 2.0; // seconds
+window.timeCostLog = [];
+window.debugCurrentModuleEnabled = true; // 调试用：禁用 phase2/3 生长
 
 import { runUserParams } from './agents/user-params.js'
 import { runTopology } from './agents/topology.js'
@@ -712,6 +715,8 @@ document.addEventListener('DOMContentLoaded', () => {
   persistCollapseState();
   initSummaryToggleLogic();
   initFocusMode();
+  // 默认执行一次 AG0-0 及后续计算，确保初始参数可用
+  runCalculation();
 });
 
 let isFocusMode = false;
@@ -868,8 +873,9 @@ document.getElementById('btn-rainfall-downstream').addEventListener('click', run
 window.addEventListener('keydown', (e) => {
   if (e.ctrlKey && e.key.toLowerCase() === 'b') {
     e.preventDefault();
-    window._bypassCheckpointA = !window._bypassCheckpointA;
-    const msg = `跳过检查点A: ${window._bypassCheckpointA ? '已开启' : '已关闭'}`;
-    showAg41Notify(msg, window._bypassCheckpointA);
+    window.debugModeEnabled = !window.debugModeEnabled;
+    window.timeCostLog = [];
+    const msg = `Debug模式: ${window.debugModeEnabled ? '已开启' : '已关闭'}`;
+    showAg41Notify(msg, window.debugModeEnabled);
   }
 });

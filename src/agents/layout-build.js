@@ -18,6 +18,26 @@ import { scoreLayout, scoreSpatialQuality } from '../layout/evaluation/scorer.js
 
 const yieldToEventLoop = () => new Promise(resolve => setTimeout(resolve, 0));
 
+/**
+ * 在 debugModeEnabled 下计时执行 fn，超过 timeCostThreshold 时 toast 报警并抛出错误。
+ * 同时将耗时记录到 window.timeCostLog。
+ */
+function timed(name, fn) {
+  if (!window.debugModeEnabled) return fn();
+  const t0 = performance.now();
+  const result = fn();
+  const duration = (performance.now() - t0) / 1000;
+  const threshold = window.timeCostThreshold ?? 0.5;
+  if (!window.timeCostLog) window.timeCostLog = [];
+  window.timeCostLog.push({ fn: name, duration });
+  if (duration > threshold) {
+    const msg = `[性能] ${name} 耗时 ${duration.toFixed(3)}s，超过阈值 ${threshold}s`;
+    import('../ui/layout-panel.js').then(({ showAg41Notify }) => showAg41Notify(msg, false));
+    throw new Error(msg);
+  }
+  return result;
+}
+
 /** 将 mm 坐标转换为网格中心索引 */
 function placementToGridCenter(placement) {
   return {
@@ -33,7 +53,7 @@ async function getGenerationContext() {
     ...params,
     gridW: Math.floor(params.buildingW / GRID_SIZE),
     gridH: Math.floor(params.buildingD / GRID_SIZE),
-    bypassCheckpointA: window._bypassCheckpointA
+    bypassCheckpointA: window.debugModeEnabled
   };
 }
 
@@ -48,11 +68,11 @@ function applyCheckpointB(layouts, ctx) {
         layout._checkpointBScore = -Infinity;
         continue;
       }
-      const snapshot = buildPartialResult(ground.gridBeforeGaps, level1.gridBeforeGaps, ctx.buildingW, ctx.buildingD);
-      const relaxed = computeRelaxedDoorAccess(ground.gridBeforeGaps, level1.gridBeforeGaps);
-      const evaluated = { ...evaluateTemplate(snapshot), _relaxedDoorAccess: relaxed };
-      
-      layout._checkpointBScore = scoreSpatialQuality(evaluated).partialScore ?? -Infinity;
+      const snapshot = timed('buildPartialResult', () => buildPartialResult(ground.gridBeforeGaps, level1.gridBeforeGaps, ctx.buildingW, ctx.buildingD));
+      const relaxed = timed('computeRelaxedDoorAccess', () => computeRelaxedDoorAccess(ground.gridBeforeGaps, level1.gridBeforeGaps));
+      const evaluated = { ...timed('evaluateTemplate', () => evaluateTemplate(snapshot)), _relaxedDoorAccess: relaxed };
+
+      layout._checkpointBScore = timed('scoreSpatialQuality', () => scoreSpatialQuality(evaluated).partialScore ?? -Infinity);
       layout._relaxedDoorAccess = relaxed;
     } catch (e) {
       console.error('Checkpoint B scoring failed:', e);
@@ -124,7 +144,7 @@ function getNewSeed(roomId, ctx, currentSeeds, isSmart = false, parentPlacements
   }
 
   const mockGrid = { width: ctx.gridW, height: ctx.gridH, getCell };
-  const weightMap = generateWeightMapForRoom(mockGrid, roomDef, currentSeeds);
+  const weightMap = timed('generateWeightMapForRoom', () => generateWeightMapForRoom(mockGrid, roomDef, currentSeeds, parentPlacements));
   let bestPos = null;
   let maxWeight = -1;
 
@@ -231,8 +251,8 @@ export async function runAG41(existingVariants = [], isCancelled = () => false, 
       if (ex.parent) {
         pushResult(generateMutatedLayout(ex.parent, ex.mode, seed, ctx, 'Exp', results.length + 1, ex.tag));
       } else {
-        pushResult(generateConstrainedLayout(seed, ctx.buildingW, ctx.buildingD, ctx.roomTargetAreas, 
-          { enableAreaSwap: true, bypassCheckpointA: ctx.bypassCheckpointA }, 'Exp', results.length + 1, ex.tag));
+        pushResult(timed('generateConstrainedLayout', () => generateConstrainedLayout(seed, ctx.buildingW, ctx.buildingD, ctx.roomTargetAreas,
+          { enableAreaSwap: true, bypassCheckpointA: ctx.bypassCheckpointA }, 'Exp', results.length + 1, ex.tag)));
       }
       attempts++; await yieldToEventLoop();
     }
@@ -240,8 +260,8 @@ export async function runAG41(existingVariants = [], isCancelled = () => false, 
 
   // 兜底：纯随机补足
   while (results.length < 9 && attempts < 50 && !isCancelled()) {
-    pushResult(generateConstrainedLayout(Math.random() * 1000, ctx.buildingW, ctx.buildingD, ctx.roomTargetAreas,
-      { enableAreaSwap: true, bypassCheckpointA: ctx.bypassCheckpointA }, 'Fill', results.length + 1, 'R'));
+    pushResult(timed('generateConstrainedLayout', () => generateConstrainedLayout(Math.random() * 1000, ctx.buildingW, ctx.buildingD, ctx.roomTargetAreas,
+      { enableAreaSwap: true, bypassCheckpointA: ctx.bypassCheckpointA }, 'Fill', results.length + 1, 'R')));
     attempts++; await yieldToEventLoop();
   }
 
@@ -294,8 +314,8 @@ function generateMutatedLayout(parent, mode, seed, ctx, groupId, idx, prefix) {
     }
   });
 
-  return generateConstrainedLayout(seed, ctx.buildingW, ctx.buildingD, ctx.roomTargetAreas, 
-    { enableAreaSwap: true, bypassCheckpointA: ctx.bypassCheckpointA, seedsMeta }, groupId, idx, prefix, childSeeds);
+  return timed('generateConstrainedLayout', () => generateConstrainedLayout(seed, ctx.buildingW, ctx.buildingD, ctx.roomTargetAreas,
+    { enableAreaSwap: true, bypassCheckpointA: ctx.bypassCheckpointA, seedsMeta }, groupId, idx, prefix, childSeeds));
 }
 
 /**
@@ -333,8 +353,8 @@ function generateHybridLayout(parentA, parentB, seed, ctx, groupId, idx, prefix)
     }
   });
 
-  return generateConstrainedLayout(seed, ctx.buildingW, ctx.buildingD, ctx.roomTargetAreas, 
-    { enableAreaSwap: true, bypassCheckpointA: ctx.bypassCheckpointA }, groupId, idx, prefix, childSeeds);
+  return timed('generateConstrainedLayout', () => generateConstrainedLayout(seed, ctx.buildingW, ctx.buildingD, ctx.roomTargetAreas,
+    { enableAreaSwap: true, bypassCheckpointA: ctx.bypassCheckpointA }, groupId, idx, prefix, childSeeds));
 }
 
 /**

@@ -41,23 +41,177 @@
 
 * * *
 
+#### 第三点五步：MUST 对协同生长预处理（Cooperative Growth Preprocessing）
+
+**背景问题**：在原算法中，MUST 邻接房间对（如 `trafo1` ↔ `trafo2`）虽然通过权重引导倾向于靠近，但由于独立竞争空间，种子位置良好的承诺在生长阶段容易被破坏：
+- 邻接房间生长顺序由动态优先级决定（面积完成率），不可预测
+- 第三方房间可能在两个邻接房间之间抢占空间，导致最终无法共边
+- 形态降级（非矩形扩展）的方向不确定，可能背离伙伴方向
+
+**解决方案**：在种子放置和房间扩展**之前**，对所有 MUST 邻接对进行临时合并，之后再分割：
+
+**步骤 1：房间合并（Pre-growth Merging）**
+```
+输入：所有房间定义 + MUST 邻接对列表
+[trafo1, trafo2, meter_main, meter_sub, parking, repair_zone, ...]
+
+MUST 对：
+  - (trafo1, trafo2)
+  - (meter_main, meter_sub)
+  - (parking, repair_zone)
+
+输出：Super-room 列表 + 映射表
+[__super__trafo1+trafo2, __super__meter_main+meter_sub, __super__parking+repair_zone, ...]
+```
+
+Super-room 属性继承：
+| 属性 | 合并规则 |
+| --- | --- |
+| `id` | `__super__roomA.id+roomB.id` |
+| `label` | `roomA.label + roomB.label` |
+| `floor` | 两房相同（MUST对必在同楼层） |
+| `targetGridCount` | `roomA.targetGridCount + roomB.targetGridCount` |
+| `constraints` | 两房约束的并集（如都需 `ext_access` 则 super-room 也需） |
+| `_roomA`, `_roomB` | 保留对原房间的引用，用于分割时还原 |
+
+**可达性元数据构建**：
+对每个 super-room，提取其成分房间的可达性需求，构建一份查询表供生长阶段使用：
+```js
+superRoomMeta = {
+  '__super__trafo1+trafo2': { mustExt: true, mustCorridor: false },
+  '__super__meter_main+meter_sub': { mustExt: true, mustCorridor: false },
+  '__super__parking+repair_zone': { mustExt: false, mustCorridor: false },
+}
+```
+
+**步骤 2：Super-room 生长（Merged Growth）**
+- Super-room 在种子放置、权重计算、形态扩展、可达性检查中都作为**单一不可分割单元**参与竞争
+- 生长算法的所有逻辑对 super-room 透明（无需修改扩展算法本身）
+- 结果：super-room 内部不会被其他房间割裂，两个房间的格子紧邻
+
+**步骤 3：分割还原（Post-growth Splitting）**
+在扩展完成后、填隙和最终评分之前，对每个 super-room 进行沿**短轴**分割：
+
+分割逻辑：
+1. 获取 super-room 的所有格子及其包围盒 (bbox)
+2. 计算目标分割比例：`ratioA = roomA.targetGridCount / (roomA.targetGridCount + roomB.targetGridCount)`
+3. 确定分割轴：
+   - 若 bbox 宽度 ≥ 高度 → **垂直分割**（沿列 x 分割）
+   - 否则 → **水平分割**（沿行 y 分割）
+4. 按分割轴排序格子，累积计数至 `countA = round(totalCells × ratioA)`，分割线前的格子属 roomA，后者属 roomB
+5. 清除 super-room 记录，在网格中注册 roomA 和 roomB 的格子
+
+示意：
+```
+生长前：[Super-room bbox]
+           ┌─────────────┐
+           │             │
+           │  trafo1+2   │  (双房面积总和)
+           │             │
+           └─────────────┘
+
+生长后（分割前）：
+           ┌─────────────┐
+           │  trafo1+2   │  (已生长到目标面积)
+           │      →      │
+           └─────────────┘
+
+分割后：
+           ┌──────┬──────┐
+           │trafo1│trafo2│  (共享竖直边界)
+           │  ←→  │      │
+           └──────┴──────┘
+```
+
+**特点**：
+- 分割生成**整洁的公共墙**（沿行/列边界对齐），无内凹或碎片化
+- 两房的相对位置和大小比例保持一致性（基于目标面积比）
+- 无需修改原生长算法，只是作为生长前的预处理和生长后的后处理
+
+* * *
+
 #### 第四步：房间扩展（Room Expansion）
 
-扩展过程采用**严格三阶段**全局同步机制：
+扩展过程采用**严格三阶段**全局同步机制。注意：此时操作的房间列表已包含 super-rooms（步骤 3 的输出），原 MUST 对房间已被临时替代：
 
 | 阶段 | 方法 | 说明 |
 | --- | --- | --- |
-| **阶段 1：全局矩形扩展** | `findBestRectangleExpansion` | **全局同步**：所有房间优先进行矩形生长。直到**没有任何房间**能继续以矩形方式扩展时，该阶段结束并记录“阶段 1”快照。 |
+| **阶段 1：全局矩形扩展** | `findBestRectangleExpansion` | **全局同步**：所有房间（含 super-room）优先进行矩形生长。直到**没有任何房间**能继续以矩形方式扩展时，该阶段结束并记录”阶段 1”快照。此时 super-room 已保证内部紧邻，不会被割裂。 |
 | **阶段 2：L/U 形填补扩展** | `findBestFillExpansion` & `findSmartLineExpansion` | **形态降级**：允许房间转为非矩形生长以填补剩余面积。**形态约束**：除走廊外，房间轮廓顶点数不得超过 **8 个**（最高支持 U 形），房间利用率（房间实际占据面积 / 房间包围盒面积）不得低于 **60%**（防止出现超大的拐角），在后期的评价指标中也会对低于 **70%** 的房间进行惩罚。 |
-| **阶段 3：边界优化与空隙填充** | `fillGaps` & `Boundary-First Filling` | **缝隙收尾**：将建筑轮廓内剩余的所有空隙（Empty Cells）完全分配给相邻房间，并借此机会重新评估并平滑房间交界线，优化房间利用率，确保建筑内部无遗漏空间且轮廓方正。此阶段可能突破上述房间面积、形态约束。 |
+| **阶段 3：边界优化与空隙填充** | `fillGaps` & `Boundary-First Filling` | **缝隙收尾**：将建筑轮廓内剩余的所有空隙（Empty Cells）完全分配给相邻房间（包括 super-room），并借此机会重新评估并平滑房间交界线。此阶段结束后，立即进行 super-room 分割还原（第 3 步），将 super-room 还原为原 MUST 对房间。 |
 
 房间选取优先级：
 
 - **阶段 1（矩形扩展）**：按**面积完成率（currentArea / targetArea）**排序，比例越低优先级越高。
-- **阶段 2（L/U 形扩展）**：采用双层优先级：**第一优先**为可达性未达标的房间（需触外墙但尚未接触、或需邻接走廊但尚未相邻），**第二优先**在可达性状态相同时按面积完成率排序。对可达性未达标的房间，扩展方向同时向目标（外墙或走廊）偏置：优先选择朝向最近外墙方向（`ext_access` 类）或朝向走廊/目标房间中心方向（`corridor_access`/`repair_zone` 类）的扩展段。
+  - 对 super-room，targetArea 为两房之和，优先级反映合并房间的共同生长进度
+- **阶段 2（L/U 形扩展）**：采用双层优先级：**第一优先**为可达性未达标的房间（包括 super-room），**第二优先**在可达性状态相同时按面积完成率排序。
+  - Super-room 的可达性需求查询 `superRoomMeta` 字典：如 `__super__trafo1+trafo2` 需 `mustExt=true`，则算法向最近外墙方向偏置扩展
+  - 对可达性未达标的房间，扩展方向向目标（外墙或走廊）偏置：优先选择朝向最近外墙方向（`ext_access` 类）或朝向走廊/目标房间中心方向（`corridor_access` 类）的扩展段
 
 
 整个算法可运行 **N 次**，收集多个合法方案，再按评分（如走廊最小、转角最少）筛选最优解。
+
+* * *
+
+### 协同生长的实现细节
+
+#### 代码层级
+
+所有改动集中在 `layout-generator.js` 中，新增/修改函数：
+
+**新增函数：**
+- `mergeMustPairsForFloor(rooms)` — 房间合并，生成 super-room 列表和映射表
+- `buildSuperRoomMeta(superRoomMap)` — 构建 super-room 可达性元数据
+- `splitSuperRoom(grid, superId, roomA, roomB)` — 单个 super-room 的分割逻辑
+- `splitAllSuperRooms(grid, superRoomMap)` — 批量分割所有 super-room
+
+**修改函数：**
+- `generateWeightMapForRoom(...)` — 增加对 super-room 的约束查询支持
+- `isAccessibilityMet(roomId, grid, buildingW, buildingD, superRoomMeta)` — 增加 super-room 参数，查询 `superRoomMeta` 以判断可达性需求
+- `getPreferredDirection(roomId, grid, buildingW, buildingD, superRoomMeta)` — 增加 super-room 参数，计算扩展偏置方向
+- `expandRooms(...)` — 传递 `superRoomMeta` 给上述两个函数
+- `generateConstrainedLayout(...)` — 主函数中，在种子放置前执行合并，在所有阶段完成后执行分割
+
+#### 分割算法细节
+
+**输入：** super-room 所占格子集合、目标房间对 (roomA, roomB)
+
+**过程：**
+1. 统计 super-room 总格子数 `total`，计算目标分配数 `countA = round(total × ratioA)`
+2. 获取 super-room 的包围盒 (bbox)，计算宽度 `w` 和高度 `h`
+3. 决定分割方向：
+   - 若 `w >= h`：垂直分割，按 x 坐标排序格子
+   - 否则：水平分割，按 y 坐标排序格子
+4. 逐列/行累积格子计数，至累计达 `countA` 时划分分割线
+5. 将分割线前的格子分配给 roomA，后续格子分配给 roomB
+
+**输出：** 网格中 super-room 的格子被替换为 roomA 和 roomB 的格子
+
+**保证：**
+- 分割线沿行/列对齐，两房共享的边界是整洁的垂直或水平线段
+- 分割比例接近目标面积比（±1 格差异）
+- 不会产生孤立的格子或割裂的连通性
+
+#### 与评分系统的交互
+
+**Checkpoint A/B 评估：**
+- 快照保存时使用 super-room ID
+- 评估前，**克隆快照网格并执行分割**，还原为原房间 ID
+- 评分逻辑无感知，作用于还原后的房间
+
+**最终评分：**
+- fillGaps 完成后，主网格中执行分割
+- finalizeLayout 作用于分割后的网格，正常输出所有房间
+
+#### 边界情况处理
+
+| 情况 | 处理方式 |
+| --- | --- |
+| Super-room 中某房间面积为 0 | 合法（如 parking 可能为 0），分割时简单还原 |
+| Super-room 生长为 0 格 | 极端但可能（即使合并也无空间），splitSuperRoom 直接返回 |
+| 分割后某侧格子数为 0 | 理论上不会发生（ratioA ∈ (0,1)），若发生则该房间获得全部格子 |
+| MUST 对跨楼层 | mergeMustPairsForFloor 检查 roomA.floor === roomB.floor，不同则跳过 |
+| finalizeLayout 遇到 super-room ID | 该函数第 1531 行有 `if (roomDef)` 保护，super-room 不在 ROOM_DEFS 中会被跳过（但分割已保证此时无 super-room ID） |
 
 * * *
 
@@ -100,7 +254,15 @@
 
 ### 算法特点与局限
 
-**优点：** 速度快（简单平面 <100ms）、支持L形房间和非矩形建筑轮廓、约束灵活可定制
+**优点：** 
+- 速度快（简单平面 <100ms）、支持L形房间和非矩形建筑轮廓、约束灵活可定制
+- **协同生长机制**消除了 MUST 邻接房间的"非确定性关系"问题：
+  - 保证 MUST 对在生长过程中不被割裂
+  - 最终分割生成整洁的共享墙界面，消除碎片化邻接失败
+  - 提高 MUST 约束满足率，评分稳定性提升
 
-**局限：** 不支持任意角度建筑、门的位置随机导致走道不优化、无法约束单个房间的长宽比（如车库）
+**局限：** 
+- 不支持任意角度建筑、门的位置随机导致走道不优化、无法约束单个房间的长宽比（如车库）
+- 协同生长中，分割比例基于目标面积，不考虑实际形态；若一方房间长宽比严重超标，分割后的两房可能都变得更不规整
+- 分割线固定为轴对齐（垂直或水平），无法处理对角线或凹陷形边界
 

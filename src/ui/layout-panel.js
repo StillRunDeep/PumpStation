@@ -174,7 +174,7 @@ function _renderEliminatedSection() {
   const container = document.getElementById('eliminated-section')
   if (!container) return
 
-  const show = window._bypassCheckpointA && _eliminatedVariants.length > 0
+  const show = window.debugModeEnabled && _eliminatedVariants.length > 0
   if (!show) { container.innerHTML = ''; _selectedElimIdx = -1; return }
 
   const rows = _eliminatedVariants.map((v, i) => {
@@ -237,7 +237,7 @@ function insertEliminatedDetailRow(idx) {
   const failedB = !failedA && v.checkpointBDiagnostic?.partialScore < -1000
   const renderFloorRow = (floor) => {
     const debugData = v._debug?.[floor] ?? {}
-    const movementHints = window._bypassCheckpointA ? (v._debug?.[floor]?.movementHints ?? null) : null
+    const movementHints = window.debugModeEnabled ? (v._debug?.[floor]?.movementHints ?? null) : null
     const finalView = `<svg viewBox="0 0 240 180" style="background:#f4f6f8">${renderLayoutSVG(v, floor, 240, 180, { showDims: false })}</svg>`
     const bypassed = v.checkpointABypassed
     const stage3 = bypassed ? '<span class="skipped-text">用户跳过</span>'
@@ -780,7 +780,7 @@ export function showAg41Notify(msg, isImproved) {
   if (!el) return
   el.textContent = msg
   
-  const isDebug = window._bypassCheckpointA
+  const isDebug = window.debugModeEnabled
   const wrap = el.closest('.notify-bar-wrap')
   
   if (isDebug) {
