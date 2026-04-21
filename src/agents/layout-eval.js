@@ -77,7 +77,14 @@ export function mergeVariants(existingVariants, newRawTemplates) {
   const reScoredExisting = existingVariants.map(v => ({ ...v, ...scoreLayout(v) }))
 
   // 2. 评分新生成的模板
-  const newScored = newRawTemplates.map(t => ({ ...scoreVariant(t), _isNew: true }))
+  const newScored = newRawTemplates.map((t, idx) => {
+    const scored = { ...scoreVariant(t), _isNew: true };
+    const origVariant = existingVariants.find(v => v.variantIdx === t.variantIdx);
+    if (origVariant && Math.abs(scored.score - origVariant.score) > 1) {
+      console.log(`[优化] Var${t.variantIdx}: ${origVariant.score.toFixed(0)} → ${scored.score.toFixed(0)} (变化${(scored.score - origVariant.score).toFixed(0)})`);
+    }
+    return scored;
+  })
 
   // 3. 合并池
   const combined = [...reScoredExisting, ...newScored]

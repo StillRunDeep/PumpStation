@@ -2274,17 +2274,41 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     const { mergedRooms: mergedLevel1Rooms, superRoomMap: level1SuperRoomMap } = mergeMustPairsForFloor(level1Rooms);
 
     // Step 6A: 无面积限制 L/U 生长
-    console.log('[Phase3Debug] 开始无面积限制生长');
-    console.log('[Phase3Debug] 优化前 ground rooms:', mergedGroundRooms.map(r => ({ id: r.id, currentArea: groundGrid.roomData[r.id]?.length || 0, targetGridCount: r.targetGridCount })));
-    console.log('[Phase3Debug] 优化前 level1 rooms:', mergedLevel1Rooms.map(r => ({ id: r.id, currentArea: level1Grid.roomData[r.id]?.length || 0, targetGridCount: r.targetGridCount })));
+    const variantTag = `[Var${variantIdx}]`;
+    console.log(`${variantTag}[Phase3] 开始无面积限制生长`);
+    const groundBefore = Object.fromEntries(mergedGroundRooms.map(r => [r.id, groundGrid.roomData[r.id]?.length || 0]));
+    const level1Before = Object.fromEntries(mergedLevel1Rooms.map(r => [r.id, level1Grid.roomData[r.id]?.length || 0]));
+    console.log(`${variantTag}[Phase3] 优化前: ground=${Object.values(groundBefore).reduce((a,b)=>a+b,0)}, level1=${Object.values(level1Before).reduce((a,b)=>a+b,0)}`);
+
+    // 样本房间扩展前的位置
+    const sampleRoom = mergedGroundRooms[0];
+    let sampleBefore = null;
+    if (sampleRoom) {
+      const beforeBbox = groundGrid.getBoundingBox(sampleRoom.id);
+      sampleBefore = beforeBbox ? `(${beforeBbox.minX},${beforeBbox.minY}) ${beforeBbox.maxX - beforeBbox.minX + 1}x${beforeBbox.maxY - beforeBbox.minY + 1}` : 'N/A';
+    }
 
     const groundCtx = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: buildSuperRoomMeta(groundSuperRoomMap) };
     expandRooms(groundGrid, mergedGroundRooms, rng, groundCtx, false, true);
-    console.log('[Phase3Debug] 优化后 ground rooms:', mergedGroundRooms.map(r => ({ id: r.id, currentArea: groundGrid.roomData[r.id]?.length || 0 })));
+    const groundAfter = Object.fromEntries(mergedGroundRooms.map(r => [r.id, groundGrid.roomData[r.id]?.length || 0]));
 
     const level1Ctx = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: buildSuperRoomMeta(level1SuperRoomMap) };
     expandRooms(level1Grid, mergedLevel1Rooms, rng, level1Ctx, false, true);
-    console.log('[Phase3Debug] 优化后 level1 rooms:', mergedLevel1Rooms.map(r => ({ id: r.id, currentArea: level1Grid.roomData[r.id]?.length || 0 })));
+    const level1After = Object.fromEntries(mergedLevel1Rooms.map(r => [r.id, level1Grid.roomData[r.id]?.length || 0]));
+
+    const gGrowth = Object.values(groundAfter).reduce((a,b)=>a+b,0) - Object.values(groundBefore).reduce((a,b)=>a+b,0);
+    const l1Growth = Object.values(level1After).reduce((a,b)=>a+b,0) - Object.values(level1Before).reduce((a,b)=>a+b,0);
+    const totalGridCells = (alignedBW / GRID_SIZE) * (alignedBD / GRID_SIZE);
+    const groundUsage = ((Object.values(groundAfter).reduce((a,b)=>a+b,0) / totalGridCells) * 100).toFixed(1);
+    const level1Usage = ((Object.values(level1After).reduce((a,b)=>a+b,0) / totalGridCells) * 100).toFixed(1);
+    console.log(`${variantTag}[Phase3] 优化后: ground增长${gGrowth}(占${groundUsage}%), level1增长${l1Growth}(占${level1Usage}%)`);
+
+    // 输出样本房间的前后对比
+    if (sampleRoom) {
+      const afterBbox = groundGrid.getBoundingBox(sampleRoom.id);
+      const sampleAfter = afterBbox ? `(${afterBbox.minX},${afterBbox.minY}) ${afterBbox.maxX - afterBbox.minX + 1}x${afterBbox.maxY - afterBbox.minY + 1}` : 'N/A';
+      console.log(`${variantTag}[Phase3] 房间${sampleRoom.id}: ${sampleBefore} → ${sampleAfter}`);
+    }
 
 
     splitAllSuperRooms(groundGrid, groundSuperRoomMap);
