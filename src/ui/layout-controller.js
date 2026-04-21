@@ -126,7 +126,7 @@ export function initLayoutController() {
         const opt = optimized.find(o => o.variantIdx === orig.variantIdx);
         return opt ? { ...orig, ...opt, groundPlacements: opt.groundPlacements, level1Placements: opt.level1Placements } : orig;
       });
-      renderLayoutPanel(replaced, _eliminatedVariants)
+      renderLayoutPanel(replaced)
       showAg41Notify(`对 ${existing.length} 个方案完成优化`, true)
     } catch (e) {
       console.error('runPhase3Optimization failed:', e)
