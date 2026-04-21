@@ -119,5 +119,5 @@ interface EvaluatedVariant {
 |------|------|
 | `src/layout/scorer.js` | 评分核心逻辑 |
 | `src/layout/scorer-params.js` | 评分权重及多样性参数配置 |
-| `src/agents/ag42-layout-eval.js` | 评价代理，负责批量评分及统一去重排序 |
+| `src/agents/layout-eval.js` | 评价代理，负责批量评分及统一去重排序 |
 | `src/layout/layout-generator.js` | 包含 Checkpoint A 阶段的**拓扑边界追踪与非交叉验证**逻辑 |

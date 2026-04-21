@@ -1,5 +1,5 @@
-import { runAG41, optimizeVariant, generateMergedLayout, computeMutatedLayout } from '../agents/ag41-building-layout.js'
-import { mergeVariants } from '../agents/ag42-layout-eval.js'
+import { runAG41, optimizeVariant, generateMergedLayout, computeMutatedLayout } from '../agents/layout-build.js'
+import { mergeVariants } from '../agents/layout-eval.js'
 import {
   renderLayoutPanel, getVariants, getSelectedVariant, getExpandedVariants,
   replaceVariant, refreshDetailRow, showAg41Notify, rescoreAndRerender,

@@ -41,8 +41,7 @@ function applyCheckpointB(layouts, buildingW, buildingD) {
  * 1. 矩形扩展（Phase 1）结束后执行检查点 A（硬性功能红线）过滤，
  *    凑齐 9 个通过方案后进入第二阶段。
  * 2. L/U 形扩展（Phase 2）结束后执行检查点 B（第一+第二梯队）排序。
- * 3. 全量评分由 AG4-3（ag42-layout-eval.js）在正式视图阶段执行。
- *
+ * 3. 全量评分由 AG4-3（layout-eval.js）在正式视图阶段执行。 *
  * @returns {Promise<Array>} 经检查点 A 过滤、检查点 B 排序的 9 个方案
  */
 export async function optimizeVariant(parent) {

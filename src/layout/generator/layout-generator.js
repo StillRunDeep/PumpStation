@@ -1936,7 +1936,7 @@ function makeRng(seed) {
 
 /**
  * Build a partial layout result from intermediate grid snapshots, for checkpoint evaluation.
- * Used by ag41-building-layout.js to evaluate layouts at phase boundaries:
+ * Used by layout-build.js to evaluate layouts at phase boundaries:
  * - Checkpoint A: pass gridAfterRect snapshots (after Phase 1 rectangle expansion)
  * - Checkpoint B: pass gridBeforeGaps snapshots (after Phase 2 L/U expansion)
  *
