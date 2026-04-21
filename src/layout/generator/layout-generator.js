@@ -2461,7 +2461,8 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
   }
 
   // ── Phase 2 (Step 6A): 对通过 Checkpoint A 的方案，继续跑有面积约束的 L/U 形扩展 ────────
-  if (!window.debugCurrentModuleEnabled) {
+  //调试模式：window.debugModeEnabled 默认false，单模块屏蔽：debugCurrentModuleEnabled 默认 true
+  if (debugCurrentModuleEnabled) {        
     timedGen('phase2_expandRooms_ground', () => expandRooms(groundGrid, mergedGroundRooms, rng, alignedBW, alignedBD, (gridState) => {
       groundGridBeforeGaps = gridState.clone();
     }, null, false, groundSuperMeta)); // stopAfterStage1 = false，完整执行 Phase 2，superRoomMeta
@@ -2513,23 +2514,24 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
       _relaxedDoorAccess: relaxedB,
     };
   }
-
-  if (!window.debugCurrentModuleEnabled) {
+  //调试模式：window.debugModeEnabled 默认false，单模块屏蔽：debugCurrentModuleEnabled 默认 true
+  if (window.debugModeEnabled) {
     // ── Step 6B: 无面积限制 L/U 生长 ──────────────────────────────────
     timedGen('phase3_growth_ground', () => runPhase3Growth(groundGrid, mergedGroundRooms, rng))
-    // ── Step 7a: 边界清理与空隙填充 ────────────────────────────────────
-    if (enableAreaSwap) timedGen('phase3_areaSwap_ground', () => runAreaSwap(groundGrid, mergedGroundRooms))
-    timedGen('phase3_fillGaps_ground', () => fillGaps(groundGrid, mergedGroundRooms));
-    // ── Step 7b: 平滑房间交界线 ────────────────────────────────────────
-    timedGen('phase3_spaceSwap_ground', () => runSpaceSwap(groundGrid, mergedGroundRooms))
+    
+    // // ── Step 7a: 边界清理与空隙填充 ────────────────────────────────────
+    // if (enableAreaSwap) timedGen('phase3_areaSwap_ground', () => runAreaSwap(groundGrid, mergedGroundRooms))
+    // timedGen('phase3_fillGaps_ground', () => fillGaps(groundGrid, mergedGroundRooms));
+    // // ── Step 7b: 平滑房间交界线 ────────────────────────────────────────
+    // timedGen('phase3_spaceSwap_ground', () => runSpaceSwap(groundGrid, mergedGroundRooms))
 
-    // ── Step 6B: 无面积限制 L/U 生长 ──────────────────────────────────
-    timedGen('phase3_growth_level1', () => runPhase3Growth(level1Grid, mergedLevel1Rooms, rng))
-    // ── Step 7a: 边界清理与空隙填充 ────────────────────────────────────
-    if (enableAreaSwap) timedGen('phase3_areaSwap_level1', () => runAreaSwap(level1Grid, mergedLevel1Rooms))
-    timedGen('phase3_fillGaps_level1', () => fillGaps(level1Grid, mergedLevel1Rooms));
-    // ── Step 7b: 平滑房间交界线 ────────────────────────────────────────
-    timedGen('phase3_spaceSwap_level1', () => runSpaceSwap(level1Grid, mergedLevel1Rooms))
+    // // ── Step 6B: 无面积限制 L/U 生长 ──────────────────────────────────
+    // timedGen('phase3_growth_level1', () => runPhase3Growth(level1Grid, mergedLevel1Rooms, rng))
+    // // ── Step 7a: 边界清理与空隙填充 ────────────────────────────────────
+    // if (enableAreaSwap) timedGen('phase3_areaSwap_level1', () => runAreaSwap(level1Grid, mergedLevel1Rooms))
+    // timedGen('phase3_fillGaps_level1', () => fillGaps(level1Grid, mergedLevel1Rooms));
+    // // ── Step 7b: 平滑房间交界线 ────────────────────────────────────────
+    // timedGen('phase3_spaceSwap_level1', () => runSpaceSwap(level1Grid, mergedLevel1Rooms))
   }
 
   // ── Super-room splitting: convert super-rooms back to constituent rooms ──
