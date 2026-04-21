@@ -45,8 +45,8 @@ function renderTopologyResult(r) {
   `
 }
 
-// 向后兼容：renderAG01 调用 renderTopologyResult
-export function renderAG01(r) {
+// 向后兼容：renderTopology 调用 renderTopologyResult
+export function renderTopology(r) {
   return renderTopologyResult(r)
 }
 
@@ -98,7 +98,10 @@ export function renderRainfallCard({ duty10Year, capacity50, floodCheck200 }) {
 `
 }
 
-export function renderAG00(r) {
+/**
+ * AG0-1: 暴雨计算结果卡片
+ */
+export function renderRainfall(r) {
   const status = r.valid ? (r.warnings.length > 0 ? 'warn' : 'pass') : 'error'
   const icon   = status === 'pass' ? '✔' : status === 'warn' ? '⚠' : '✘'
   const label  = status === 'pass' ? '验证通过' : status === 'warn' ? '通过（有警告）' : '验证失败'

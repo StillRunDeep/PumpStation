@@ -16,7 +16,7 @@ import { runPipeSizing, PIPE_SCHEMES } from './agents/pipe-sizing.js'
 import { runDrawing } from './agents/drawing.js'
 import { initLayoutController, generateInitialLayouts } from './ui/layout-controller.js'
 
-import { renderAG00, renderAG01, renderPoolDepth, renderPipeSizing, renderMaintenanceRoom, renderPumpSpec, renderRainfallCard, renderSchemeOptions } from './ui/results-panel.js'
+import { renderRainfall, renderTopology, renderPoolDepth, renderPipeSizing, renderMaintenanceRoom, renderPumpSpec, renderRainfallCard, renderSchemeOptions } from './ui/results-panel.js'
 import { showAg41Notify } from './ui/layout-panel.js'
 import { initTopologyEditor, setTopologyFromN, getCurrentTopology } from './ui/topology-editor.js'
 
@@ -463,13 +463,13 @@ async function runCalculation() {
     L:          parseFloat(document.getElementById('inp-L').value) || 500,
   }
 
-  // AG0-0: 参数验证（保留，用于获取 mode、N 等下游参数）
+  // AG0-1: 参数验证（保留，用于获取 mode、N 等下游参数）
   const ag00 = runUserParams(ag00Params)
 
   const panel = document.getElementById('results-panel')
   panel.hidden = false
 
-  // AG0-1: 若 N 或 N_spare 变化则重置默认拓扑
+  // AG0-2: 若 N 或 N_spare 变化则重置默认拓扑
   const N_spare = parseInt(document.getElementById('inp-N-spare').value, 10) || 0
   if (ag00Params.N !== _lastTopoN || N_spare !== _lastTopoSpare) {
     setTopologyFromN(ag00Params.N, N_spare)
@@ -477,12 +477,12 @@ async function runCalculation() {
     _lastTopoSpare = N_spare
   }
 
-  // AG0-0: 暴雨计算（已知条件在卡片内，输出到 card-rainfall）
+  // AG0-1: 暴雨计算（已知条件在卡片内，输出到 card-rainfall）
   const ag00Result = recalcRainfall()
 
-  // AG0-1: 拓扑解析（单独调用，输出到 card-ag01）
+  // AG0-2: 拓扑解析（单独调用，输出到 card-topology）
   const ag01Topo = runTopology(getCurrentTopology())
-  document.getElementById('card-ag01').innerHTML = renderAG01(ag01Topo)
+  document.getElementById('card-topology').innerHTML = renderTopology(ag01Topo)
 
   if (!ag00.valid) {
     ;['card-ag11', 'card-ag12', 'card-ag13', 'card-ag21'].forEach(id => {
