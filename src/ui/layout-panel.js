@@ -5,6 +5,7 @@ import {
   saveScorerParams,
 } from '../layout/evaluation/scorer-params.js'
 import { scoreLayout } from '../layout/evaluation/scorer.js'
+import { rescoreVariants } from '../agents/layout-eval.js'
 import { ROOM_DEFS } from '../layout/model/room-defs.js'
 import { sendToRevit } from '../layout/export/revit-exporter.js'
 
@@ -12,7 +13,7 @@ import { sendToRevit } from '../layout/export/revit-exporter.js'
 let _variants = []
 let _eliminatedVariants = []
 let _expandedIds = new Set()   // Set of variant IDs currently expanded
-let _showDrawingInList = false; // Our new state variable
+let _showDrawingInList = true; // Our new state variable
 const VW = 1080, VH = 560
 const COL_COUNT = 8
 
@@ -625,11 +626,7 @@ function _restoreSelection(prevExpandedIds) {
 
 function _rescoreAndRerender() {
   const prevExpandedIds = new Set(_expandedIds)
-
-  _variants = _variants.map(v => {
-    const { score, spaceEfficiency, efficiencyScore, accessibilityScore, diversityPenalty, breakdown } = scoreLayout(v)
-    return { ...v, score, spaceEfficiency, efficiencyScore, accessibilityScore, diversityPenalty, breakdown }
-  })
+  _variants = rescoreVariants(_variants)
 
   const wrap = document.getElementById('comparison-table-wrap')
   if (wrap) {
@@ -752,10 +749,7 @@ window._ag41ResetParams = function() {
   if (!cmp) return
   const prevExpandedIds = new Set(_expandedIds)
 
-  _variants = _variants.map(v => {
-    const { score, spaceEfficiency, efficiencyScore, accessibilityScore, diversityPenalty, breakdown } = scoreLayout(v)
-    return { ...v, score, spaceEfficiency, efficiencyScore, accessibilityScore, diversityPenalty, breakdown }
-  })
+  _variants = rescoreVariants(_variants)
 
   cmp.innerHTML = renderComparisonTable(_sortedVariants())
   _restoreSelection(prevExpandedIds)
