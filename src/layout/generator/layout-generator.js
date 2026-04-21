@@ -22,11 +22,11 @@
  * Total: 11s per variant × 9 variants = ~2 minutes for full generation
  */
 
-import { ROOM_DEFS } from './room-defs.js';
-import { checkAdjacency, ADJACENCY_MUST } from './adjacency.js';
-import { placeDoors } from './door-placer.js';
-import { SCORER_PARAMS } from './scorer-params.js';
-import { evaluateCheckpointA, scoreSpatialQuality, GROUND_MUST_EXT, LEVEL1_MUST_FACE_CORRIDOR } from './scorer.js';
+import { ROOM_DEFS } from '../model/room-defs.js';
+import { checkAdjacency, ADJACENCY_MUST } from '../topology/adjacency.js';
+import { placeDoors } from '../topology/door-placer.js';
+import { SCORER_PARAMS } from '../evaluation/scorer-params.js';
+import { evaluateCheckpointA, scoreSpatialQuality, GROUND_MUST_EXT, LEVEL1_MUST_FACE_CORRIDOR } from '../evaluation/scorer.js';
 import { adjacent, centerX, centerY, touchesExteriorNonSouth, CONSTRAINT_CHECKS, evaluateTemplate } from './placer.js';
 
 export const GRID_SIZE = 500; // 500mm per grid cell — single source of truth, imported by ag41/ag42
@@ -1271,9 +1271,9 @@ function fillGaps(grid, rooms) {
                 }
 
                 // --- 2a. 阶段一：优先填充凹角 (方案C) ---
-                const凹角Score = calculateConcaveScore(grid, seg, roomId);
-                if (凹角Score > 0) {
-                    const score = 10000 + 凹角Score + seg.cells.length;
+                const reflexAngleScore = calculateConcaveScore(grid, seg, roomId);
+                if (reflexAngleScore > 0) {
+                    const score = 10000 + reflexAngleScore + seg.cells.length;
                      if (score > bestScore) {
                         bestScore = score;
                         bestSegment = seg;
@@ -1936,7 +1936,7 @@ function makeRng(seed) {
 
 /**
  * Build a partial layout result from intermediate grid snapshots, for checkpoint evaluation.
- * Used by ag41-building-layout.js to evaluate layouts at phase boundaries:
+ * Used by layout-build.js to evaluate layouts at phase boundaries:
  * - Checkpoint A: pass gridAfterRect snapshots (after Phase 1 rectangle expansion)
  * - Checkpoint B: pass gridBeforeGaps snapshots (after Phase 2 L/U expansion)
  *
@@ -2098,7 +2098,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     const level1Layout = finalizeLayout(level1GridAfterRect).level1;
     return {
       id: `${prefix}-${groupId}-${variantIdx}`,
-      label: `约束生长法 (未通过红线)`,
+      label: `约束生长法 (检查点A)`,
       desc: `建筑 ${(alignedBW / 1000).toFixed(1)}m×${(alignedBD / 1000).toFixed(1)}m`,
       groundPlacements: groundLayout,
       level1Placements: level1Layout,
@@ -2141,7 +2141,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     const level1Layout = finalizeLayout(level1GridBeforeGaps).level1;
     return {
       id: `${prefix}-${groupId}-${variantIdx}`,
-      label: `约束生长法 (未通过检查点B)`,
+      label: `约束生长法 (检查点B)`,
       desc: `建筑 ${(alignedBW / 1000).toFixed(1)}m×${(alignedBD / 1000).toFixed(1)}m`,
       groundPlacements: groundLayout,
       level1Placements: level1Layout,

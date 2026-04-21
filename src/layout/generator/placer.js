@@ -1,7 +1,7 @@
-import { ROOM_DEFS } from './room-defs.js'
+import { ROOM_DEFS } from '../model/room-defs.js'
 import { GRID_SIZE } from './layout-generator.js';
-import { checkAdjacency } from './adjacency.js'
-import { placeDoors } from './door-placer.js'
+import { checkAdjacency } from '../topology/adjacency.js'
+import { placeDoors } from '../topology/door-placer.js'
 
 // ── Geometry helpers ──────────────────────────────────────────────
 

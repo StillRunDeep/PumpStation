@@ -484,5 +484,5 @@ interface LayoutVariant {
 | `src/layout/scorer.js`               | 方案量化评价核心；新增 `scoreHardRedlines()`（第一梯队）、`scoreSpatialQuality()`（第一+二梯队）分阶段导出 |
 | `src/layout/scorer-params.js`        | 评分系数与阈值管理（支持 UI 动态调整） |
 | `src/layout/layout-generator.js`     | 约束生长算法核心；新增 `buildPartialResult()` 辅助函数，将阶段快照转换为可评价的布局对象 |
-| `src/agents/ag41-building-layout.js` | 布局生成代理；含检查点 A 过滤循环、检查点 B 排序，以及进化算法调度 |
-| `src/agents/ag42-layout-eval.js`     | 布局评价代理（全量 scoreLayout，含方案合并与排序） |
+| `src/agents/layout-build.js` | 布局生成代理；含检查点 A 过滤循环、检查点 B 排序，以及进化算法调度 |
+| `src/agents/layout-eval.js`     | 布局评价代理（全量 scoreLayout，含方案合并与排序） |

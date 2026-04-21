@@ -1,4 +1,10 @@
 import './style.css'
+import { initTokenVerification } from './auth.js'
+
+// 初始化token验证
+const isTokenValid = initTokenVerification()
+
+window._bypassCheckpointA = false;
 
 import { runUserParams } from './agents/user-params.js'
 import { runTopology } from './agents/topology.js'
@@ -8,45 +14,16 @@ import { SPACE_RULES_DEFAULT } from './data/fitting-dims.js'
 import { runPumpSpec } from './agents/pump-spec.js'
 import { runPipeSizing, PIPE_SCHEMES } from './agents/pipe-sizing.js'
 import { runDrawing } from './agents/drawing.js'
-import { runAG41 } from './agents/ag41-building-layout.js'
-import { mergeVariants } from './agents/ag42-layout-eval.js'
+import { initLayoutController, generateInitialLayouts } from './ui/layout-controller.js'
 
-/**
- * 统一的布局生成结果处理：
- * - 所有方案均参与评分展示，返回 { variants, improved, newScored }
- * @param {Array}  newRaw    runAG41() 的返回值
- * @param {Array}  existing  当前已有方案（首次传 []）
- * @param {boolean} isReset  true = 重置/初次，不显示"更优/未更优"提示
- */
-function applyLayoutResult(newRaw, existing, isReset = false) {
-  if (newRaw.length > 0) {
-    const { variants, improved, newScored } = mergeVariants(existing, newRaw)
-    renderLayoutPanel(variants)
-    if (isReset) {
-      showAg41Notify('已生成初始方案', true)
-    } else {
-      const maxNewScore    = Math.max(...newScored.map(v => v.score))
-      const currentTopScore = variants[0]?.score || 0
-      if (improved) {
-        showAg41Notify(`发现更优方案！新方案最高分: ${maxNewScore}`, true)
-      } else {
-        showAg41Notify(`未发现更优方案 (当前最高: ${currentTopScore} / 本轮最高: ${maxNewScore})`, false)
-      }
-    }
-    return { variants, improved, newScored }
-  }
-
-  return { variants, improved, newScored }
-}
-import { renderAG00, renderAG01, renderPoolDepth, renderPipeSizing, renderMaintenanceRoom, renderPumpSpec, renderRainfallCard, renderSchemeOptions } from './ui/results-panel.js'
-import { renderLayoutPanel, getVariants, showAg41Notify, renderScorerParamsPanel, rescoreAndRerender } from './ui/layout-panel.js'
-import { SCORER_PARAMS } from './layout/scorer-params.js'
-import { renderBuildingParamsPanel } from './ui/building-params-panel.js'
-import { getDefaultUserParams } from './layout/user-params.js'
+import { renderRainfall, renderTopology, renderPoolDepth, renderPipeSizing, renderMaintenanceRoom, renderPumpSpec, renderRainfallCard, renderSchemeOptions } from './ui/results-panel.js'
+import { showAg41Notify } from './ui/layout-panel.js'
 import { initTopologyEditor, setTopologyFromN, getCurrentTopology } from './ui/topology-editor.js'
 
 let _lastTopoN     = null
 let _lastTopoSpare = 0
+
+initLayoutController()
 
 // ── 模块缓存与卡片预填 ────────────────────────────────────────────
 
@@ -486,13 +463,13 @@ async function runCalculation() {
     L:          parseFloat(document.getElementById('inp-L').value) || 500,
   }
 
-  // AG0-0: 参数验证（保留，用于获取 mode、N 等下游参数）
+  // AG0-1: 参数验证（保留，用于获取 mode、N 等下游参数）
   const ag00 = runUserParams(ag00Params)
 
   const panel = document.getElementById('results-panel')
   panel.hidden = false
 
-  // AG0-1: 若 N 或 N_spare 变化则重置默认拓扑
+  // AG0-2: 若 N 或 N_spare 变化则重置默认拓扑
   const N_spare = parseInt(document.getElementById('inp-N-spare').value, 10) || 0
   if (ag00Params.N !== _lastTopoN || N_spare !== _lastTopoSpare) {
     setTopologyFromN(ag00Params.N, N_spare)
@@ -500,12 +477,12 @@ async function runCalculation() {
     _lastTopoSpare = N_spare
   }
 
-  // AG0-0: 暴雨计算（已知条件在卡片内，输出到 card-rainfall）
+  // AG0-1: 暴雨计算（已知条件在卡片内，输出到 card-rainfall）
   const ag00Result = recalcRainfall()
 
-  // AG0-1: 拓扑解析（单独调用，输出到 card-ag01）
+  // AG0-2: 拓扑解析（单独调用，输出到 card-topology）
   const ag01Topo = runTopology(getCurrentTopology())
-  document.getElementById('card-ag01').innerHTML = renderAG01(ag01Topo)
+  document.getElementById('card-topology').innerHTML = renderTopology(ag01Topo)
 
   if (!ag00.valid) {
     ;['card-ag11', 'card-ag12', 'card-ag13', 'card-ag21'].forEach(id => {
@@ -643,8 +620,7 @@ async function runCalculation() {
   updateRepairZoneHint(ag21)
 
   // ── AG4-1/AG4-2: 布局生成与评分 ─────────────────────────────────
-  const ag41Variants = await runAG41()
-  applyLayoutResult(ag41Variants, [], true)
+  await generateInitialLayouts()
 
   panel.scrollIntoView({ behavior: 'smooth' })
 }
@@ -674,153 +650,6 @@ document.getElementById('inp-N').addEventListener('input', _updateTopo)
 document.getElementById('inp-N-spare').addEventListener('input', _updateTopo)
 
 document.getElementById('btn-calc').addEventListener('click', runCalculation)
-
-let isGeneratingLayouts = false;
-let generationReqId = null;
-
-// 用户展开方案详图时自动暂停持续生成
-window.addEventListener('ag41-detail-opened', () => {
-  if (!isGeneratingLayouts) return;
-  isGeneratingLayouts = false;
-  if (generationReqId) {
-    cancelAnimationFrame(generationReqId);
-    generationReqId = null;
-  }
-  const btn = document.getElementById('btn-ag41-more');
-  if (btn) btn.textContent = '生成更多方案';
-  showAg41Notify('已暂停生成（展开详图）', false);
-});
-
-document.getElementById('btn-ag41-more').addEventListener('click', () => {
-  const btn = document.getElementById('btn-ag41-more');
-
-  if (isGeneratingLayouts) {
-    // Stop generation
-    isGeneratingLayouts = false;
-    if (generationReqId) {
-      cancelAnimationFrame(generationReqId);
-      generationReqId = null;
-    }
-    btn.textContent = '生成更多方案';
-    showAg41Notify('已停止持续生成', false);
-  } else {
-    // Start generation
-    isGeneratingLayouts = true;
-    btn.textContent = '停止';
-
-    const generationLoop = async () => {
-      if (!isGeneratingLayouts) {
-        btn.textContent = '生成更多方案';
-        return;
-      }
-
-      try {
-        const existing = getVariants();
-        const newRaw = await runAG41(existing, () => !isGeneratingLayouts);
-        if (newRaw === null) { // runAG41 might be cancelled
-          isGeneratingLayouts = false;
-          btn.textContent = '生成更多方案';
-          return;
-        }
-        applyLayoutResult(newRaw, existing, false);
-      } catch (error) {
-        console.error("Error during layout generation loop:", error);
-        showAg41Notify('生成新方案时出错', false);
-        isGeneratingLayouts = false;
-        btn.textContent = '生成更多方案';
-        return;
-      }
-
-      if (isGeneratingLayouts) {
-        generationReqId = requestAnimationFrame(generationLoop);
-      }
-    };
-
-    generationReqId = requestAnimationFrame(generationLoop);
-  }
-});
-
-document.getElementById('btn-ag41-reset').addEventListener('click', async () => {
-  const btn = document.getElementById('btn-ag41-reset')
-  btn.disabled = true
-  btn.textContent = '生成中…'
-  try {
-    const newRaw = await runAG41([]) // Start with no existing variants
-    applyLayoutResult(newRaw, [], true)
-  } finally {
-    btn.disabled = false
-    btn.textContent = '重制方案'
-  }
-});
-
-// ── 建筑参数面板设置 ──
-const btnParams = document.getElementById('btn-ag41-params');
-const buildParamsDialog = document.getElementById('modal-build-params');
-const closeBtn = buildParamsDialog.querySelector('.modal-close');
-
-btnParams?.addEventListener('click', () => {
-    const defaultParams = getDefaultUserParams();
-    const panel = renderBuildingParamsPanel(defaultParams);
-    const modalBody = buildParamsDialog.querySelector('#modal-params-wrap');
-    if (panel && modalBody) {
-        modalBody.innerHTML = panel.innerHTML;
-        panel.init(modalBody);
-
-        const actionsContainer = buildParamsDialog.querySelector('#modal-params-actions');
-        if (actionsContainer) {
-          actionsContainer.innerHTML = `
-            <button id="btn-params-cancel" style="padding: 8px 16px; font-size: 13px; border-radius: 6px; border: 1px solid #ccc; background: #fff; cursor: pointer;">取消</button>
-            <button id="btn-params-done" style="padding: 8px 16px; font-size: 13px; border-radius: 6px; border: none; background: #2e86c1; color: white; cursor: pointer; font-weight: 600;">完成</button>
-          `;
-          actionsContainer.querySelector('#btn-params-done').addEventListener('click', () => {
-            if (panel.validateAndConfirm()) {
-              buildParamsDialog.close();
-            }
-          });
-          actionsContainer.querySelector('#btn-params-cancel').addEventListener('click', () => {
-            buildParamsDialog.close();
-          });
-        }
-    }
-    buildParamsDialog.showModal();
-});
-
-closeBtn?.addEventListener('click', () => {
-    buildParamsDialog.close();
-});
-
-buildParamsDialog.addEventListener('params-confirmed', () => {
-  buildParamsDialog.close();
-});
-
-// ── 评分参数面板设置 ──
-const btnScorerParams = document.getElementById('btn-ag41-scorer-params');
-const scorerParamsDialog = document.getElementById('modal-scorer-params');
-
-btnScorerParams?.addEventListener('click', () => {
-    const panelHtml = renderScorerParamsPanel(SCORER_PARAMS);
-    const modalBody = scorerParamsDialog.querySelector('#modal-scorer-wrap');
-    if (modalBody) {
-        modalBody.innerHTML = panelHtml;
-    }
-    const actionsContainer = scorerParamsDialog.querySelector('#modal-scorer-actions');
-    if (actionsContainer) {
-      actionsContainer.innerHTML = `
-        <button id="btn-scorer-cancel" style="padding: 8px 16px; font-size: 13px; border-radius: 6px; border: 1px solid #ccc; background: #fff; cursor: pointer;">取消</button>
-        <button id="btn-scorer-done" style="padding: 8px 16px; font-size: 13px; border-radius: 6px; border: none; background: #2e86c1; color: white; cursor: pointer; font-weight: 600;">完成</button>
-      `;
-      actionsContainer.querySelector('#btn-scorer-done').addEventListener('click', () => {
-        // Since params are updated on-the-fly, "Done" just needs to rescore and close.
-        rescoreAndRerender();
-        scorerParamsDialog.close();
-      });
-      actionsContainer.querySelector('#btn-scorer-cancel').addEventListener('click', () => {
-        scorerParamsDialog.close();
-      });
-    }
-    scorerParamsDialog.showModal();
-});
-
 
 // ── 高级参数标签页切换 ─────────────────────────────────────────────
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -882,7 +711,143 @@ function persistCollapseState() {
 document.addEventListener('DOMContentLoaded', () => {
   persistCollapseState();
   initSummaryToggleLogic();
+  initFocusMode();
 });
+
+let isFocusMode = false;
+
+/**
+ * ── Focus Mode (Wizard UI) ──
+ * 1. Single card open at a time.
+ * 2. Non-open cards are hidden when in focus mode.
+ */
+function initFocusMode() {
+  const allCards = document.querySelectorAll('.agent-card');
+  const openCard = Array.from(allCards).find(c => c.open);
+  
+  if (openCard) {
+    isFocusMode = true;
+    document.body.classList.add('focus-mode');
+    document.body.classList.add('has-open-card');
+    // Ensure only one is open
+    allCards.forEach(c => { if (c !== openCard) c.removeAttribute('open'); });
+  }
+
+  // Inject Navigation Bar
+  const navBar = document.createElement('div');
+  navBar.id = 'wizard-nav-bar';
+  navBar.className = 'wizard-nav-bar';
+  navBar.innerHTML = `
+    <button id="btn-wizard-prev">上一步</button>
+    <button id="btn-wizard-next">下一步</button>
+  `;
+  document.body.appendChild(navBar);
+
+  const prevBtn = navBar.querySelector('#btn-wizard-prev');
+  const nextBtn = navBar.querySelector('#btn-wizard-next');
+
+  const updateNav = () => {
+    if (!isFocusMode) {
+      navBar.style.display = 'none';
+      return;
+    }
+    navBar.style.display = 'flex';
+
+    const allCards = Array.from(document.querySelectorAll('.agent-card'));
+    const resultsPanel = document.getElementById('results-panel');
+    const isResultsHidden = resultsPanel ? resultsPanel.hidden : true;
+
+    // Filter visible cards based on parent section visibility
+    const visibleCards = allCards.filter(c => {
+      const parentSection = c.closest('section');
+      if (parentSection && parentSection.id === 'results-panel' && isResultsHidden) return false;
+      return true;
+    });
+
+    const activeCard = visibleCards.find(c => c.open);
+    const currentIndex = activeCard ? visibleCards.indexOf(activeCard) : -1;
+    
+    // 维护 body 状态类，用于 CSS 控制卡片可见性
+    const anyOpen = visibleCards.some(c => c.open);
+    document.body.classList.toggle('has-open-card', anyOpen);
+
+    prevBtn.disabled = currentIndex <= 0;
+    
+    const isEnd = currentIndex === -1 || currentIndex >= visibleCards.length - 1;
+    const isInputCard = activeCard && activeCard.id === 'card-input-wrap';
+
+    if (isEnd && (currentIndex === -1 || (isInputCard && isResultsHidden))) {
+      nextBtn.disabled = false;
+      nextBtn.textContent = '下一步';
+      nextBtn.onclick = () => {
+        document.getElementById('btn-calc').click();
+        // Trigger move after calc unhides panel
+        setTimeout(() => {
+          const updatedVisible = Array.from(document.querySelectorAll('.agent-card')).filter(c => {
+            const p = c.closest('section');
+            return !p || !p.hidden;
+          });
+          if (updatedVisible.length > 1) {
+            activeCard.removeAttribute('open');
+            updatedVisible[1].setAttribute('open', '');
+            updatedVisible[1].scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+          updateNav();
+        }, 350);
+      };
+    } else {
+      nextBtn.disabled = isEnd;
+      nextBtn.textContent = '下一步';
+      nextBtn.onclick = () => {
+        if (!isEnd) {
+          activeCard.removeAttribute('open');
+          visibleCards[currentIndex + 1].setAttribute('open', '');
+          visibleCards[currentIndex + 1].scrollIntoView({ behavior: 'smooth', block: 'start' });
+          updateNav();
+        }
+      };
+    }
+
+    prevBtn.onclick = () => {
+      if (currentIndex > 0) {
+        activeCard.removeAttribute('open');
+        visibleCards[currentIndex - 1].setAttribute('open', '');
+        visibleCards[currentIndex - 1].scrollIntoView({ behavior: 'smooth', block: 'start' });
+        updateNav();
+      }
+    };
+  };
+
+  // Global toggle listener (capture phase) to enforce single open and manage modes
+  document.addEventListener('toggle', (e) => {
+    if (e.target.classList.contains('agent-card')) {
+      const allCards = document.querySelectorAll('.agent-card');
+      const openCards = Array.from(allCards).filter(c => c.open);
+
+      if (e.target.open) {
+        // Just opened a card: Enter focus mode, hide others
+        isFocusMode = true;
+        document.body.classList.add('focus-mode');
+        document.body.classList.add('has-open-card');
+        
+        allCards.forEach(c => {
+          if (c !== e.target && c.open) c.removeAttribute('open');
+        });
+      } else {
+        // Just closed a card: If no cards are left open, exit focus mode (show headers stack)
+        if (openCards.length === 0) {
+          isFocusMode = false;
+          document.body.classList.remove('focus-mode');
+          document.body.classList.remove('has-open-card');
+        }
+      }
+      updateNav();
+    }
+  }, true);
+
+  // Initial call
+  updateNav();
+}
 
 // ── Summary Click Logic (Only triangle triggers toggle) ──
 function initSummaryToggleLogic() {
@@ -894,8 +859,9 @@ function initSummaryToggleLogic() {
     const clickX = e.clientX - rect.left;
 
     // The triangle is within the first 35px. 
-    // If click is further to the right, prevent the default toggle.
-    if (clickX > 35) {
+    // AG-Init is special: allow clicking anywhere on the header to toggle.
+    const isInitCard = summary.closest('#card-input-wrap');
+    if (clickX > 35 && !isInitCard) {
       const targetTag = e.target.tagName.toLowerCase();
       const isInteractive = ['input', 'button', 'label'].includes(targetTag) || e.target.closest('button, label');
       if (!isInteractive) {
@@ -907,3 +873,13 @@ function initSummaryToggleLogic() {
 
 document.getElementById('btn-rainfall-recalc').addEventListener('click', recalcRainfall)
 document.getElementById('btn-rainfall-downstream').addEventListener('click', runFromRainfall)
+
+// Keyboard shortcut for bypassing Checkpoint A
+window.addEventListener('keydown', (e) => {
+  if (e.ctrlKey && e.key.toLowerCase() === 'b') {
+    e.preventDefault();
+    window._bypassCheckpointA = !window._bypassCheckpointA;
+    const msg = `跳过检查点A: ${window._bypassCheckpointA ? '已开启' : '已关闭'}`;
+    showAg41Notify(msg, window._bypassCheckpointA);
+  }
+});

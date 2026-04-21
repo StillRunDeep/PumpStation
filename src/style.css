@@ -44,10 +44,15 @@ main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
   background: var(--color-card);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  padding: 24px;
+  padding: 0; /* 必须为0，否则折叠后会有残余高度 */
   margin-bottom: 28px;
+  overflow: hidden;
 }
 .input-panel h2 { font-size: 16px; color: var(--color-primary); margin-bottom: 18px; border-bottom: 2px solid #d6eaf8; padding-bottom: 8px; }
+
+.agent-card.input-panel .card-body {
+  padding: 24px;
+}
 
 .form-grid {
   display: grid;
@@ -190,7 +195,7 @@ details .adv-grid { margin-top: 12px; }
   text-decoration: none; /* No underline on hover */
 }
 
-/* We can use a trick with a pseudo-element or just keep it simple with JS handling. 
+/* We can use a trick with a pseudo-element or just keep it simple with JS handling.
    Actually, the most intuitive way is to have the whole header NOT look like a giant button. */
 
 .card-header::before {
@@ -231,9 +236,8 @@ details[open] > .card-header::before {
   gap: 8px;
 }
 
-.card-ag01 .card-header { background: #7d3c98; }
-.card-rainfall-analysis .card-header { background: #7d3c98; }
-.card-ag00 .card-header { background: var(--color-ag00); }
+.card-topology .card-header { background: #7d3c98; }
+.card-rainfall-analysis .card-header { background: var(--color-ag00); }
 .card-pool-depth .card-header { background: var(--color-ag11); }
 .card-pump-spec .card-header { background: var(--color-ag12); }
 .card-maintenance-room .card-header { background: var(--color-ag21); }
@@ -731,8 +735,9 @@ svg.zoom-active {
   border-left: 3px solid #117a65;
 }
 
-/* ── "更多方案" button ── */
-#btn-ag41-more, #btn-ag41-reset, #btn-ag41-params, #btn-ag41-scorer-params {
+/* ── AG4 header buttons ── */
+#btn-ag41-more, #btn-ag41-optimize, #btn-ag41-merge, #btn-ag41-reset,
+#btn-ag41-params, #btn-ag41-scorer-params {
   padding: 4px 12px;
   background: rgba(255,255,255,0.15);
   color: #fff;
@@ -742,8 +747,42 @@ svg.zoom-active {
   cursor: pointer;
   transition: background 0.2s, opacity 0.2s;
 }
-#btn-ag41-more:hover:not(:disabled), #btn-ag41-reset:hover:not(:disabled) { background: rgba(255,255,255,0.3); }
-#btn-ag41-more:disabled, #btn-ag41-reset:disabled { opacity: 0.6; cursor: not-allowed; }
+#btn-ag41-more:hover:not(:disabled), #btn-ag41-optimize:hover:not(:disabled),
+#btn-ag41-merge:hover:not(:disabled), #btn-ag41-reset:hover:not(:disabled) {
+  background: rgba(255,255,255,0.3);
+}
+#btn-ag41-more:disabled, #btn-ag41-optimize:disabled,
+#btn-ag41-merge:disabled, #btn-ag41-reset:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ── Floating action bar ── */
+#ag41-floating-bar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 1000;
+  background: #1a3a5c;
+  padding: 6px 16px;
+  gap: 8px;
+  align-items: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,.35);
+}
+#ag41-floating-bar::before {
+  content: 'AG4 布局';
+  font-size: 12px;
+  color: rgba(255,255,255,.6);
+  margin-right: 8px;
+}
+.float-btn {
+  padding: 4px 12px;
+  background: rgba(255,255,255,0.15);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.4);
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.2s, opacity 0.2s;
+}
+.float-btn:hover:not(:disabled) { background: rgba(255,255,255,0.3); }
+.float-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* ── AG4-1 inline notification ── */
 .notify-bar-wrap {
@@ -752,6 +791,14 @@ svg.zoom-active {
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: background 0.3s;
+}
+.notify-bar-wrap.notify-debug {
+  background: #fff3e0; /* 浅橘色背景 */
+  border-bottom: 1px solid #ffe0b2;
+}
+.header-notify.notify-debug {
+  color: #e65100; /* 深橘色文字 */
 }
 
 .header-notify {
@@ -983,3 +1030,272 @@ svg.section-drag-active [data-zoom-handle] {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
+
+/* ── Password Verification Page ── */
+#password-verify-page {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #1a5276 0%, #2e86c1 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+
+.password-verify-container {
+  width: 100%;
+  max-width: 420px;
+  padding: 20px;
+}
+
+.password-verify-card {
+  background: white;
+  border-radius: 16px;
+  padding: 40px 30px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  text-align: center;
+}
+
+.password-verify-icon {
+  font-size: 64px;
+  margin-bottom: 20px;
+}
+
+.password-verify-card h1 {
+  font-size: 24px;
+  color: #2c3e50;
+  margin-bottom: 12px;
+  font-weight: 700;
+}
+
+.password-prompt {
+  font-size: 16px;
+  color: #2c3e50;
+  margin-bottom: 24px;
+  font-weight: 500;
+}
+
+.password-verify-card > p {
+  font-size: 14px;
+  color: #7f8c8d;
+  margin-bottom: 30px;
+  line-height: 1.6;
+}
+
+.password-verify-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.password-input-container {
+  position: relative;
+  width: 100%;
+}
+
+.password-input {
+  width: 100%;
+  padding: 12px 16px 12px 16px;
+  border: 2px solid #ccd6e0;
+  border-radius: 8px;
+  font-size: 15px;
+  font-family: var(--font);
+  transition: all 0.2s;
+  outline: none;
+  background: #fafcfe;
+  padding-right: 48px;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+}
+
+/* 禁用浏览器默认的密码可见性切换按钮 */
+.password-input::-ms-reveal,
+.password-input::-ms-clear {
+  display: none;
+}
+
+.password-input::-webkit-contacts-auto-fill-button {
+  visibility: hidden;
+  display: none !important;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+}
+
+.password-input::-webkit-credentials-auto-fill-button {
+  visibility: hidden;
+  display: none !important;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+}
+
+.toggle-password-btn {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.toggle-password-btn:hover {
+  background: rgba(46, 134, 193, 0.1);
+}
+
+.toggle-password-btn:active {
+  transform: translateY(-50%) scale(0.95);
+}
+
+.password-input:focus {
+  border-color: #2e86c1;
+  background: #fff;
+}
+
+.btn-password-verify {
+  display: block;
+  width: 100%;
+  padding: 12px 0;
+  background: linear-gradient(135deg, #2e86c1, #1a5276);
+  color: white;
+  font-size: 15px;
+  font-weight: 700;
+  font-family: var(--font);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  letter-spacing: 1px;
+  transition: opacity .2s, transform .1s;
+  box-shadow: 0 3px 8px rgba(30,82,118,0.35);
+}
+
+.btn-password-verify:hover {
+  opacity: .92;
+}
+
+.btn-password-verify:active {
+  transform: scale(.98);
+}
+
+.password-error {
+  background: #fee;
+  color: #c0392b;
+  padding: 10px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-bottom: 16px;
+  border: 1px solid #fcc;
+}
+/* Toggle Switch for Table Header */
+.toggle-switch {
+  position: relative;
+  z-index: 2;
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background-color: rgba(255, 255, 255, 0.2);
+  border-radius: 15px;
+  padding: 3px;
+  cursor: pointer;
+}
+.toggle-switch span {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 12px;
+  transition: all 0.2s ease-in-out;
+  color: #fff;
+}
+.toggle-switch span.active {
+  background-color: #fff;
+  color: var(--color-primary);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+/* ── Focus Mode ── */
+/* 仅在有卡片展开时，隐藏其他非展开卡片 */
+body.focus-mode.has-open-card .agent-card:not([open]) {
+  display: none !important;
+}
+
+body.focus-mode .page-header {
+  display: none;
+}
+
+body.focus-mode main {
+  padding-top: 10px;
+}
+
+/* 统一输入卡片的标题风格 */
+.card-input-wrap .card-header {
+  background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%) !important;
+}
+
+/* 修复 input-panel 作为卡片时的内边距冲突 */
+.agent-card.input-panel {
+  padding: 0; /* 移除外层 padding，使用标准的 card-body padding */
+  margin-bottom: 20px;
+}
+.agent-card.input-panel .card-body {
+  padding: 24px;
+}
+
+.wizard-nav-bar {
+  position: fixed;
+  bottom: 30px;
+  right: 30px;
+  display: flex;
+  gap: 12px;
+  z-index: 1000;
+  pointer-events: none; /* Let clicks pass through to background if not on buttons */
+}
+
+.wizard-nav-bar button {
+  pointer-events: auto;
+  background: var(--color-primary);
+  color: white;
+  border: none;
+  padding: 10px 18px;
+  border-radius: 24px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.35);
+  transition: transform 0.2s, background 0.2s, opacity 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wizard-nav-bar button:hover:not(:disabled) {
+  background: #154360;
+  transform: translateY(-2px);
+}
+
+.wizard-nav-bar button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.wizard-nav-bar button:disabled {
+  background: #95a5a6;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Fix for layout shift on view toggle */
+#variant-tbody > tr.variant-row > td {
+  height: 74px; /* SVG height (60px) + padding (14px) */
+  vertical-align: middle;
+}
+

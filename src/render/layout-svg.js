@@ -1,4 +1,4 @@
-import { ROOM_DEFS } from '../layout/room-defs.js'
+import { ROOM_DEFS } from '../layout/model/room-defs.js'
 import { _r, _l, _t, _dh, _dv, decomposeRoomIntoRects, calculateLabelPosition } from './svg-helpers.js'
 
 const FONT = 'Microsoft YaHei,sans-serif';

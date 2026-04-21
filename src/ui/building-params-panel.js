@@ -3,7 +3,7 @@
  * @description 在 AG3-1 和 AG4-1 之间提供建筑尺寸及功能空间面积参数设置
  */
 
-import { saveParams, HARDCODED_DEFAULTS } from '../layout/user-params.js'
+import { saveParams, HARDCODED_DEFAULTS } from '../layout/model/user-params.js'
 
 function renderBuildingParamsPanel(defaultParams = {}) {
   const defaultBw = defaultParams.buildingW || 43850

@@ -24,7 +24,7 @@
  *   aspectRatioPenalty: 500 → 2000 (verification in CODE_REVIEW_b803908.md)
  */
 
-import { adjacent, centerX, centerY, touchesExteriorNonSouth } from './placer.js'
+import { adjacent, centerX, centerY, touchesExteriorNonSouth } from '../generator/placer.js'
 import { SCORER_PARAMS } from './scorer-params.js'
 
 // ── Room ID constants ────────────────────────────────────────────────────────
