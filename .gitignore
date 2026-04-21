@@ -6,5 +6,5 @@ dist/
 .docx
 .doc
 .openclaude/
-TODO.md
-todo.md
+TODO*.md
+todo*.md
