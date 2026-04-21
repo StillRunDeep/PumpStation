@@ -1322,7 +1322,7 @@ function getPreferredDirection(roomId, grid, buildingW, buildingD, superRoomMeta
   return null;
 }
 
-function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionComplete = null, onRectExpansionComplete = null, stopAfterStage1 = false, superRoomMeta = null) {
+function expandRooms(grid, rooms, rng, { buildingW, buildingD, superRoomMeta }, stopAfterStage1 = false, ignoreAreaLimit = false) {
     let iterations = 0;
     let stage = 1; // Stage 1: Rectangular only, Stage 2: All types allowed
     // currentArea is now in grid cell counts
@@ -1345,7 +1345,9 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
         // Stage 2: also include rooms that haven't met accessibility, even if they've reached
         // their area target — they need to keep growing toward the exterior wall / corridor.
         let activeRooms;
-        if (stage === 2) {
+        if (ignoreAreaLimit) {
+          activeRooms = growingRooms; // Grow all rooms regardless of area
+        } else if (stage === 2) {
           activeRooms = growingRooms.filter(room => {
             if (room.currentArea < room.targetGridCount) return true;
             const t0 = _t ? performance.now() : 0;
@@ -1360,8 +1362,7 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
         // If all rooms reached their target area (and accessibility in Stage 2)
         if (activeRooms.length === 0) {
             if (stage === 1) {
-                if (onRectExpansionComplete) onRectExpansionComplete(grid);
-            }
+                            }
             break;
         }
 
@@ -1420,10 +1421,7 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
 
             // If no room could grow rectangularly, Stage 1 is complete
             if (!growthHappenedThisCycle) {
-                if (onRectExpansionComplete) {
-                    onRectExpansionComplete(grid); // Take snapshot AFTER all possible rect growths are done
-                }
-                // If stopAfterStage1 is enabled, stop here; otherwise proceed to Phase 2
+                                // If stopAfterStage1 is enabled, stop here; otherwise proceed to Phase 2
                 if (!stopAfterStage1) {
                     stage = 2; // Proceed to L/U shape phase
                     continue; // Restart the while loop for Stage 2
@@ -1503,7 +1501,7 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
                     }
 
                     for (const cell of expansionCells) {
-                        if (roomToGrow.currentArea < roomToGrow.targetGridCount) {
+                        if (ignoreAreaLimit || roomToGrow.currentArea < roomToGrow.targetGridCount) {
                             grid.addRoomCell(roomToGrow.id, cell.x, cell.y);
                             roomToGrow.currentArea++; // Increment by 1 grid cell
                         } else {
@@ -1530,8 +1528,7 @@ function expandRooms(grid, rooms, rng, buildingW, buildingD, onRegularExpansionC
     }
 
     // Capture the final grid state (always fires regardless of exit path)
-    if (onRegularExpansionComplete) onRegularExpansionComplete(grid);
-
+    
     if (_t) {
       if (!window.timeCostLog) window.timeCostLog = [];
       for (const [k, v] of Object.entries(_t)) {
@@ -2307,6 +2304,13 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     const { mergedRooms: mergedGroundRooms, superRoomMap: groundSuperRoomMap } = mergeMustPairsForFloor(groundRooms);
     const { mergedRooms: mergedLevel1Rooms, superRoomMap: level1SuperRoomMap } = mergeMustPairsForFloor(level1Rooms);
 
+    // Step 6A: 无面积限制 L/U 生长
+    const groundCtx = { buildingW: bW, buildingD: bD, superRoomMeta: buildSuperRoomMeta(groundSuperRoomMap) };
+    expandRooms(groundGrid, mergedGroundRooms, rng, groundCtx, false, true);
+
+    const level1Ctx = { buildingW: bW, buildingD: bD, superRoomMeta: buildSuperRoomMeta(level1SuperRoomMap) };
+    expandRooms(level1Grid, mergedLevel1Rooms, rng, level1Ctx, false, true);
+
     runPhase3Growth(groundGrid, mergedGroundRooms, rng);
     runPhase3Growth(level1Grid, mergedLevel1Rooms, rng);
 
@@ -2414,23 +2418,16 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
   level1GridAfterSeeds = level1Grid.clone();
 
   // --- Checkpoint A (Phase 1 snapshot evaluation) ---
+  const groundCtx = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: groundSuperMeta };
+  timedGen('phase1_expandRooms_ground', () => expandRooms(groundGrid, mergedGroundRooms, rng, groundCtx, schemaLayout));
+  groundGridAfterRect = groundGrid.clone(); // Capture snapshot after stage 1
+  if (!groundGridBeforeGaps) groundGridBeforeGaps = groundGrid.clone(); // Fallback if not set by expandRooms
 
-  // 先用 stopAfterStage1=true 跑 Phase 1 来评估 Checkpoint A
-  timedGen('phase1_expandRooms_ground', () => expandRooms(groundGrid, mergedGroundRooms, rng, alignedBW, alignedBD, (gridState) => {
-    groundGridBeforeGaps = gridState.clone();
-  }, (gridState) => {
-    groundGridAfterRect = gridState.clone();
-  }, schemaLayout, groundSuperMeta)); // stopAfterStage1 = schemaLayout, superRoomMeta
-   if (!groundGridAfterRect) groundGridAfterRect = groundGrid.clone();
-   if (!groundGridBeforeGaps) groundGridBeforeGaps = groundGrid.clone();
+  const level1Ctx = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: level1SuperMeta };
+  timedGen('phase1_expandRooms_level1', () => expandRooms(level1Grid, mergedLevel1Rooms, rng, level1Ctx, schemaLayout));
+  level1GridAfterRect = level1Grid.clone(); // Capture snapshot after stage 1
+  if (!level1GridBeforeGaps) level1GridBeforeGaps = level1Grid.clone(); // Fallback
 
-  timedGen('phase1_expandRooms_level1', () => expandRooms(level1Grid, mergedLevel1Rooms, rng, alignedBW, alignedBD, (gridState) => {
-    level1GridBeforeGaps = gridState.clone();
-  }, (gridState) => {
-    level1GridAfterRect = gridState.clone();
-  }, schemaLayout, level1SuperMeta)); // stopAfterStage1 = schemaLayout, superRoomMeta
-  if (!level1GridAfterRect) level1GridAfterRect = level1Grid.clone();
-  if (!level1GridBeforeGaps) level1GridBeforeGaps = level1Grid.clone();
 
   // Split super-rooms in snapshots before Checkpoint A evaluation
   const groundAfterRectForEval = groundGridAfterRect.clone();
@@ -2503,13 +2500,14 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
 
   // ── Phase 2 (Step 6A): 对通过 Checkpoint A 的方案，继续跑有面积约束的 L/U 形扩展 ────────
   //调试模式：window.debugModeEnabled 默认false，单模块屏蔽：debugCurrentModuleEnabled 默认 true
-  if (debugCurrentModuleEnabled) {        
-    timedGen('phase2_expandRooms_ground', () => expandRooms(groundGrid, mergedGroundRooms, rng, alignedBW, alignedBD, (gridState) => {
-      groundGridBeforeGaps = gridState.clone();
-    }, null, false, groundSuperMeta)); // stopAfterStage1 = false，完整执行 Phase 2，superRoomMeta
-    timedGen('phase2_expandRooms_level1', () => expandRooms(level1Grid, mergedLevel1Rooms, rng, alignedBW, alignedBD, (gridState) => {
-      level1GridBeforeGaps = gridState.clone();
-    }, null, false, level1SuperMeta)); // stopAfterStage1 = false，完整执行 Phase 2，superRoomMeta
+  if (debugCurrentModuleEnabled) {
+    const groundCtx = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: groundSuperMeta };
+    timedGen('phase2_expandRooms_ground', () => expandRooms(groundGrid, mergedGroundRooms, rng, groundCtx, false));
+    groundGridBeforeGaps = groundGrid.clone();
+
+    const level1Ctx = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: level1SuperMeta };
+    timedGen('phase2_expandRooms_level1', () => expandRooms(level1Grid, mergedLevel1Rooms, rng, level1Ctx, false));
+    level1GridBeforeGaps = level1Grid.clone();
   }
   if (!groundGridBeforeGaps) groundGridBeforeGaps = groundGrid.clone();
   if (!level1GridBeforeGaps) level1GridBeforeGaps = level1Grid.clone();
@@ -2556,7 +2554,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     };
   }
   //调试模式：window.debugModeEnabled 默认false，单模块屏蔽：debugCurrentModuleEnabled 默认 true
-  if (window.debugModeEnabled) {
+  if (debugCurrentModuleEnabled) {
     // ── Step 6B: 无面积限制 L/U 生长 ──────────────────────────────────
     timedGen('phase3_growth_ground', () => runPhase3Growth(groundGrid, mergedGroundRooms, rng))
     
