@@ -124,7 +124,7 @@ function getNewSeed(roomId, ctx, currentSeeds, isSmart = false, parentPlacements
   }
 
   const mockGrid = { width: ctx.gridW, height: ctx.gridH, getCell };
-  const weightMap = generateWeightMapForRoom(mockGrid, roomDef, currentSeeds);
+  const weightMap = generateWeightMapForRoom(mockGrid, roomDef, currentSeeds, parentPlacements);
   let bestPos = null;
   let maxWeight = -1;
 

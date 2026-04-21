@@ -118,16 +118,18 @@ const ADJACENCY_PAIRS = ADJACENCY_MUST.map(item => item.pair);
 /**
  * Generates a weight map for a specific room based on its constraints.
  */
-export function generateWeightMapForRoom(grid, room, placedSeeds) {
+export function generateWeightMapForRoom(grid, room, placedSeeds, parentPlacements = null) {
   const { width, height } = grid;
   const weightMap = Array(height).fill(null).map(() => Array(width).fill(1));
   const roomDef = ROOM_DEFS[room.id];
+  const GRID_SIZE = 100; // 假设网格大小为 100mm
 
   // Rule 1: Exterior wall constraint
   if (roomDef.constraints.includes('ext_access')) {
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
-        // 500mm is 1 grid cell. Non-south walls.
+        // 500mm is 5 grid cells if GRID_SIZE=100. Check existing convention.
+        // Based on original code, x===0, y===0, x===width-1 were used as "500mm".
         if (x === 0 || y === 0 || x === width - 1) {
           weightMap[y][x] = 10;
         }
@@ -141,15 +143,35 @@ export function generateWeightMapForRoom(grid, room, placedSeeds) {
     if (pair[0] === room.id) partnerId = pair[1];
     if (pair[1] === room.id) partnerId = pair[0];
 
-    if (partnerId && placedSeeds[partnerId]) {
-      const partnerSeed = placedSeeds[partnerId];
-      // 1500mm is 3 grid cells.
-      for (let dy = -3; dy <= 3; dy++) {
-        for (let dx = -3; dx <= 3; dx++) {
-          const nx = partnerSeed.x + dx;
-          const ny = partnerSeed.y + dy;
-          if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-            weightMap[ny][nx] *= 50;
+    if (partnerId) {
+      const p = parentPlacements?.[partnerId];
+      if (p) {
+        // 基于真实轮廓外发光 (基于 GRID_SIZE=100)
+        const x0 = Math.floor(p.x / GRID_SIZE);
+        const y0 = Math.floor(p.y / GRID_SIZE);
+        const x1 = Math.ceil((p.x + p.w) / GRID_SIZE);
+        const y1 = Math.ceil((p.y + p.d) / GRID_SIZE);
+
+        const expand = 3; // 向外扩展 3 格 (300mm)
+        for (let y = y0 - expand; y <= y1 + expand; y++) {
+          for (let x = x0 - expand; x <= x1 + expand; x++) {
+            if (x >= 0 && x < width && y >= 0 && y < height) {
+              // 排除掉 partner 内部格子，只提升边缘权重
+              if (x >= x0 && x < x1 && y >= y0 && y < y1) continue;
+              weightMap[y][x] *= 50;
+            }
+          }
+        }
+      } else if (placedSeeds[partnerId]) {
+        // 兜底：若无真实轮廓，退回到中心点扩散
+        const partnerSeed = placedSeeds[partnerId];
+        for (let dy = -3; dy <= 3; dy++) {
+          for (let dx = -3; dx <= 3; dx++) {
+            const nx = partnerSeed.x + dx;
+            const ny = partnerSeed.y + dy;
+            if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+              weightMap[ny][nx] *= 50;
+            }
           }
         }
       }
