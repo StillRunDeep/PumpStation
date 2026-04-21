@@ -9,25 +9,40 @@ export function buildRevitMessage(v) {
   const WALL_THICK = 200
   const GROUND_H = 8500
   const LEVEL1_H = 4000
+  const SLAB_THICK = 300
 
   const rooms = []
   const walls = []
   const doors = []
+  const slabs = []
   let wallIdx = 0
   let doorIdx = 0
 
-  const addRooms = (placements, floor) => {
-    const z = floor === 'ground' ? 0 : GROUND_H
+  const addRoomsAndSlabs = (placements, floor) => {
+    if (!placements || Object.keys(placements).length === 0) return
+
     const height = floor === 'ground' ? GROUND_H : LEVEL1_H
+    const zOffset = 0 // Relative offset from the current level
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+
     Object.entries(placements || {}).forEach(([roomId, p]) => {
       const rid = `${floor}-${roomId}`
-      rooms.push({ id: rid, name: ROOM_DEFS[roomId]?.label || roomId, z })
+      // Optional: Passing the floor level hint
+      rooms.push({ id: rid, name: ROOM_DEFS[roomId]?.label || roomId, level: floor })
       const { x, y, w, d } = p
+
+      // Update floor boundary
+      minX = Math.min(minX, x)
+      minY = Math.min(minY, y)
+      maxX = Math.max(maxX, x + w)
+      maxY = Math.max(maxY, y + d)
+
       ;[
-        { start: { x, y, z },         end: { x: x + w, y,       z } },
-        { start: { x: x + w, y, z },  end: { x: x + w, y: y + d, z } },
-        { start: { x, y: y + d, z },  end: { x: x + w, y: y + d, z } },
-        { start: { x, y, z },         end: { x,         y: y + d, z } },
+        { start: { x, y, z: zOffset },         end: { x: x + w, y,       z: zOffset } },
+        { start: { x: x + w, y, z: zOffset },  end: { x: x + w, y: y + d, z: zOffset } },
+        { start: { x, y: y + d, z: zOffset },  end: { x: x + w, y: y + d, z: zOffset } },
+        { start: { x, y, z: zOffset },         end: { x,         y: y + d, z: zOffset } },
       ].forEach(seg => {
         walls.push({
           id: `wall-${++wallIdx}`,
@@ -39,22 +54,38 @@ export function buildRevitMessage(v) {
         })
       })
     })
+
+    // Add floor slab for this level
+    slabs.push({
+      id: `slab-${floor}`,
+      roomId: Object.keys(placements)[0] ? `${floor}-${Object.keys(placements)[0]}` : '',
+      elevationMm: zOffset,
+      thicknessMm: SLAB_THICK,
+      boundaryMm: [
+        { x: minX, y: minY, z: zOffset },
+        { x: maxX, y: minY, z: zOffset },
+        { x: maxX, y: maxY, z: zOffset },
+        { x: minX, y: maxY, z: zOffset }
+      ]
+    })
   }
 
-  addRooms(v.groundPlacements, 'ground')
-  addRooms(v.level1Placements, 'level1')
+  addRoomsAndSlabs(v.groundPlacements, 'ground')
+  addRoomsAndSlabs(v.level1Placements, 'level1')
 
   if (v.doors) {
     v.doors.forEach(d => {
       const room1Def = ROOM_DEFS[d.rooms[0]]
       const floor = room1Def?.floor || 'ground'
-      const z = floor === 'ground' ? 0 : GROUND_H
+      const zOffset = 0 // Relative offset
       
       const doorCx = d.x
       const doorCy = d.y
       
       const wall = walls.find(w => {
-        if (w.startMm.z !== z) return false
+        // Find matching wall by checking if it belongs to the same floor
+        if (!w.roomId.startsWith(`${floor}-`)) return false
+
         const minX = Math.min(w.startMm.x, w.endMm.x)
         const maxX = Math.max(w.startMm.x, w.endMm.x)
         const minY = Math.min(w.startMm.y, w.endMm.y)
@@ -72,7 +103,7 @@ export function buildRevitMessage(v) {
         wallId: wall ? wall.id : '',
         widthMm: 900,
         heightMm: 2100,
-        locationMm: { x: doorCx, y: doorCy, z }
+        locationMm: { x: doorCx, y: doorCy, z: zOffset }
       })
     })
   }
@@ -86,6 +117,7 @@ export function buildRevitMessage(v) {
       rooms,
       walls,
       doors,
+      slabs,
     },
   }
 }

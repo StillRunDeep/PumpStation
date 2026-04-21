@@ -181,6 +181,7 @@ providing additional boundary polygons in the `openings` array.
 - Vertices must be ordered consistently (CW or CCW).
 - Opening polygons must lie fully within the slab boundary.
 - Multiple openings per slab are supported.
+- **Floor Slabs:** For each level (e.g., Ground, Level 1), a slab is automatically generated to represent the floor. Its boundary matches the overall building outline (bounding box of all rooms on that level) and its elevation is set to the level's base elevation.
 
 ---
 
