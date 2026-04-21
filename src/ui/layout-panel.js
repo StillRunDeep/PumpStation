@@ -13,7 +13,7 @@ import { sendToRevit } from '../layout/export/revit-exporter.js'
 let _variants = []
 let _eliminatedVariants = []
 let _expandedIds = new Set()   // Set of variant IDs currently expanded
-let _showDrawingInList = false; // Our new state variable
+let _showDrawingInList = true; // Our new state variable
 const VW = 1080, VH = 560
 const COL_COUNT = 8
 
