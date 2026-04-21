@@ -711,7 +711,143 @@ function persistCollapseState() {
 document.addEventListener('DOMContentLoaded', () => {
   persistCollapseState();
   initSummaryToggleLogic();
+  initFocusMode();
 });
+
+let isFocusMode = false;
+
+/**
+ * ── Focus Mode (Wizard UI) ──
+ * 1. Single card open at a time.
+ * 2. Non-open cards are hidden when in focus mode.
+ */
+function initFocusMode() {
+  const allCards = document.querySelectorAll('.agent-card');
+  const openCard = Array.from(allCards).find(c => c.open);
+  
+  if (openCard) {
+    isFocusMode = true;
+    document.body.classList.add('focus-mode');
+    document.body.classList.add('has-open-card');
+    // Ensure only one is open
+    allCards.forEach(c => { if (c !== openCard) c.removeAttribute('open'); });
+  }
+
+  // Inject Navigation Bar
+  const navBar = document.createElement('div');
+  navBar.id = 'wizard-nav-bar';
+  navBar.className = 'wizard-nav-bar';
+  navBar.innerHTML = `
+    <button id="btn-wizard-prev">上一步</button>
+    <button id="btn-wizard-next">下一步</button>
+  `;
+  document.body.appendChild(navBar);
+
+  const prevBtn = navBar.querySelector('#btn-wizard-prev');
+  const nextBtn = navBar.querySelector('#btn-wizard-next');
+
+  const updateNav = () => {
+    if (!isFocusMode) {
+      navBar.style.display = 'none';
+      return;
+    }
+    navBar.style.display = 'flex';
+
+    const allCards = Array.from(document.querySelectorAll('.agent-card'));
+    const resultsPanel = document.getElementById('results-panel');
+    const isResultsHidden = resultsPanel ? resultsPanel.hidden : true;
+
+    // Filter visible cards based on parent section visibility
+    const visibleCards = allCards.filter(c => {
+      const parentSection = c.closest('section');
+      if (parentSection && parentSection.id === 'results-panel' && isResultsHidden) return false;
+      return true;
+    });
+
+    const activeCard = visibleCards.find(c => c.open);
+    const currentIndex = activeCard ? visibleCards.indexOf(activeCard) : -1;
+    
+    // 维护 body 状态类，用于 CSS 控制卡片可见性
+    const anyOpen = visibleCards.some(c => c.open);
+    document.body.classList.toggle('has-open-card', anyOpen);
+
+    prevBtn.disabled = currentIndex <= 0;
+    
+    const isEnd = currentIndex === -1 || currentIndex >= visibleCards.length - 1;
+    const isInputCard = activeCard && activeCard.id === 'card-input-wrap';
+
+    if (isEnd && (currentIndex === -1 || (isInputCard && isResultsHidden))) {
+      nextBtn.disabled = false;
+      nextBtn.textContent = '下一步';
+      nextBtn.onclick = () => {
+        document.getElementById('btn-calc').click();
+        // Trigger move after calc unhides panel
+        setTimeout(() => {
+          const updatedVisible = Array.from(document.querySelectorAll('.agent-card')).filter(c => {
+            const p = c.closest('section');
+            return !p || !p.hidden;
+          });
+          if (updatedVisible.length > 1) {
+            activeCard.removeAttribute('open');
+            updatedVisible[1].setAttribute('open', '');
+            updatedVisible[1].scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+          updateNav();
+        }, 350);
+      };
+    } else {
+      nextBtn.disabled = isEnd;
+      nextBtn.textContent = '下一步';
+      nextBtn.onclick = () => {
+        if (!isEnd) {
+          activeCard.removeAttribute('open');
+          visibleCards[currentIndex + 1].setAttribute('open', '');
+          visibleCards[currentIndex + 1].scrollIntoView({ behavior: 'smooth', block: 'start' });
+          updateNav();
+        }
+      };
+    }
+
+    prevBtn.onclick = () => {
+      if (currentIndex > 0) {
+        activeCard.removeAttribute('open');
+        visibleCards[currentIndex - 1].setAttribute('open', '');
+        visibleCards[currentIndex - 1].scrollIntoView({ behavior: 'smooth', block: 'start' });
+        updateNav();
+      }
+    };
+  };
+
+  // Global toggle listener (capture phase) to enforce single open and manage modes
+  document.addEventListener('toggle', (e) => {
+    if (e.target.classList.contains('agent-card')) {
+      const allCards = document.querySelectorAll('.agent-card');
+      const openCards = Array.from(allCards).filter(c => c.open);
+
+      if (e.target.open) {
+        // Just opened a card: Enter focus mode, hide others
+        isFocusMode = true;
+        document.body.classList.add('focus-mode');
+        document.body.classList.add('has-open-card');
+        
+        allCards.forEach(c => {
+          if (c !== e.target && c.open) c.removeAttribute('open');
+        });
+      } else {
+        // Just closed a card: If no cards are left open, exit focus mode (show headers stack)
+        if (openCards.length === 0) {
+          isFocusMode = false;
+          document.body.classList.remove('focus-mode');
+          document.body.classList.remove('has-open-card');
+        }
+      }
+      updateNav();
+    }
+  }, true);
+
+  // Initial call
+  updateNav();
+}
 
 // ── Summary Click Logic (Only triangle triggers toggle) ──
 function initSummaryToggleLogic() {
@@ -723,8 +859,9 @@ function initSummaryToggleLogic() {
     const clickX = e.clientX - rect.left;
 
     // The triangle is within the first 35px. 
-    // If click is further to the right, prevent the default toggle.
-    if (clickX > 35) {
+    // AG-Init is special: allow clicking anywhere on the header to toggle.
+    const isInitCard = summary.closest('#card-input-wrap');
+    if (clickX > 35 && !isInitCard) {
       const targetTag = e.target.tagName.toLowerCase();
       const isInteractive = ['input', 'button', 'label'].includes(targetTag) || e.target.closest('button, label');
       if (!isInteractive) {
