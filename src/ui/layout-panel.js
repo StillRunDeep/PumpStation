@@ -544,19 +544,7 @@ export function refreshDetailRow(variantId, displayVariant, message = null) {
 
 function _syncButtonStates() {
   const optimizeBtn = document.getElementById('btn-ag41-optimize')
-  if (optimizeBtn) optimizeBtn.disabled = _expandedIds.size === 0
-  const mergeBtn = document.getElementById('btn-ag41-merge')
-  if (mergeBtn) {
-    const selectedCount = _expandedIds.size
-    mergeBtn.disabled = selectedCount !== 2
-    if (selectedCount > 2) {
-      mergeBtn.title = '只能选择两个方案进行合并'
-    } else if (selectedCount !== 2) {
-      mergeBtn.title = '请选择两个方案进行合并'
-    } else {
-      mergeBtn.title = ''
-    }
-  }
+  if (optimizeBtn) optimizeBtn.disabled = _variants.length === 0
   _syncFloatingBar()
 }
 
@@ -675,7 +663,7 @@ export function renderLayoutPanel(variants, eliminated = []) {
   const badge = document.getElementById('ag41-badge')
   if (badge) badge.style.display = 'none'
   document.getElementById('card-ag41-wrap').hidden = false
-  ;['btn-ag41-more','btn-ag41-optimize','btn-ag41-merge','btn-ag41-reset'].forEach(id => {
+  ;['btn-ag41-more','btn-ag41-optimize','btn-ag41-reset'].forEach(id => {
     const btn = document.getElementById(id)
     if (btn) btn.hidden = false
   })
@@ -798,7 +786,7 @@ export function rescoreAndRerender() {
 
 // ── Floating action bar ───────────────────────────────────────────────
 
-const FLOAT_BUTTON_IDS = ['btn-ag41-more','btn-ag41-optimize','btn-ag41-merge','btn-ag41-reset']
+const FLOAT_BUTTON_IDS = ['btn-ag41-more','btn-ag41-optimize','btn-ag41-reset']
 let _floatBarObserver = null
 
 function _syncFloatingBar() {

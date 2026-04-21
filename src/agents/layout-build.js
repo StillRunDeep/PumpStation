@@ -213,6 +213,12 @@ export async function runAG41(existingVariants = [], isCancelled = () => false, 
   const results = [];
   let attempts = 0;
 
+  const runParams = {
+    enableAreaSwap: true,
+    bypassCheckpointA: ctx.bypassCheckpointA,
+    schemaLayout: options.schemaLayout || false,
+  };
+
   const pushResult = (layout) => results.push(evaluateTemplate(layout));
 
   // 策略 1: 交叉进化 (Top 10 中选优)
@@ -223,7 +229,7 @@ export async function runAG41(existingVariants = [], isCancelled = () => false, 
     ];
     for (const p of pairs) {
       if (isCancelled()) break;
-      pushResult(generateHybridLayout(p.a, p.b, Math.random() * 1000, ctx, 'Evo', results.length + 1, p.tag));
+      pushResult(generateHybridLayout(p.a, p.b, Math.random() * 1000, ctx, 'Evo', results.length + 1, p.tag, runParams));
       attempts++; await yieldToEventLoop();
     }
   }
@@ -232,7 +238,7 @@ export async function runAG41(existingVariants = [], isCancelled = () => false, 
   if (!options.randomOnly && sorted.length > 0) {
     for (let i = 0; i < Math.min(sorted.length, 3); i++) {
       if (isCancelled()) break;
-      pushResult(generateMutatedLayout(sorted[i], 'unverified_smart', Math.random() * 1000, ctx, 'Exp', results.length + 1, `O${i+1}`));
+      pushResult(generateMutatedLayout(sorted[i], 'unverified_smart', Math.random() * 1000, ctx, 'Exp', results.length + 1, `O${i+1}`, runParams));
       attempts++; await yieldToEventLoop();
     }
   }
@@ -249,10 +255,10 @@ export async function runAG41(existingVariants = [], isCancelled = () => false, 
       if (isCancelled() || results.length >= 9) break;
       const seed = Math.random() * 1000;
       if (ex.parent) {
-        pushResult(generateMutatedLayout(ex.parent, ex.mode, seed, ctx, 'Exp', results.length + 1, ex.tag));
+        pushResult(generateMutatedLayout(ex.parent, ex.mode, seed, ctx, 'Exp', results.length + 1, ex.tag, runParams));
       } else {
         pushResult(timed('generateConstrainedLayout', () => generateConstrainedLayout(seed, ctx.buildingW, ctx.buildingD, ctx.roomTargetAreas,
-          { enableAreaSwap: true, bypassCheckpointA: ctx.bypassCheckpointA }, 'Exp', results.length + 1, ex.tag)));
+          runParams, 'Exp', results.length + 1, ex.tag)));
       }
       attempts++; await yieldToEventLoop();
     }
@@ -261,7 +267,7 @@ export async function runAG41(existingVariants = [], isCancelled = () => false, 
   // 兜底：纯随机补足
   while (results.length < 9 && attempts < 50 && !isCancelled()) {
     pushResult(timed('generateConstrainedLayout', () => generateConstrainedLayout(Math.random() * 1000, ctx.buildingW, ctx.buildingD, ctx.roomTargetAreas,
-      { enableAreaSwap: true, bypassCheckpointA: ctx.bypassCheckpointA }, 'Fill', results.length + 1, 'R')));
+      runParams, 'Fill', results.length + 1, 'R')));
     attempts++; await yieldToEventLoop();
   }
 
@@ -273,7 +279,7 @@ export async function runAG41(existingVariants = [], isCancelled = () => false, 
 /**
  * 变异逻辑：基于父代进行局部修改
  */
-function generateMutatedLayout(parent, mode, seed, ctx, groupId, idx, prefix) {
+function generateMutatedLayout(parent, mode, seed, ctx, groupId, idx, prefix, runParams = {}) {
   const childSeeds = { ground: {}, level1: {} };
   const seedsMeta = { ground: {}, level1: {} };
   
@@ -315,13 +321,13 @@ function generateMutatedLayout(parent, mode, seed, ctx, groupId, idx, prefix) {
   });
 
   return timed('generateConstrainedLayout', () => generateConstrainedLayout(seed, ctx.buildingW, ctx.buildingD, ctx.roomTargetAreas,
-    { enableAreaSwap: true, bypassCheckpointA: ctx.bypassCheckpointA, seedsMeta }, groupId, idx, prefix, childSeeds));
+    { ...runParams, seedsMeta }, groupId, idx, prefix, childSeeds));
 }
 
 /**
  * 杂交逻辑：融合两个父代的优良基因
  */
-function generateHybridLayout(parentA, parentB, seed, ctx, groupId, idx, prefix) {
+function generateHybridLayout(parentA, parentB, seed, ctx, groupId, idx, prefix, runParams = {}) {
   let rngState = seed;
   const rng = () => (rngState = (rngState * 9301 + 49297) % 233280) / 233280;
 
@@ -354,7 +360,7 @@ function generateHybridLayout(parentA, parentB, seed, ctx, groupId, idx, prefix)
   });
 
   return timed('generateConstrainedLayout', () => generateConstrainedLayout(seed, ctx.buildingW, ctx.buildingD, ctx.roomTargetAreas,
-    { enableAreaSwap: true, bypassCheckpointA: ctx.bypassCheckpointA }, groupId, idx, prefix, childSeeds));
+    runParams, groupId, idx, prefix, childSeeds));
 }
 
 /**
@@ -387,4 +393,25 @@ export function computeMutatedLayout(parent) {
   });
 
   return hints;
+}
+
+export async function runPhase3Optimization(variants) {
+  const ctx = await getGenerationContext();
+  const results = [];
+
+  for (const variant of variants) {
+    const runParams = {
+      detailedLayout: true,
+      initialGrid: variant._debug,
+    };
+    const optimized = generateConstrainedLayout(Math.random() * 1000, ctx.buildingW, ctx.buildingD, ctx.roomTargetAreas, runParams, 'Opt', variant.variantIdx, variant.id.slice(0, 3));
+    results.push(evaluateTemplate(optimized));
+  }
+
+  applyCheckpointB(results, ctx);
+  for (const r of results) {
+    Object.assign(r, scoreLayout(r));
+  }
+
+  return results;
 }
