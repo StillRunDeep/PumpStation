@@ -34,7 +34,7 @@ export const HARDCODED_DEFAULTS = {
     trafo1:      60,   // 变压器房 1
     trafo2:      60,   // 变压器房 2
     parking:    150,   // 停车位（最小 150 m²，满足 5.5t 货车）
-    repair_zone: 120,  // 泵房维护间（最小 120 m²，满足三条 DN1000 主管）
+    repair_zone: 400,  // 泵房维护间（最小 120 m²，满足三条 DN1000 主管）
     meter_main:  12,   // 总水表房
     meter_sub:    8,   // 水表房
     fire_equip:  15,   // 消防设备房
