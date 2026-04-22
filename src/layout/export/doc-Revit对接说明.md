@@ -148,6 +148,7 @@
 {
   "id":          "wall-01",
   "roomId":      "ground-trafo1",
+  "levelId":     "ground",
   "startMm":     { "x": 0,    "y": 0, "z": 0 },
   "endMm":       { "x": 5000, "y": 0, "z": 0 },
   "thicknessMm": 200,
@@ -159,6 +160,7 @@
 | :--- | :--- | :--- | :--- |
 | id | string | 是 | 唯一墙体 ID |
 | roomId | string | 是 | 所属房间 ID |
+| levelId | string | 是 | 关联的标高 ID |
 | startMm | Point3 | 是 | 墙体起点 (mm) |
 | endMm | Point3 | 是 | 墙体终点 (mm) |
 | thicknessMm | number | 是 | 墙体厚度 (mm) |
@@ -170,6 +172,7 @@
 {
   "id":         "door-01",
   "wallId":     "wall-01",
+  "levelId":    "ground",
   "widthMm":    900,
   "heightMm":   2100,
   "locationMm": { "x": 2500, "y": 0, "z": 0 }
@@ -180,6 +183,7 @@
 | :--- | :--- | :--- | :--- |
 | id | string | 是 | 唯一门 ID |
 | wallId | string | 是 | 宿主墙体 ID |
+| levelId | string | 是 | 关联的标高 ID |
 | widthMm | number | 是 | 门宽度 (mm) |
 | heightMm | number | 是 | 门高度 (mm) |
 | locationMm | Point3 | 是 | 在墙体上的插入点 (mm)，Z 为 Sill Height |
@@ -221,10 +225,11 @@
 
 - **坐标系:** 统一使用毫米 (mm)。
 - **显式标高定义:** 传输协议中通过 `levels` 数组显式定义各楼层的绝对高度，避免 Revit 插件预定义的硬编码错误。
+- **构件标高明确性:** 所有构件（Room、Wall、Door、Slab）都必须包含 `levelId` 属性，用于精确指定其所属的楼层。
 - **相对高程 (Relative Z-Offset):** 所有几何元素（墙体、楼板、门）的 Z 坐标均相对于其所在房间关联的标高。目前默认偏移量均为 `0`。
-- **标高分配:** 插件应根据 `levels` 定义在 Revit 中创建或匹配标高，并根据房间对象的 `levelId` 将其及下属构件分配到对应的标高上。
+- **标高分配:** 插件应根据 `levels` 定义在 Revit 中创建或匹配标高，并根据各构件对象的 `levelId` 将其分配到对应的标高上。
 - **楼板生成:** 每一层会自动生成一个楼板，其边界 `boundaryMm` 为该层所有房间的最小外接矩形（Bounding Box）。
-- **门墙匹配:** 门与其宿主墙的关联必须保证在同一楼层（通过 `roomId` 前缀校验）。
+- **门墙匹配:** 门与其宿主墙的关联必须保证在同一楼层（通过 `levelId` 校验）。
 
 ---
 
