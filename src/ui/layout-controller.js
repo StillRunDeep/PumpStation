@@ -64,13 +64,6 @@ export function initLayoutController() {
       btn.textContent = '生成方案'
       showAg41Notify('已停止生成', false)
     } else {
-      const variants = getVariants();
-      const top9 = variants.slice(0, 9);
-      if (top9.length === 9 && top9.every(v => v.checkpointADiagnostic?.passes)) {
-        showAg41Notify('方案已生成，请重置方案', false);
-        return;
-      }
-
       schemaLayout = true;
       detailedLayout = false;
       isGeneratingLayouts = true
@@ -84,16 +77,6 @@ export function initLayoutController() {
           if (newRaw === null) { isGeneratingLayouts = false; btn.textContent = '生成方案'; return }
           applyLayoutResult(newRaw, existing, false)
 
-          const variants = getVariants();
-          const top9 = variants.slice(0, 9);
-          if (schemaLayout && top9.length === 9 && top9.every(v => v.checkpointADiagnostic?.passes)) {
-            isGeneratingLayouts = false;
-            schemaLayout = false;
-            if (generationReqId) { cancelAnimationFrame(generationReqId); generationReqId = null; }
-            btn.textContent = '生成方案';
-            showAg41Notify('已生成9个通过检查点的草图，自动停止', true);
-            return;
-          }
         } catch (error) {
           console.error('layout generation error:', error)
           showAg41Notify('生成新方案时出错', false)

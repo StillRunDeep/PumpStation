@@ -307,17 +307,19 @@ Step 4  房间放置（Room Placement）
 
 ## 运行模式控制
 
-生成引擎通过两个核心变量控制算法阶段的执行：
+生成引擎通过两个核心变量**直接控制算法阶段的执行**，独立于Checkpoint评估结果：
 
-| 变量 | 说明 | 控制范围 |
-|------|------|--------|
-| `schemaLayout` | **真** = 执行阶段1（架构/模式），**假** = 跳过 | Phase 1：全局矩形扩展 |
-| `detailedLayout` | **真** = 执行阶段2+3（细化与优化），**假** = 跳过 | Phase 2：L/U扩展 + Phase 3：边界优化 |
+| 变量 | 含义 | 行为 |
+|------|------|------|
+| `schemaLayout` | 是否执行阶段1 | `true` = 执行矩形扩展获取基础架构；`false` = 跳过 |
+| `detailedLayout` | 是否执行阶段2+3 | `true` = 执行L/U扩展与边界优化；`false` = 跳过 |
+
+**关键说明：** 这两个变量仅控制**是否执行相应算法阶段**，不受Checkpoint通过/失败的影响。即使Checkpoint A失败，若 `detailedLayout=true`，仍会尝试执行阶段2+3（但输出可能反映失败状态）。
 
 **典型运行模式：**
-- `schemaLayout=true, detailedLayout=true`：完整流程（默认生成）
-- `schemaLayout=true, detailedLayout=false`：仅获得粗架构（快速排版）
-- `schemaLayout=false, detailedLayout=true`：基于已有架构进行细化（用于选定方案的优化）
+- `schemaLayout=true, detailedLayout=true`：完整流程（默认生成，包含三个阶段）
+- `schemaLayout=true, detailedLayout=false`：快速排版模式（仅矩形架构，跳过细化优化）
+- `schemaLayout=false, detailedLayout=true`：精细优化模式（跳过初始架构，基于已有网格进行细化）
 
 ---
 
@@ -325,14 +327,15 @@ Step 5  阶段1（Stage1） — 全局矩形扩展
         （执行条件：`schemaLayout === true`）
         所有房间优先且仅允许进行矩形扩展，直到达到建筑轮廓边界极限/或者“实际目标面积”极限。
 
-        ▼ 检查点 A（硬性功能红线过滤门）
+        ▼ 检查点 A（硬性功能红线评估，内部机制）
 Step 5A 矩形扩展结束后，对当前网格快照调用 评价.md中**第一梯队**评价函数，逐方案评价：
         • computeMissingRoomsPenalty()       —— 缺失房间
         • computeRelaxedDoorAccess()        —— 可达性违规（宽松）
         • violations 计算（宽松）             —— MUST 约束违反（宽松）
         检查点A通过条件：三项惩罚之和 = 0（即硬性红线全部满足，无任何扣分）。
-        - 通过 → 方案进入 Step 6（Stage2:L/U 形扩展）
-        - 未通过 → 按照阶段1生长结果直接进行整体评分，并参与排名，UI debug 视图"未通过checkpointA，未执行"；预留了调试用的“跳过检查点A”的check box，选中时默认检查点A检查结果通过。
+        
+        **说明：** Checkpoint A 结果仅用于评分和UI展示质量状态，不控制是否进入阶段2。
+        进入阶段2的决策完全由 `detailedLayout` 变量决定（见”运行模式控制”）。
 
         **Checkpoint A 宽松逻辑（空白区域虚拟桥接）：**
         可达性违规与 MUST 邻接违规在算法层面保持一致，均允许通过空白区域作为虚拟中间节点来满足。
@@ -349,8 +352,9 @@ Step 5A 矩形扩展结束后，对当前网格快照调用 评价.md中**第一
         对 doorAccess 和 must_adjacent 违规均不作虚拟桥接处理，确保最终输出方案为真实满足。
 
 Step 6  阶段 2（Stage2） — L/U 形填补扩展
-        （执行条件：`detailedLayout === true` 且通过 Checkpoint A）
-        通过检查点 A 的方案，才会进入非矩形扩展。
+        （执行条件：`detailedLayout === true`）
+        
+        **说明：** 阶段2的执行仅由 `detailedLayout` 变量决定，与 Checkpoint A 的通过/失败无关。
         
 Step 6A L/U 生长（有面积约束）
         所有房间仅允许进行L/U形扩展，填补剩余空间，直到达到边界极限/“实际目标面积”极限/受 8 顶点形态约束。
@@ -389,7 +393,9 @@ Step 6B L/U 生长（无面积约束）
 
 
 Step 7  阶段 3 — 边界优化（Phase 3 Optimization）
-        （执行条件：`detailedLayout === true` 且通过 Checkpoint B）
+        （执行条件：`detailedLayout === true`）
+        
+        **说明：** 阶段3的执行仅由 `detailedLayout` 变量决定，与 Checkpoint B 的通过/失败无关。
 
 Step 7a 边界清理与空隙填充（原 fillGaps）
         消除锯齿，将剩余空格分配给相邻房间。
