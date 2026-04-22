@@ -176,31 +176,6 @@ export async function optimizeVariant(parent) {
   return candidate;
 }
 
-/**
- * 合并两个方案
- */
-export async function generateMergedLayout(variantA, variantB) {
-  const ctx = await getGenerationContext();
-
-  const makeCandidate = (g, l) => evaluateTemplate({
-    buildingW: g.buildingW, buildingD: g.buildingD,
-    groundPlacements: { ...g.groundPlacements },
-    level1Placements: { ...l.level1Placements },
-    _debug: {},
-    checkpointABypassed: g.checkpointABypassed || l.checkpointABypassed,
-  });
-
-  const c1 = makeCandidate(variantA, variantB);
-  const c2 = makeCandidate(variantB, variantA);
-  applyCheckpointB([c1, c2], ctx);
-  
-  const best = c1.score >= c2.score ? c1 : c2;
-  Object.assign(best, scoreLayout(best), {
-    id: `M-${Date.now().toString(36).toUpperCase()}`,
-    label: `合并(${variantA.id}+${variantB.id})`
-  });
-  return best;
-}
 
 /**
  * 运行全量布局生成流程

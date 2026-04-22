@@ -869,7 +869,7 @@ function initSummaryToggleLogic() {
 document.getElementById('btn-rainfall-recalc').addEventListener('click', recalcRainfall)
 document.getElementById('btn-rainfall-downstream').addEventListener('click', runFromRainfall)
 
-// Keyboard shortcut for bypassing Checkpoint A
+// Keyboard shortcut for window.debugModeEnabled
 window.addEventListener('keydown', (e) => {
   if (e.ctrlKey && e.key.toLowerCase() === 'b') {
     e.preventDefault();
