@@ -76,10 +76,11 @@ export function initLayoutController() {
       btn.textContent = '停止生成'
 
       const existing = getVariants();
-      const allQualified = existing.length > 0 && existing.every(isQualifiedVariant);
+      const top9 = existing.slice(0, 9);
+      const top9areQualified = top9.length > 0 && top9.every(isQualifiedVariant);
 
-      if (allQualified && existing.length >= 9) {
-        showAg41Notify('所有方案均已合格，无需生成更多', true);
+      if (top9.length >= 9 && top9areQualified) {
+        showAg41Notify('排名前9的方案均已合格，无需生成更多', true);
         isGeneratingLayouts = false;
         btn.textContent = '生成方案';
         return;
@@ -94,11 +95,12 @@ export function initLayoutController() {
           applyLayoutResult(newRaw, existing, false)
 
           const currentVariants = getVariants();
-          const qualifiedCount = currentVariants.filter(isQualifiedVariant).length;
-          if (qualifiedCount >= 9) {
+          const top9 = currentVariants.slice(0, 9);
+          const top9areQualified = top9.length > 0 && top9.every(isQualifiedVariant);
+          if (top9.length >= 9 && top9areQualified) {
             isGeneratingLayouts = false;
             btn.textContent = '生成方案';
-            showAg41Notify('已生成9个合格方案，停止自动生成', true);
+            showAg41Notify('排名前9的方案均已合格，停止自动生成', true);
             return;
           }
 
