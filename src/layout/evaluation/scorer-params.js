@@ -110,7 +110,7 @@ export const DEFAULT_SCORER_PARAMS = {
   doorAccessPenalty:      3000,
   missingRoomPenalty:     3000,
   aspectRatioThreshold:   4,
-  aspectRatioPenalty:     1500,
+  aspectRatioPenalty:     1000,
   utilizationThreshold:   0.70,
   utilizationStep:        0.15,
   vertexThreshold:        6,
