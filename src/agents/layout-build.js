@@ -11,7 +11,6 @@ import { scoreLayout, scoreSpatialQuality } from '../layout/evaluation/scorer.js
  * @property {number} gridW
  * @property {number} gridH
  * @property {Object} roomTargetAreas
- * @property {boolean} bypassCheckpointA
  */
 
 // --- 基础辅助工具 ---
@@ -52,8 +51,7 @@ async function getGenerationContext() {
   return {
     ...params,
     gridW: Math.floor(params.buildingW / GRID_SIZE),
-    gridH: Math.floor(params.buildingD / GRID_SIZE),
-    bypassCheckpointA: window.debugModeEnabled
+    gridH: Math.floor(params.buildingD / GRID_SIZE)
   };
 }
 
@@ -215,8 +213,8 @@ export async function runAG41(existingVariants = [], isCancelled = () => false, 
 
   const runParams = {
     enableAreaSwap: true,
-    bypassCheckpointA: ctx.bypassCheckpointA,
     schemaLayout: options.schemaLayout || false,
+    detailedLayout: options.detailedLayout !== false, // Default to true unless explicitly set to false
   };
 
   const pushResult = (layout) => results.push(evaluateTemplate(layout));

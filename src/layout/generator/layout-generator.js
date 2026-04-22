@@ -2474,14 +2474,11 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     : { ...evaluated, violations: violationsWithDebug };
   let checkpointADiagnostic = evaluateCheckpointA(relaxedEvaluated, relaxedDoorAccess);
 
-  // If bypassing, force the diagnostic to 'pass' so the UI doesn't show a failure state
-  // that the user explicitly chose to ignore.
-  if (bypassCheckpointA) {
-    checkpointADiagnostic = { ...checkpointADiagnostic, passes: true };
-  }
+  // Phase 2+3 execution control: skipped if detailedLayout is false OR Checkpoint A fails
+  // (unless bypassCheckpointA is set for backward compatibility)
+  const skipPhase2And3 = !detailedLayout || (!checkpointADiagnostic.passes && !bypassCheckpointA);
 
-  // If the layout fails Checkpoint A, skip expensive Phase 2/3 growth
-  if (!checkpointADiagnostic.passes) {
+  if (skipPhase2And3) {
     // Split super-rooms before finalizing
     splitAllSuperRooms(groundGridAfterRect, groundSuperRoomMap);
     splitAllSuperRooms(level1GridAfterRect, level1SuperRoomMap);
@@ -2531,7 +2528,10 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
   const checkpointBDiagnostic = scoreSpatialQuality(evaluatedB);
   const CHECKPOINT_B_THRESHOLD = -1000; // 总惩罚绝对值 < 1000 才通过
 
-  if (checkpointBDiagnostic.partialScore < CHECKPOINT_B_THRESHOLD) {
+  // Phase 3 execution control: skipped if detailedLayout is false OR Checkpoint B fails
+  const skipPhase3 = !detailedLayout || (checkpointBDiagnostic.partialScore < CHECKPOINT_B_THRESHOLD);
+
+  if (skipPhase3) {
     // 不通过 → 直接用 Phase 2 结果参与排名，跳过 Step 6B（无面积约束生长）与 Phase 3
     // Split super-rooms before finalizing
     splitAllSuperRooms(groundGridBeforeGaps, groundSuperRoomMap);

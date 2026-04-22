@@ -305,7 +305,24 @@ Step 4  房间放置（Room Placement）
         然后按面积比例（大房间优先）逐一选取房间，加权随机初始位置；
         若邻接约束未被满足，则重置重试（最多 20 次）。
 
+## 运行模式控制
+
+生成引擎通过两个核心变量控制算法阶段的执行：
+
+| 变量 | 说明 | 控制范围 |
+|------|------|--------|
+| `schemaLayout` | **真** = 执行阶段1（架构/模式），**假** = 跳过 | Phase 1：全局矩形扩展 |
+| `detailedLayout` | **真** = 执行阶段2+3（细化与优化），**假** = 跳过 | Phase 2：L/U扩展 + Phase 3：边界优化 |
+
+**典型运行模式：**
+- `schemaLayout=true, detailedLayout=true`：完整流程（默认生成）
+- `schemaLayout=true, detailedLayout=false`：仅获得粗架构（快速排版）
+- `schemaLayout=false, detailedLayout=true`：基于已有架构进行细化（用于选定方案的优化）
+
+---
+
 Step 5  阶段1（Stage1） — 全局矩形扩展
+        （执行条件：`schemaLayout === true`）
         所有房间优先且仅允许进行矩形扩展，直到达到建筑轮廓边界极限/或者“实际目标面积”极限。
 
         ▼ 检查点 A（硬性功能红线过滤门）
@@ -332,6 +349,7 @@ Step 5A 矩形扩展结束后，对当前网格快照调用 评价.md中**第一
         对 doorAccess 和 must_adjacent 违规均不作虚拟桥接处理，确保最终输出方案为真实满足。
 
 Step 6  阶段 2（Stage2） — L/U 形填补扩展
+        （执行条件：`detailedLayout === true` 且通过 Checkpoint A）
         通过检查点 A 的方案，才会进入非矩形扩展。
         
 Step 6A L/U 生长（有面积约束）
@@ -371,6 +389,7 @@ Step 6B L/U 生长（无面积约束）
 
 
 Step 7  阶段 3 — 边界优化（Phase 3 Optimization）
+        （执行条件：`detailedLayout === true` 且通过 Checkpoint B）
 
 Step 7a 边界清理与空隙填充（原 fillGaps）
         消除锯齿，将剩余空格分配给相邻房间。
