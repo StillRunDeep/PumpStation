@@ -75,6 +75,16 @@ export function initLayoutController() {
       isGeneratingLayouts = true
       btn.textContent = '停止生成'
 
+      const existing = getVariants();
+      const allQualified = existing.length > 0 && existing.every(isQualifiedVariant);
+
+      if (allQualified && existing.length >= 9) {
+        showAg41Notify('所有方案均已合格，无需生成更多', true);
+        isGeneratingLayouts = false;
+        btn.textContent = '生成方案';
+        return;
+      }
+
       const generationLoop = async () => {
         if (!isGeneratingLayouts) { btn.textContent = '生成方案'; return }
         try {
