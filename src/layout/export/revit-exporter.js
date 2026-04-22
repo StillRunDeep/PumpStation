@@ -47,6 +47,7 @@ export function buildRevitMessage(v) {
         walls.push({
           id: `wall-${++wallIdx}`,
           roomId: rid,
+          levelId: floor,
           startMm: seg.start,
           endMm: seg.end,
           thicknessMm: WALL_THICK,
@@ -102,6 +103,7 @@ export function buildRevitMessage(v) {
       doors.push({
         id: `door-${++doorIdx}`,
         wallId: wall ? wall.id : '',
+        levelId: floor,
         widthMm: 900,
         heightMm: 2100,
         locationMm: { x: doorCx, y: doorCy, z: zOffset }
