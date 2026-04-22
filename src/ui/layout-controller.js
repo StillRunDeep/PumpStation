@@ -8,11 +8,17 @@ import {
 import { renderBuildingParamsPanel } from './building-params-panel.js'
 import { getDefaultUserParams } from '../layout/model/user-params.js'
 import { SCORER_PARAMS } from '../layout/evaluation/scorer-params.js'
+import { scoreLayout, scoreHardRedlines } from '../layout/evaluation/scorer.js'
 
 let schemaLayout = true;
 let detailedLayout = false;
 let isGeneratingLayouts = false;
 let generationReqId = null;
+
+function isQualifiedVariant(variant) {
+  const hardRedlinesResult = scoreHardRedlines(variant);
+  return hardRedlinesResult.passes === true;
+}
 
 /**
  * 统一的布局生成结果处理：
@@ -37,7 +43,7 @@ function applyLayoutResult(newRaw, existing, isReset = false) {
 }
 
 export async function generateInitialLayouts() {
-  const ag41Variants = await runAG41()
+  const ag41Variants = await runAG41([], () => false, { detailedLayout: false })
   applyLayoutResult(ag41Variants, [], true)
 }
 
@@ -73,9 +79,18 @@ export function initLayoutController() {
         if (!isGeneratingLayouts) { btn.textContent = '生成方案'; return }
         try {
           const existing = getVariants()
-          const newRaw = await runAG41(existing, () => !isGeneratingLayouts, { schemaLayout: schemaLayout })
+          const newRaw = await runAG41(existing, () => !isGeneratingLayouts, { schemaLayout: schemaLayout, detailedLayout: false })
           if (newRaw === null) { isGeneratingLayouts = false; btn.textContent = '生成方案'; return }
           applyLayoutResult(newRaw, existing, false)
+
+          const currentVariants = getVariants();
+          const qualifiedCount = currentVariants.filter(isQualifiedVariant).length;
+          if (qualifiedCount >= 9) {
+            isGeneratingLayouts = false;
+            btn.textContent = '生成方案';
+            showAg41Notify('已生成9个合格方案，停止自动生成', true);
+            return;
+          }
 
         } catch (error) {
           console.error('layout generation error:', error)
@@ -126,7 +141,7 @@ export function initLayoutController() {
     btn.disabled = true
     btn.textContent = '生成中…'
     try {
-      const newRaw = await runAG41([]) 
+      const newRaw = await runAG41([], () => false, { detailedLayout: false }) 
       applyLayoutResult(newRaw, [], true)
     } finally {
       btn.disabled = false
