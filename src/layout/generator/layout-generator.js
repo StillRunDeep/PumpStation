@@ -533,7 +533,7 @@ function getRoomMinCrossWidth(grid, roomId) {
   return minW === Infinity ? 0 : minW;
 }
 
-const CORRIDOR_MIN_WIDTH_CELLS = 3; // 3 × 500mm = 1500mm
+const CORRIDOR_MIN_WIDTH_CELLS = 5; // 5 × 500mm = 2500mm
 
 function findBestRectangleExpansion(grid, roomId, preferElongated = false, preferredDir = null) {
   const bbox = grid.getBoundingBox(roomId);
