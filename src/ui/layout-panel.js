@@ -100,15 +100,14 @@ export function renderScorerParamsPanel(params) {
 
 function renderComparisonTable(variants) {
   const rows = variants.map((v, i) => {
-    const cp = v.checkpointADiagnostic || {}
-    const mustSat = cp.mustAdjacency?.satisfied ?? (v.adjacency?.satisfied || []).filter(a => a.type === 'must').length
-    const mustTot = cp.mustAdjacency?.total ?? mustSat + (v.adjacency?.violated || []).filter(a => a.type === 'must').length
+    const mustSat = (v.adjacency?.satisfied || []).filter(a => a.type === 'must').length
+    const mustTot = mustSat + (v.adjacency?.violated || []).filter(a => a.type === 'must').length
     const uniqueViolations = (v.violations || []).filter(err => err.constraint !== 'must_adjacent' && err.constraint !== 'ext_access')
     const violCount = uniqueViolations.length
     const violCell = violCount === 0 ? `<span style="color:#27ae60">✓</span>` : `<span style="color:#c0392b">⚠ ${violCount}</span>`
-    const daCount = cp.doorAccessCount ?? v.breakdown?.doorAccessCount ?? 0
+    const daCount = v.breakdown?.doorAccessCount ?? 0
     const daCell = daCount === 0 ? `<span style="color:#27ae60">✓</span>` : `<span style="color:#c0392b;font-weight:700">⚠ ${daCount}</span>`
-    const eff  = cp.spaceEfficiency != null ? (cp.spaceEfficiency * 100).toFixed(1) + '%' : (v.spaceEfficiency != null ? (v.spaceEfficiency * 100).toFixed(1) + '%' : '—')
+    const eff  = v.spaceEfficiency != null ? (v.spaceEfficiency * 100).toFixed(1) + '%' : '—'
     const rowBg = i % 2 === 0 ? '#f8fafc' : '#fff'
 
     const solutionCellContent = _showDrawingInList
@@ -178,15 +177,13 @@ function _renderEliminatedSection() {
   if (!show) { container.innerHTML = ''; _selectedElimIdx = -1; return }
 
   const rows = _eliminatedVariants.map((v, i) => {
-    const cp = v.checkpointADiagnostic || {}
-    const mustSat = cp.mustAdjacency?.satisfied ?? 0
-    const mustTot = cp.mustAdjacency?.total ?? mustSat
-    const daCount = cp.doorAccessCount ?? v.breakdown?.doorAccessCount ?? 0
+    const mustSat = 0
+    const mustTot = 0
+    const daCount = v.breakdown?.doorAccessCount ?? 0
     const daCell = daCount === 0
       ? `<span style="color:#27ae60">✓</span>`
       : `<span style="color:#c0392b;font-weight:700">⚠ ${daCount}</span>`
-    const eff = cp.spaceEfficiency != null ? (cp.spaceEfficiency * 100).toFixed(1) + '%'
-      : (v.spaceEfficiency != null ? (v.spaceEfficiency * 100).toFixed(1) + '%' : '—')
+    const eff = v.spaceEfficiency != null ? (v.spaceEfficiency * 100).toFixed(1) + '%' : '—'
     const isSelected = i === _selectedElimIdx
     const rowBg = isSelected ? '#e8f4f8' : (i % 2 === 0 ? '#f8fafc' : '#fff')
     const borderLeft = isSelected ? 'border-left:4px solid #5d6d7e' : 'border-left:4px solid transparent'
@@ -233,19 +230,14 @@ function insertEliminatedDetailRow(idx) {
   const breakdownHtml = buildBreakdownHtml(v)
   const title = `方案 ${v.id}：${v.label}  —  得分 ${v.score}`
 
-  const failedA = !v.checkpointADiagnostic?.passes
-  const failedB = !failedA && v.checkpointBDiagnostic?.partialScore < -1000
+  const detailedDisabled = v.detailedLayout === false
   const renderFloorRow = (floor) => {
     const debugData = v._debug?.[floor] ?? {}
     const movementHints = window.debugModeEnabled ? (v._debug?.[floor]?.movementHints ?? null) : null
     const finalView = `<svg viewBox="0 0 240 180" style="background:#f4f6f8">${renderLayoutSVG(v, floor, 240, 180, { showDims: false })}</svg>`
-    const bypassed = v.checkpointABypassed
-    const stage3 = bypassed ? '<span class="skipped-text">用户跳过</span>'
-      : failedA ? '<span class="skipped-text">未通过红线，未执行</span>'
-      : failedB ? '<span class="skipped-text">未通过检查点B，未执行</span>'
+    const stage3 = detailedDisabled ? '<span class="pending-text">尚未执行</span>'
       : (debugData.gridAfterGaps ? renderDebugGrid({ grid: debugData.gridAfterGaps, seeds: debugData.seeds, movementHints }, 200, 150) : '无数据')
-    const stage2 = bypassed ? '<span class="skipped-text">用户跳过</span>'
-      : failedA ? '<span class="skipped-text">未通过红线，未执行</span>'
+    const stage2 = detailedDisabled ? '<span class="pending-text">尚未执行</span>'
       : (debugData.gridBeforeGaps ? renderDebugGrid({ grid: debugData.gridBeforeGaps, seeds: debugData.seeds, movementHints }, 200, 150) : '无数据')
     const stage1 = debugData.gridAfterRect ? renderDebugGrid({ grid: debugData.gridAfterRect, seeds: debugData.seeds, movementHints }, 200, 150) : '无数据'
     return `
@@ -282,6 +274,7 @@ function insertEliminatedDetailRow(idx) {
           .grid-cell.final-view { background:#f4f6f8; }
           .grid-cell.debug-view svg { width:100%;height:100%; }
           .skipped-text { font-size:11px;color:#95a5a6;font-style:italic; }
+          .pending-text { font-size:11px;color:#b0b0b0;font-style:italic; }
         </style>
       </td>
     </tr>`
@@ -433,20 +426,15 @@ function _revitButtonHtml() {
 // showing a candidate (failed optimization) without replacing the stored variant.
 function _buildDetailInnerHtml(v, message = null, debugVariant = null) {
   const dv = debugVariant || v
-  const failedA = !dv.checkpointADiagnostic?.passes
-  const failedB = !failedA && dv.checkpointBDiagnostic?.partialScore < -1000
+  const detailedDisabled = dv.detailedLayout === false
   const renderFloorRow = (floor) => {
     const debugData = dv._debug?.[floor] ?? {}
     const seedsMeta = dv._debug?.[floor]?.seedsMeta ?? null
     const movementHints = dv._debug?.[floor]?.movementHints ?? null
     const finalView = `<svg viewBox="0 0 240 180" style="background:#f4f6f8">${renderLayoutSVG(v, floor, 240, 180, { showDims: false })}</svg>`
-    const bypassed = dv.checkpointABypassed
-    const stage3 = bypassed ? '<span class="skipped-text">用户跳过</span>'
-      : failedA ? '<span class="skipped-text">未通过红线，未执行</span>'
-      : failedB ? '<span class="skipped-text">未通过检查点B，未执行</span>'
+    const stage3 = detailedDisabled ? '<span class="pending-text">尚未执行</span>'
       : (debugData.gridAfterGaps ? renderDebugGrid({ grid: debugData.gridAfterGaps, seeds: debugData.seeds, seedsMeta, movementHints }, 200, 150) : '无数据')
-    const stage2 = bypassed ? '<span class="skipped-text">用户跳过</span>'
-      : failedA ? '<span class="skipped-text">未通过红线，未执行</span>'
+    const stage2 = detailedDisabled ? '<span class="pending-text">尚未执行</span>'
       : (debugData.gridBeforeGaps ? renderDebugGrid({ grid: debugData.gridBeforeGaps, seeds: debugData.seeds, seedsMeta, movementHints }, 200, 150) : '无数据')
     const stage1 = debugData.gridAfterRect ? renderDebugGrid({ grid: debugData.gridAfterRect, seeds: debugData.seeds, seedsMeta, movementHints }, 200, 150) : '无数据'
     return `

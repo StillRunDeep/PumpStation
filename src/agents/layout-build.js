@@ -11,7 +11,6 @@ import { scoreLayout, scoreSpatialQuality } from '../layout/evaluation/scorer.js
  * @property {number} gridW
  * @property {number} gridH
  * @property {Object} roomTargetAreas
- * @property {boolean} bypassCheckpointA
  */
 
 // --- 基础辅助工具 ---
@@ -52,8 +51,7 @@ async function getGenerationContext() {
   return {
     ...params,
     gridW: Math.floor(params.buildingW / GRID_SIZE),
-    gridH: Math.floor(params.buildingD / GRID_SIZE),
-    bypassCheckpointA: window.debugModeEnabled
+    gridH: Math.floor(params.buildingD / GRID_SIZE)
   };
 }
 
@@ -178,31 +176,6 @@ export async function optimizeVariant(parent) {
   return candidate;
 }
 
-/**
- * 合并两个方案
- */
-export async function generateMergedLayout(variantA, variantB) {
-  const ctx = await getGenerationContext();
-
-  const makeCandidate = (g, l) => evaluateTemplate({
-    buildingW: g.buildingW, buildingD: g.buildingD,
-    groundPlacements: { ...g.groundPlacements },
-    level1Placements: { ...l.level1Placements },
-    _debug: {},
-    checkpointABypassed: g.checkpointABypassed || l.checkpointABypassed,
-  });
-
-  const c1 = makeCandidate(variantA, variantB);
-  const c2 = makeCandidate(variantB, variantA);
-  applyCheckpointB([c1, c2], ctx);
-  
-  const best = c1.score >= c2.score ? c1 : c2;
-  Object.assign(best, scoreLayout(best), {
-    id: `M-${Date.now().toString(36).toUpperCase()}`,
-    label: `合并(${variantA.id}+${variantB.id})`
-  });
-  return best;
-}
 
 /**
  * 运行全量布局生成流程
@@ -212,11 +185,12 @@ export async function runAG41(existingVariants = [], isCancelled = () => false, 
   const sorted = [...existingVariants].sort((a, b) => b.score - a.score);
   const results = [];
   let attempts = 0;
+  const maxVariantIdx = existingVariants.reduce((max, v) => Math.max(max, v.variantIdx || 0), 0);
 
   const runParams = {
     enableAreaSwap: true,
-    bypassCheckpointA: ctx.bypassCheckpointA,
     schemaLayout: options.schemaLayout || false,
+    detailedLayout: options.detailedLayout !== false, // Default to true unless explicitly set to false
   };
 
   const pushResult = (layout) => results.push(evaluateTemplate(layout));
@@ -229,7 +203,7 @@ export async function runAG41(existingVariants = [], isCancelled = () => false, 
     ];
     for (const p of pairs) {
       if (isCancelled()) break;
-      pushResult(generateHybridLayout(p.a, p.b, Math.random() * 1000, ctx, 'Evo', results.length + 1, p.tag, runParams));
+      pushResult(generateHybridLayout(p.a, p.b, Math.random() * 1000, ctx, 'Evo', maxVariantIdx + results.length + 1, p.tag, runParams));
       attempts++; await yieldToEventLoop();
     }
   }
@@ -238,7 +212,7 @@ export async function runAG41(existingVariants = [], isCancelled = () => false, 
   if (!options.randomOnly && sorted.length > 0) {
     for (let i = 0; i < Math.min(sorted.length, 3); i++) {
       if (isCancelled()) break;
-      pushResult(generateMutatedLayout(sorted[i], 'unverified_smart', Math.random() * 1000, ctx, 'Exp', results.length + 1, `O${i+1}`, runParams));
+      pushResult(generateMutatedLayout(sorted[i], 'unverified_smart', Math.random() * 1000, ctx, 'Exp', maxVariantIdx + results.length + 1, `O${i+1}`, runParams));
       attempts++; await yieldToEventLoop();
     }
   }
@@ -255,10 +229,10 @@ export async function runAG41(existingVariants = [], isCancelled = () => false, 
       if (isCancelled() || results.length >= 9) break;
       const seed = Math.random() * 1000;
       if (ex.parent) {
-        pushResult(generateMutatedLayout(ex.parent, ex.mode, seed, ctx, 'Exp', results.length + 1, ex.tag, runParams));
+        pushResult(generateMutatedLayout(ex.parent, ex.mode, seed, ctx, 'Exp', maxVariantIdx + results.length + 1, ex.tag, runParams));
       } else {
         pushResult(timed('generateConstrainedLayout', () => generateConstrainedLayout(seed, ctx.buildingW, ctx.buildingD, ctx.roomTargetAreas,
-          runParams, 'Exp', results.length + 1, ex.tag)));
+          runParams, 'Exp', maxVariantIdx + results.length + 1, ex.tag)));
       }
       attempts++; await yieldToEventLoop();
     }
@@ -267,7 +241,7 @@ export async function runAG41(existingVariants = [], isCancelled = () => false, 
   // 兜底：纯随机补足
   while (results.length < 9 && attempts < 50 && !isCancelled()) {
     pushResult(timed('generateConstrainedLayout', () => generateConstrainedLayout(Math.random() * 1000, ctx.buildingW, ctx.buildingD, ctx.roomTargetAreas,
-      runParams, 'Fill', results.length + 1, 'R')));
+      runParams, 'Fill', maxVariantIdx + results.length + 1, 'R')));
     attempts++; await yieldToEventLoop();
   }
 

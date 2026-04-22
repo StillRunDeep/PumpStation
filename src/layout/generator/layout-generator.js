@@ -2321,7 +2321,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
 
     return {
       id: `${prefix}-${groupId}-${variantIdx}`,
-      label: `约束生长法 (优化)`,
+      label: `约束生长法`,
       desc: `建筑 ${(alignedBW / 1000).toFixed(1)}m×${(alignedBD / 1000).toFixed(1)}m`,
       groundPlacements: finalLayout.ground,
       level1Placements: finalLayout.level1,
@@ -2330,7 +2330,8 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
       groupId,
       variantIdx,
       _debug: { ...debugInfo, ground: { ...debugInfo.ground, gridAfterGaps: groundGrid }, level1: { ...debugInfo.level1, gridAfterGaps: level1Grid } },
-      checkpointADiagnostic: initialGrid.checkpointADiagnostic,
+      schemaLayout,
+      detailedLayout,
       _relaxedDoorAccess: initialGrid._relaxedDoorAccess,
     };
   }
@@ -2474,14 +2475,10 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     : { ...evaluated, violations: violationsWithDebug };
   let checkpointADiagnostic = evaluateCheckpointA(relaxedEvaluated, relaxedDoorAccess);
 
-  // If bypassing, force the diagnostic to 'pass' so the UI doesn't show a failure state
-  // that the user explicitly chose to ignore.
-  if (bypassCheckpointA) {
-    checkpointADiagnostic = { ...checkpointADiagnostic, passes: true };
-  }
+  // Phase 2+3 execution control: skipped if detailedLayout is false
+  const skipPhase2And3 = !detailedLayout;
 
-  // If the layout fails Checkpoint A, skip expensive Phase 2/3 growth
-  if (!checkpointADiagnostic.passes) {
+  if (skipPhase2And3) {
     // Split super-rooms before finalizing
     splitAllSuperRooms(groundGridAfterRect, groundSuperRoomMap);
     splitAllSuperRooms(level1GridAfterRect, level1SuperRoomMap);
@@ -2489,7 +2486,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     const level1Layout = finalizeLayout(level1GridAfterRect).level1;
     return {
       id: `${prefix}-${groupId}-${variantIdx}`,
-      label: `约束生长法 (检查点A)`,
+      label: `约束生长法`,
       desc: `建筑 ${(alignedBW / 1000).toFixed(1)}m×${(alignedBD / 1000).toFixed(1)}m`,
       groundPlacements: groundLayout,
       level1Placements: level1Layout,
@@ -2498,7 +2495,8 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
       groupId,
       variantIdx,
       _debug: debugData,
-      checkpointADiagnostic,
+      schemaLayout,
+      detailedLayout,
       _relaxedDoorAccess: relaxedDoorAccess,
     };
   }
@@ -2531,7 +2529,10 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
   const checkpointBDiagnostic = scoreSpatialQuality(evaluatedB);
   const CHECKPOINT_B_THRESHOLD = -1000; // 总惩罚绝对值 < 1000 才通过
 
-  if (checkpointBDiagnostic.partialScore < CHECKPOINT_B_THRESHOLD) {
+  // Phase 3 execution control: skipped if detailedLayout is false
+  const skipPhase3 = !detailedLayout;
+
+  if (skipPhase3) {
     // 不通过 → 直接用 Phase 2 结果参与排名，跳过 Step 6B（无面积约束生长）与 Phase 3
     // Split super-rooms before finalizing
     splitAllSuperRooms(groundGridBeforeGaps, groundSuperRoomMap);
@@ -2540,7 +2541,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     const level1Layout = finalizeLayout(level1GridBeforeGaps).level1;
     return {
       id: `${prefix}-${groupId}-${variantIdx}`,
-      label: `约束生长法 (检查点B)`,
+      label: `约束生长法`,
       desc: `建筑 ${(alignedBW / 1000).toFixed(1)}m×${(alignedBD / 1000).toFixed(1)}m`,
       groundPlacements: groundLayout,
       level1Placements: level1Layout,
@@ -2549,8 +2550,8 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
       groupId,
       variantIdx,
       _debug: debugData,
-      checkpointADiagnostic,
-      checkpointBDiagnostic,
+      schemaLayout,
+      detailedLayout,
       _relaxedDoorAccess: relaxedB,
     };
   }
@@ -2589,8 +2590,8 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     groupId,
     variantIdx,
     _debug: debugData,
-    checkpointADiagnostic,
-    checkpointBDiagnostic,
+    schemaLayout,
+    detailedLayout,
     _relaxedDoorAccess: relaxedFinal,
   };
 }

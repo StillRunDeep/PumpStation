@@ -98,7 +98,7 @@ export function evaluateTemplate(template, options = {}) {
     }
   }
 
-  // Place doors (skipped if requested for performance, e.g. at Checkpoint A)
+  // Place doors (skipped if requested for performance)
   const doors = skipDoors ? [] : placeDoors(allPlacements);
 
   const result = {
