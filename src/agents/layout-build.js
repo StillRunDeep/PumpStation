@@ -185,6 +185,7 @@ export async function runAG41(existingVariants = [], isCancelled = () => false, 
   const sorted = [...existingVariants].sort((a, b) => b.score - a.score);
   const results = [];
   let attempts = 0;
+  const maxVariantIdx = existingVariants.reduce((max, v) => Math.max(max, v.variantIdx || 0), 0);
 
   const runParams = {
     enableAreaSwap: true,
@@ -202,7 +203,7 @@ export async function runAG41(existingVariants = [], isCancelled = () => false, 
     ];
     for (const p of pairs) {
       if (isCancelled()) break;
-      pushResult(generateHybridLayout(p.a, p.b, Math.random() * 1000, ctx, 'Evo', results.length + 1, p.tag, runParams));
+      pushResult(generateHybridLayout(p.a, p.b, Math.random() * 1000, ctx, 'Evo', maxVariantIdx + results.length + 1, p.tag, runParams));
       attempts++; await yieldToEventLoop();
     }
   }
@@ -211,7 +212,7 @@ export async function runAG41(existingVariants = [], isCancelled = () => false, 
   if (!options.randomOnly && sorted.length > 0) {
     for (let i = 0; i < Math.min(sorted.length, 3); i++) {
       if (isCancelled()) break;
-      pushResult(generateMutatedLayout(sorted[i], 'unverified_smart', Math.random() * 1000, ctx, 'Exp', results.length + 1, `O${i+1}`, runParams));
+      pushResult(generateMutatedLayout(sorted[i], 'unverified_smart', Math.random() * 1000, ctx, 'Exp', maxVariantIdx + results.length + 1, `O${i+1}`, runParams));
       attempts++; await yieldToEventLoop();
     }
   }
@@ -228,10 +229,10 @@ export async function runAG41(existingVariants = [], isCancelled = () => false, 
       if (isCancelled() || results.length >= 9) break;
       const seed = Math.random() * 1000;
       if (ex.parent) {
-        pushResult(generateMutatedLayout(ex.parent, ex.mode, seed, ctx, 'Exp', results.length + 1, ex.tag, runParams));
+        pushResult(generateMutatedLayout(ex.parent, ex.mode, seed, ctx, 'Exp', maxVariantIdx + results.length + 1, ex.tag, runParams));
       } else {
         pushResult(timed('generateConstrainedLayout', () => generateConstrainedLayout(seed, ctx.buildingW, ctx.buildingD, ctx.roomTargetAreas,
-          runParams, 'Exp', results.length + 1, ex.tag)));
+          runParams, 'Exp', maxVariantIdx + results.length + 1, ex.tag)));
       }
       attempts++; await yieldToEventLoop();
     }
@@ -240,7 +241,7 @@ export async function runAG41(existingVariants = [], isCancelled = () => false, 
   // 兜底：纯随机补足
   while (results.length < 9 && attempts < 50 && !isCancelled()) {
     pushResult(timed('generateConstrainedLayout', () => generateConstrainedLayout(Math.random() * 1000, ctx.buildingW, ctx.buildingD, ctx.roomTargetAreas,
-      runParams, 'Fill', results.length + 1, 'R')));
+      runParams, 'Fill', maxVariantIdx + results.length + 1, 'R')));
     attempts++; await yieldToEventLoop();
   }
 
