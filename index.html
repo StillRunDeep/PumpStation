@@ -16,7 +16,7 @@
 
 <main>
   <!-- ══ 输入面板 ══ -->
-  <details class="agent-card input-panel card-input-wrap" id="card-input-wrap">
+  <details class="agent-card input-panel card-input-wrap" id="card-input-wrap" open>
     <summary class="card-header">
       <span>AG0-0</span><span class="agent-label">参数输入</span>
     </summary>
@@ -66,7 +66,7 @@
     </div>
 
     <!-- 设备拓扑配置（始终可见） -->
-    <details id="topology-details" open>
+    <details id="topology-details">
       <summary>设备拓扑配置</summary>
       <div id="topology-editor-wrap"></div>
     </details>
@@ -250,7 +250,7 @@
           </div>
         </summary>
         <div class="card-inputs">
-          <details open>
+          <details>
             <summary class="card-inputs-title">已知条件</summary>
             <table class="inputs-table">
               <tr>
@@ -297,7 +297,7 @@
       </details>
 
       <!-- AG1-1 -->
-      <details class="agent-card card-pool-depth" open>
+      <details class="agent-card card-pool-depth">
         <summary class="card-header">
           <span>AG1-1</span><span class="agent-label">污水池计算</span>
           <div class="card-header-actions">
@@ -306,7 +306,7 @@
           </div>
         </summary>
         <div class="card-inputs">
-          <details open>
+          <details>
             <summary class="card-inputs-title">已知条件</summary>
             <table class="inputs-table">
               <tr>
@@ -346,7 +346,7 @@
       </details>
 
       <!-- AG1-2 -->
-      <details class="agent-card card-pump-spec" open>
+      <details class="agent-card card-pump-spec">
         <summary class="card-header">
           <span>AG1-2</span><span class="agent-label">水泵选型</span>
           <div class="card-header-actions">
@@ -355,7 +355,7 @@
           </div>
         </summary>
         <div class="card-inputs">
-          <details open>
+          <details>
             <summary class="card-inputs-title">已知条件</summary>
             <table class="inputs-table">
               <tr>
@@ -389,7 +389,7 @@
       </details>
 
       <!-- AG1-3 -->
-      <details class="agent-card card-pipe-sizing" open>
+      <details class="agent-card card-pipe-sizing">
         <summary class="card-header">
           <span>AG1-3</span><span class="agent-label">管道尺寸计算</span>
           <div class="card-header-actions">
@@ -398,7 +398,7 @@
           </div>
         </summary>
         <div class="card-inputs">
-          <details open>
+          <details>
             <summary class="card-inputs-title">已知条件</summary>
             <table class="inputs-table">
               <tr>
@@ -446,7 +446,7 @@
       </details>
 
       <!-- AG2-1 -->
-      <details class="agent-card card-maintenance-room" open>
+      <details class="agent-card card-maintenance-room">
         <summary class="card-header">
           <span>AG2-1</span><span class="agent-label">泵房维护间尺寸计算</span>
           <div class="card-header-actions">
@@ -455,7 +455,7 @@
           </div>
         </summary>
         <div class="card-inputs">
-          <details open>
+          <details>
             <summary class="card-inputs-title">已知条件</summary>
             <table class="inputs-table">
               <tr>
@@ -495,7 +495,7 @@
       </details>
 
       <!-- AG3-1: pump-room drawing -->
-      <details class="agent-card card-ag31 card-ag31-wrap" open>
+      <details class="agent-card card-ag31 card-ag31-wrap">
         <summary class="card-header">
           <span>AG3-1</span><span class="agent-label">设备流线二维示意</span>
           <div style="margin-left:auto;display:flex;gap:5px;align-items:center">
@@ -512,7 +512,7 @@
       </details>
 
       <!-- AG4: building layout generation and evaluate -->
-      <details class="agent-card card-ag41 card-ag41-wrap" id="card-ag41-wrap" open>
+      <details class="agent-card card-ag41 card-ag41-wrap" id="card-ag41-wrap">
         <summary class="card-header">
           <span>AG4</span>
           <span class="agent-label">建筑平面布局生成与评价</span>
