@@ -688,6 +688,23 @@ document.addEventListener('DOMContentLoaded', () => {
   initFocusMode();
   // 默认执行一次 AG0-0 及后续计算，确保初始参数可用
   runCalculation();
+
+  // After calculation, ensure focus mode is properly set
+  // Keep only AG0-0 open if it exists
+  const cardInput = document.getElementById('card-input-wrap');
+  if (cardInput) {
+    const allCards = document.querySelectorAll('.agent-card');
+    allCards.forEach(card => {
+      if (card !== cardInput) {
+        card.removeAttribute('open');
+      }
+    });
+    // Ensure AG0-0 is open and focus mode is active
+    cardInput.setAttribute('open', '');
+    isFocusMode = true;
+    document.body.classList.add('focus-mode');
+    document.body.classList.add('has-open-card');
+  }
 });
 
 let isFocusMode = false;
@@ -812,11 +829,17 @@ function initFocusMode() {
   }, true);
 
   // Check initial state: if any card is already open, enter focus mode
-  const openCards = Array.from(document.querySelectorAll('.agent-card')).filter(c => c.open);
+  const allCards = document.querySelectorAll('.agent-card');
+  const openCards = Array.from(allCards).filter(c => c.open);
   if (openCards.length > 0) {
     isFocusMode = true;
     document.body.classList.add('focus-mode');
     document.body.classList.add('has-open-card');
+
+    // Keep only the first open card, close others (enforce single open card rule)
+    if (openCards.length > 1) {
+      openCards.slice(1).forEach(c => c.removeAttribute('open'));
+    }
   }
 
   // Initial call
