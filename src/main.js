@@ -811,6 +811,14 @@ function initFocusMode() {
     }
   }, true);
 
+  // Check initial state: if any card is already open, enter focus mode
+  const openCards = Array.from(document.querySelectorAll('.agent-card')).filter(c => c.open);
+  if (openCards.length > 0) {
+    isFocusMode = true;
+    document.body.classList.add('focus-mode');
+    document.body.classList.add('has-open-card');
+  }
+
   // Initial call
   updateNav();
 }
