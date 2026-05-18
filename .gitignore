@@ -9,3 +9,4 @@ dist/
 TODO*.md
 todo*.md
 done*.md
+.vscode/
