@@ -2849,6 +2849,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
 
       detailedLayout,
       stopPhase: 1,
+      _debug: debugData,
     };
   }
 
