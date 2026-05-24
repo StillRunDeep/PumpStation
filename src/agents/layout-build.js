@@ -188,8 +188,7 @@ export async function runAG41(existingVariants = [], isCancelled = () => false, 
   const maxVariantIdx = existingVariants.reduce((max, v) => Math.max(max, v.variantIdx || 0), 0);
 
   const runParams = {
-    enableAreaSwap: true,
-    schemaLayout: options.schemaLayout || false,
+    stopPhase: options.stopPhase || 3,
     detailedLayout: options.detailedLayout !== false, // Default to true unless explicitly set to false
   };
 

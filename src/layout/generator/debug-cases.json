@@ -1,0 +1,34 @@
+[
+  {
+    "name": "simple_rect",
+    "seed": 1,
+    "buildingW": 30000,
+    "buildingD": 20000,
+    "floor": "level1",
+    "description": "基础矩形房间布局，用于验证形态约束"
+  },
+  {
+    "name": "must_pair_trafo",
+    "seed": 123,
+    "buildingW": 35000,
+    "buildingD": 22000,
+    "floor": "ground",
+    "description": "trafo1↔trafo2 MUST邻接对，验证协同生长分割"
+  },
+  {
+    "name": "must_pair_meter",
+    "seed": 456,
+    "buildingW": 32000,
+    "buildingD": 21000,
+    "floor": "ground",
+    "description": "meter_main↔meter_sub MUST邻接对分割测试"
+  },
+  {
+    "name": "level1_layout",
+    "seed": 789,
+    "buildingW": 40000,
+    "buildingD": 25000,
+    "floor": "level1",
+    "description": "一楼走廊和房间布局，验证可达性和L/U形扩展"
+  }
+]

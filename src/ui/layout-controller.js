@@ -10,7 +10,6 @@ import { getDefaultUserParams } from '../layout/model/user-params.js'
 import { SCORER_PARAMS } from '../layout/evaluation/scorer-params.js'
 import { scoreLayout, scoreHardRedlines } from '../layout/evaluation/scorer.js'
 
-let schemaLayout = true;
 let detailedLayout = false;
 let isGeneratingLayouts = false;
 let generationReqId = null;
@@ -70,7 +69,6 @@ export function initLayoutController() {
       btn.textContent = '生成方案'
       showAg41Notify('已停止生成', false)
     } else {
-      schemaLayout = true;
       detailedLayout = false;
       isGeneratingLayouts = true
       btn.textContent = '停止生成'
@@ -90,7 +88,7 @@ export function initLayoutController() {
         if (!isGeneratingLayouts) { btn.textContent = '生成方案'; return }
         try {
           const existing = getVariants()
-          const newRaw = await runAG41(existing, () => !isGeneratingLayouts, { schemaLayout: schemaLayout, detailedLayout: false })
+          const newRaw = await runAG41(existing, () => !isGeneratingLayouts, { stopPhase: 1, detailedLayout: false })
           if (newRaw === null) { isGeneratingLayouts = false; btn.textContent = '生成方案'; return }
           applyLayoutResult(newRaw, existing, false)
 
