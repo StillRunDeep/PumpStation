@@ -1,7 +1,7 @@
 [
   {
     "name": "simple_rect",
-    "seed": 1,
+    "seed": 100,
     "buildingW": 30000,
     "buildingD": 20000,
     "floor": "level1",
