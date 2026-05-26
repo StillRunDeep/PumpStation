@@ -30,7 +30,6 @@ if (typeof window === 'undefined') {
     timeCostThreshold: parseFloat(process.env.TIME_THRESHOLD || '5'),
     timeCostLog: [],
     layoutDebugLog: [],
-    debugCurrentModuleEnabled: true,
   };
 }
 
@@ -153,10 +152,10 @@ async function generateLayout(seed, buildingW, buildingD, floor, phase = 3) {
   console.log(`[INFO] Phase limit: ${phase}`);
 
   const startTime = performance.now();
-  // If stopPhase < 3, we need to enable detailedLayout to run Phases 2 and beyond
+  // Enable Phase 2/3 execution if stopPhase > 1
   const runParams = {
     stopPhase: phase,
-    detailedLayout: phase > 1  // Enable Phase 2+ only if stopPhase > 1
+    runPhase2And3: phase > 1  // Enable Phase 2+ only if stopPhase > 1
   };
   const result = generateConstrainedLayout(
     seed,

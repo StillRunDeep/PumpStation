@@ -2592,10 +2592,12 @@ function timedGen(name, fn) {
 }
 
 export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParams = {}, groupId = 'CG', variantIdx = 1, prefix = 'R', initialSeeds = null) {
-  const { bypassCheckpointA = false, detailedLayout = false, initialGrid = null, stopPhase = 3 } = runParams;
+  const { bypassCheckpointA = false, runPhase2And3 = false, initialGrid = null, stopPhase = 3 } = runParams;
+  // 向后兼容：如果提供了 detailedLayout 但没提供 runPhase2And3，使用 detailedLayout 的值
+  const actualRunPhase2And3 = runParams.hasOwnProperty('runPhase2And3') ? runPhase2And3 : (runParams.detailedLayout === true);
   const rng = makeRng(seed);
 
-  if (detailedLayout && initialGrid) {
+  if (actualRunPhase2And3 && initialGrid) {
     // --- 终极防御性检查 ---
     // initialGrid 可能是 variant 对象（包含_debug），或直接是_debug对象
     const debugInfo = initialGrid._debug || initialGrid;
@@ -2625,46 +2627,30 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     const { mergedRooms: mergedGroundRooms, superRoomMap: groundSuperRoomMap } = mergeMustPairsForFloor(groundRooms);
     const { mergedRooms: mergedLevel1Rooms, superRoomMap: level1SuperRoomMap } = mergeMustPairsForFloor(level1Rooms);
 
-    // Step 6A: 无面积限制 L/U 生长
-    const variantTag = `[Var${variantIdx}]`;
-    console.log(`${variantTag}[Phase3] 开始无面积限制生长`);
-    const groundBefore = Object.fromEntries(mergedGroundRooms.map(r => [r.id, groundGrid.roomData[r.id]?.length || 0]));
-    const level1Before = Object.fromEntries(mergedLevel1Rooms.map(r => [r.id, level1Grid.roomData[r.id]?.length || 0]));
-    console.log(`${variantTag}[Phase3] 优化前: ground=${Object.values(groundBefore).reduce((a,b)=>a+b,0)}, level1=${Object.values(level1Before).reduce((a,b)=>a+b,0)}`);
+    // Phase 2: area-constrained L/U expansion
+    const groundCtx2 = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: buildSuperRoomMeta(groundSuperRoomMap) };
+    expandRooms(groundGrid, mergedGroundRooms, rng, groundCtx2, false);
+    const groundGridBeforeGaps = groundGrid.clone();
 
-    // 样本房间扩展前的位置
-    const sampleRoom = mergedGroundRooms[0];
-    let sampleBefore = null;
-    if (sampleRoom) {
-      const beforeBbox = groundGrid.getBoundingBox(sampleRoom.id);
-      sampleBefore = beforeBbox ? `(${beforeBbox.minX},${beforeBbox.minY}) ${beforeBbox.maxX - beforeBbox.minX + 1}x${beforeBbox.maxY - beforeBbox.minY + 1}` : 'N/A';
-    }
+    const level1Ctx2 = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: buildSuperRoomMeta(level1SuperRoomMap) };
+    expandRooms(level1Grid, mergedLevel1Rooms, rng, level1Ctx2, false);
+    const level1GridBeforeGaps = level1Grid.clone();
 
-    const groundCtx = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: buildSuperRoomMeta(groundSuperRoomMap) };
-    expandRooms(groundGrid, mergedGroundRooms, rng, groundCtx, false, true);
-    const groundAfter = Object.fromEntries(mergedGroundRooms.map(r => [r.id, groundGrid.roomData[r.id]?.length || 0]));
+    // Phase 3: unlimited expansion + fillGaps + areaSwap
+    const groundCtx3 = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: buildSuperRoomMeta(groundSuperRoomMap) };
+    expandRooms(groundGrid, mergedGroundRooms, rng, groundCtx3, false, true);
+    const level1Ctx3 = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: buildSuperRoomMeta(level1SuperRoomMap) };
+    expandRooms(level1Grid, mergedLevel1Rooms, rng, level1Ctx3, false, true);
 
-    const level1Ctx = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: buildSuperRoomMeta(level1SuperRoomMap) };
-    expandRooms(level1Grid, mergedLevel1Rooms, rng, level1Ctx, false, true);
-    const level1After = Object.fromEntries(mergedLevel1Rooms.map(r => [r.id, level1Grid.roomData[r.id]?.length || 0]));
-
-    const gGrowth = Object.values(groundAfter).reduce((a,b)=>a+b,0) - Object.values(groundBefore).reduce((a,b)=>a+b,0);
-    const l1Growth = Object.values(level1After).reduce((a,b)=>a+b,0) - Object.values(level1Before).reduce((a,b)=>a+b,0);
-    const totalGridCells = (alignedBW / GRID_SIZE) * (alignedBD / GRID_SIZE);
-    const groundUsage = ((Object.values(groundAfter).reduce((a,b)=>a+b,0) / totalGridCells) * 100).toFixed(1);
-    const level1Usage = ((Object.values(level1After).reduce((a,b)=>a+b,0) / totalGridCells) * 100).toFixed(1);
-    console.log(`${variantTag}[Phase3] 优化后: ground增长${gGrowth}(占${groundUsage}%), level1增长${l1Growth}(占${level1Usage}%)`);
-
-    // 输出样本房间的前后对比
-    if (sampleRoom) {
-      const afterBbox = groundGrid.getBoundingBox(sampleRoom.id);
-      const sampleAfter = afterBbox ? `(${afterBbox.minX},${afterBbox.minY}) ${afterBbox.maxX - afterBbox.minX + 1}x${afterBbox.maxY - afterBbox.minY + 1}` : 'N/A';
-      console.log(`${variantTag}[Phase3] 房间${sampleRoom.id}: ${sampleBefore} → ${sampleAfter}`);
-    }
-
+    fillGaps(groundGrid, mergedGroundRooms);
+    fillGaps(level1Grid, mergedLevel1Rooms);
+    runAreaSwap(groundGrid, mergedGroundRooms);
+    runAreaSwap(level1Grid, mergedLevel1Rooms);
 
     splitAllSuperRooms(groundGrid, groundSuperRoomMap);
     splitAllSuperRooms(level1Grid, level1SuperRoomMap);
+    runAreaSwap(groundGrid, groundRooms);
+    runAreaSwap(level1Grid, level1Rooms);
 
     const finalLayout = {
       ground: timedGen('finalizeLayout_ground', () => finalizeLayout(groundGrid).ground),
@@ -2681,9 +2667,11 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
       buildingD: alignedBD,
       groupId,
       variantIdx,
-      _debug: { ...debugInfo, ground: { ...debugInfo.ground, gridAfterGaps: groundGrid }, level1: { ...debugInfo.level1, gridAfterGaps: level1Grid } },
-
-      detailedLayout,
+      _debug: {
+        ...debugInfo,
+        ground: { ...debugInfo.ground, gridBeforeGaps: groundGridBeforeGaps, gridAfterGaps: groundGrid },
+        level1: { ...debugInfo.level1, gridBeforeGaps: level1GridBeforeGaps, gridAfterGaps: level1Grid },
+      },
       _relaxedDoorAccess: initialGrid._relaxedDoorAccess,
     };
   }
@@ -2780,15 +2768,11 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
   timedGen('phase1_expandRooms_ground', () => expandRooms(groundGrid, mergedGroundRooms, rng, groundCtx, stopPhase === 1));
   groundGridAfterRect = groundGrid.clone();
   debugData.ground.gridAfterRect = groundGridAfterRect;
-  groundGridBeforeGaps = groundGrid.clone();
-  debugData.ground.gridBeforeGaps = groundGridBeforeGaps;
 
   const level1Ctx = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: level1SuperMeta };
   timedGen('phase1_expandRooms_level1', () => expandRooms(level1Grid, mergedLevel1Rooms, rng, level1Ctx, stopPhase === 1));
   level1GridAfterRect = level1Grid.clone();
   debugData.level1.gridAfterRect = level1GridAfterRect;
-  level1GridBeforeGaps = level1Grid.clone();
-  debugData.level1.gridBeforeGaps = level1GridBeforeGaps;
 
 
   // Split super-rooms in snapshots before Checkpoint A evaluation
@@ -2829,39 +2813,42 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
 
   // ── Early return for Phase 1 (stopPhase = 1) ──
   if (stopPhase === 1) {
-    // Split super-rooms before finalizing
-    splitAllSuperRooms(groundGridAfterRect, groundSuperRoomMap);
-    splitAllSuperRooms(level1GridAfterRect, level1SuperRoomMap);
-    const groundLayout = finalizeLayout(groundGridAfterRect).ground;
-    const level1Layout = finalizeLayout(level1GridAfterRect).level1;
+    // Clone before splitting so debugData.ground.gridAfterRect keeps merged IDs (needed by initialGrid path)
+    const groundGridForFinalize = groundGridAfterRect.clone();
+    const level1GridForFinalize = level1GridAfterRect.clone();
+    splitAllSuperRooms(groundGridForFinalize, groundSuperRoomMap);
+    splitAllSuperRooms(level1GridForFinalize, level1SuperRoomMap);
+    const groundLayout = finalizeLayout(groundGridForFinalize).ground;
+    const level1Layout = finalizeLayout(level1GridForFinalize).level1;
     return {
       id: `${prefix}-${groupId}-${variantIdx}`,
       label: `约束生长法 (Phase 1)`,
       desc: `建筑 ${(alignedBW / 1000).toFixed(1)}m×${(alignedBD / 1000).toFixed(1)}m [Phase 1]`,
       groundPlacements: groundLayout,
       level1Placements: level1Layout,
-      groundCells: extractGridCells(groundGridAfterRect),
-      level1Cells: extractGridCells(level1GridAfterRect),
+      groundCells: extractGridCells(groundGridForFinalize),
+      level1Cells: extractGridCells(level1GridForFinalize),
       buildingW: alignedBW,
       buildingD: alignedBD,
       groupId,
       variantIdx,
 
-      detailedLayout,
       stopPhase: 1,
       _debug: debugData,
     };
   }
 
-  // Phase 2+3 execution control: skipped if detailedLayout is false
-  const skipPhase2And3 = !detailedLayout;
+  // Phase 2+3 execution control: skipped if runPhase2And3 is false
+  const skipPhase2And3 = !actualRunPhase2And3;
 
   if (skipPhase2And3) {
-    // Split super-rooms before finalizing
-    splitAllSuperRooms(groundGridAfterRect, groundSuperRoomMap);
-    splitAllSuperRooms(level1GridAfterRect, level1SuperRoomMap);
-    const groundLayout = finalizeLayout(groundGridAfterRect).ground;
-    const level1Layout = finalizeLayout(level1GridAfterRect).level1;
+    // Clone before splitting so debugData.ground.gridAfterRect keeps merged IDs (needed by initialGrid path)
+    const groundGridForFinalize = groundGridAfterRect.clone();
+    const level1GridForFinalize = level1GridAfterRect.clone();
+    splitAllSuperRooms(groundGridForFinalize, groundSuperRoomMap);
+    splitAllSuperRooms(level1GridForFinalize, level1SuperRoomMap);
+    const groundLayout = finalizeLayout(groundGridForFinalize).ground;
+    const level1Layout = finalizeLayout(level1GridForFinalize).level1;
     return {
       id: `${prefix}-${groupId}-${variantIdx}`,
       label: `约束生长法`,
@@ -2874,14 +2861,12 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
       variantIdx,
       _debug: debugData,
 
-      detailedLayout,
       _relaxedDoorAccess: relaxedDoorAccess,
     };
   }
 
   // ── Phase 2 (Step 6A): 对通过 Checkpoint A 的方案，继续跑有面积约束的 L/U 形扩展 ────────
-  //调试模式：window.debugModeEnabled 默认false，单模块屏蔽：debugCurrentModuleEnabled 默认 true
-  if (window.debugCurrentModuleEnabled) {
+  if (actualRunPhase2And3) {
     const groundCtx = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: groundSuperMeta };
     timedGen('phase2_expandRooms_ground', () => expandRooms(groundGrid, mergedGroundRooms, rng, groundCtx, false));
     groundGridBeforeGaps = groundGrid.clone();
@@ -2927,13 +2912,12 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
       groupId,
       variantIdx,
 
-      detailedLayout,
       stopPhase: 2,
     };
   }
 
-  // Phase 3 execution control: skipped if detailedLayout is false
-  const skipPhase3 = !detailedLayout;
+  // Phase 3 execution control: skipped if runPhase2And3 is false
+  const skipPhase3 = !actualRunPhase2And3;
 
   if (skipPhase3) {
     // 不通过 → 直接用 Phase 2 结果参与排名，跳过 Step 6B（无面积约束生长）与 Phase 3
@@ -2954,12 +2938,11 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
       variantIdx,
       _debug: debugData,
 
-      detailedLayout,
       _relaxedDoorAccess: relaxedB,
     };
   }
   // ── Phase 3: 无面积限制 L/U 扩展 → 空隙填充 → 面积偏差调整 ──
-  if (window.debugCurrentModuleEnabled) {
+  if (actualRunPhase2And3) {
     const groundCtx3 = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: groundSuperMeta };
     timedGen('phase3_expandRooms_ground', () => expandRooms(groundGrid, mergedGroundRooms, rng, groundCtx3, false, true));
 
@@ -2985,7 +2968,7 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
   console.error(`[CoGrow] After split - level1 roomData keys: ${Object.keys(level1Grid.roomData).join(',')}`);
 
   // ── Phase 3 post-split AreaSwap: re-run corner reduction on original rooms ──
-  if (window.debugCurrentModuleEnabled) {
+  if (actualRunPhase2And3) {
     timedGen('phase3_areaSwap_postSplit_ground', () => runAreaSwap(groundGrid, groundRooms));
     timedGen('phase3_areaSwap_postSplit_level1', () => runAreaSwap(level1Grid, level1Rooms));
   }
@@ -3012,7 +2995,6 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     groupId,
     variantIdx,
     _debug: debugData,
-    detailedLayout,
     _relaxedDoorAccess: relaxedFinal,
   };
 }

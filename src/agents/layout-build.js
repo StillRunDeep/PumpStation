@@ -166,7 +166,10 @@ export async function optimizeVariant(parent) {
   const ctx = await getGenerationContext();
   const seed = Math.floor(Math.random() * 100000);
 
-  const rawChild = generateMutatedLayout(parent, 'unverified_smart', seed, ctx, 'Opt', 1, 'OPT');
+  const runParams = {
+    runPhase2And3: true,  // optimizeVariant 总是执行完整 Phase 2/3
+  };
+  const rawChild = generateMutatedLayout(parent, 'unverified_smart', seed, ctx, 'Opt', 1, 'OPT', runParams);
   const candidate = evaluateTemplate(rawChild);
 
   Object.assign(candidate, scoreLayout(candidate));
@@ -189,7 +192,7 @@ export async function runAG41(existingVariants = [], isCancelled = () => false, 
 
   const runParams = {
     stopPhase: options.stopPhase || 3,
-    detailedLayout: options.detailedLayout !== false, // Default to true unless explicitly set to false
+    runPhase2And3: options.detailedLayout === true, // Only run Phase 2/3 when explicitly opted in
   };
 
   const pushResult = (layout) => results.push(evaluateTemplate(layout));
