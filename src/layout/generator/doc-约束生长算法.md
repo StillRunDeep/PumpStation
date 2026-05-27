@@ -161,6 +161,11 @@ superRoomMeta = {
 - 深化模式（`initialGrid`）同样输出 Phase 2 和 Phase 3 的整阶段耗时。
 - AreaSwap 内部在 debug 模式下额外记录 `findBestShapeOperation`、`findShapeOperations`、`cloneAndApply`、`countRoomVertices`、`isRoomConnected` 等累计耗时和调用次数，用于定位 Phase 3 中具体慢点。
 
+**正式视图几何来源：**
+- Phase 3 后房间可能是 L/U/复杂正交形状，`finalizeLayout()` 输出的 `x/y/w/d` 仅表示房间 bbox，继续用于评分、面积和导出兼容。
+- 生成结果同时携带 `groundCells` / `level1Cells`，并在正式 placement 上附加 `cells` / `gridSize`；正式视图应基于真实 cell 边界提取正交多边形轮廓进行渲染，避免非矩形房间 bbox 覆盖其他房间。
+- 缺少 cell 数据的旧结果才回退到 bbox + overlap 修补渲染。
+
 房间选取优先级：
 
 - **阶段 1（矩形扩展）**：按**面积完成率（currentArea / targetArea）**排序，比例越低优先级越高。

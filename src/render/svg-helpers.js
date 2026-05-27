@@ -147,6 +147,64 @@ export function _dv(x, y1, y2, label, clr) {
   ].join('')
 }
 
+export function getRoomOutlinePaths(cells) {
+    if (!cells || cells.length === 0) return [];
+
+    const cellSet = new Set(cells.map(c => `${c.x},${c.y}`));
+    const edges = new Map();
+    const addEdge = (x1, y1, x2, y2) => {
+        const key = `${x1},${y1}`;
+        if (!edges.has(key)) edges.set(key, []);
+        edges.get(key).push({ x1, y1, x2, y2 });
+    };
+
+    for (const { x, y } of cells) {
+        if (!cellSet.has(`${x},${y - 1}`)) addEdge(x, y, x + 1, y);
+        if (!cellSet.has(`${x + 1},${y}`)) addEdge(x + 1, y, x + 1, y + 1);
+        if (!cellSet.has(`${x},${y + 1}`)) addEdge(x + 1, y + 1, x, y + 1);
+        if (!cellSet.has(`${x - 1},${y}`)) addEdge(x, y + 1, x, y);
+    }
+
+    const paths = [];
+    while (edges.size > 0) {
+        const startKey = [...edges.keys()].sort((a, b) => {
+            const [ax, ay] = a.split(',').map(Number);
+            const [bx, by] = b.split(',').map(Number);
+            return ay - by || ax - bx;
+        })[0];
+        const [startX, startY] = startKey.split(',').map(Number);
+        let currentKey = startKey;
+        const points = [{ x: startX, y: startY }];
+
+        while (edges.has(currentKey)) {
+            const list = edges.get(currentKey);
+            const edge = list.shift();
+            if (list.length === 0) edges.delete(currentKey);
+            points.push({ x: edge.x2, y: edge.y2 });
+            currentKey = `${edge.x2},${edge.y2}`;
+            if (currentKey === startKey) break;
+        }
+
+        const simplified = [];
+        for (const p of points) {
+            simplified.push(p);
+            while (simplified.length >= 3) {
+                const a = simplified[simplified.length - 3];
+                const b = simplified[simplified.length - 2];
+                const c = simplified[simplified.length - 1];
+                if ((a.x === b.x && b.x === c.x) || (a.y === b.y && b.y === c.y)) {
+                    simplified.splice(simplified.length - 2, 1);
+                } else {
+                    break;
+                }
+            }
+        }
+        paths.push(simplified);
+    }
+
+    return paths;
+}
+
 export function decomposeRoomIntoRects(cells) {
     if (!cells || cells.length === 0) return [];
 
