@@ -93,7 +93,7 @@ scoreLayout()：对最终布局方案进行全面评估 (Tier 1 + Tier 2 + Tier 
 *   目标： 在现有方案的基础上，进行精细化的边界优化和全面生长。
 *   流程：
     *   新生成： 执行完整的阶段 1、2、3 流程。
-    *   优化现有： 可以从一个已完成阶段 2 的方案快照 (initialGrid 包含 gridBeforeGaps) 开始，直接进入阶段 3 的无面积限制扩展和空隙填充。
+    *   优化现有： 优先从一个已完成阶段 2 的方案快照 (initialGrid 包含 `gridBeforeGaps`) 开始，直接进入阶段 3 的无面积限制扩展、空隙填充与 AreaSwap；若旧结果缺少 `gridBeforeGaps` 但保留了 `gridAfterRect`，则仅作为 legacy fallback 使用，从阶段 1 快照继续补齐后续阶段。
 *   特点： 方案质量更高，细节更精细，但计算成本更高。
 ## 5. 进化策略 (layout-build.js)
 runAG41() 函数实现了以下进化策略，以在多样性和质量之间取得平衡：

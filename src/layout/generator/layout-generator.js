@@ -2276,6 +2276,7 @@ function findBestShapeOperation(grid, rooms, roomMap, perf = null) {
     const vBefore = currentVertices;
 
     for (const op of ops) {
+      addPerf(perf, 'shapeOpCandidates', 0, 1);
       const cloneStart = perf ? performance.now() : 0;
       const tempGrid = grid.clone();
       let affectedIds;
@@ -2311,6 +2312,7 @@ function findBestShapeOperation(grid, rooms, roomMap, perf = null) {
         neighborVBefore += vertexBeforeByRoom.get(nid) ?? countRoomVertices(grid, nid);
         neighborVAfter  += countRoomVertices(tempGrid, nid);
       }
+      addPerf(perf, 'shapeOpNeighborVertices', performance.now() - neighborVertexStart, affectedIds.length * 2);
       addPerf(perf, 'countRoomVertices', performance.now() - neighborVertexStart, affectedIds.length * 2);
       const globalReduction = aReduction - (neighborVAfter - neighborVBefore);
 
@@ -2319,16 +2321,20 @@ function findBestShapeOperation(grid, rooms, roomMap, perf = null) {
       // A 连通检查（trim 时 A 可能被切断）
       const selfConnectedStart = perf ? performance.now() : 0;
       if (!isRoomConnected(tempGrid, room.id)) { ok = false; rejectReason = `${room.id}不连通`; }
+      addPerf(perf, 'shapeOpConnectivity', performance.now() - selfConnectedStart);
       addPerf(perf, 'isRoomConnected', performance.now() - selfConnectedStart);
 
       if (ok) {
         for (const nid of affectedIds) {
           const connectedStart = perf ? performance.now() : 0;
           if (!isRoomConnected(tempGrid, nid)) { ok = false; rejectReason = `${nid}不连通`; break; }
+          addPerf(perf, 'shapeOpConnectivity', performance.now() - connectedStart);
           addPerf(perf, 'isRoomConnected', performance.now() - connectedStart);
           const r = roomMap.get(nid);
           if (r) {
+            const areaCheckStart = perf ? performance.now() : 0;
             const dev = Math.abs((tempGrid.roomData[nid]?.length || 0) / (r.targetGridCount || 1) - 1);
+            addPerf(perf, 'shapeOpAreaChecks', performance.now() - areaCheckStart);
             if (dev > PHASE3_AREA_DEVIATION * 2) { ok = false; rejectReason = `${nid}面积偏差${(dev*100).toFixed(0)}%`; break; }
           }
         }
@@ -2372,7 +2378,7 @@ function applyShapeTrim(grid, roomId, cells) {
  */
 function runAreaCorrect(grid, rooms, roomMap) {
   const DIRS = [[1,0],[-1,0],[0,1],[0,-1]];
-  const MAX_CANDIDATES_PER_ROOM = 120;
+  const MAX_CANDIDATES_PER_ROOM = window.disableAreaCorrectCandidateLimit ? Infinity : 120;
   let anyMoved = false;
 
   const overRooms = rooms
@@ -2680,6 +2686,13 @@ function endPhaseTimer(timer) {
   window.timeCostLog.push({ fn: timer.label, duration });
 }
 
+function runTimedPhaseStep(name, fn) {
+  const timer = startPhaseTimer(name);
+  const result = fn();
+  endPhaseTimer(timer);
+  return result;
+}
+
 export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParams = {}, groupId = 'CG', variantIdx = 1, prefix = 'R', initialSeeds = null) {
   const { bypassCheckpointA = false, runPhase2And3 = false, initialGrid = null, stopPhase = 3 } = runParams;
   // 向后兼容：如果提供了 detailedLayout 但没提供 runPhase2And3，使用 detailedLayout 的值
@@ -2692,8 +2705,14 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     const debugInfo = initialGrid._debug || initialGrid;
     if (!debugInfo) throw new Error('detailedLayout: initialGrid._debug或initialGrid不存在');
 
-    const groundGrid = (debugInfo.ground?.gridBeforeGaps || debugInfo.ground?.gridAfterRect).clone();
-    const level1Grid = (debugInfo.level1?.gridBeforeGaps || debugInfo.level1?.gridAfterRect).clone();
+    const hasPhase2Snapshot = !!(debugInfo.ground?.gridBeforeGaps && debugInfo.level1?.gridBeforeGaps);
+    const hasLegacyRectSnapshot = !!(debugInfo.ground?.gridAfterRect && debugInfo.level1?.gridAfterRect);
+    if (!hasPhase2Snapshot && !hasLegacyRectSnapshot) {
+      throw new Error('detailedLayout: initialGrid 缺少可用快照（需要 gridBeforeGaps 或 legacy gridAfterRect）');
+    }
+
+    const groundGrid = (hasPhase2Snapshot ? debugInfo.ground.gridBeforeGaps : debugInfo.ground.gridAfterRect).clone();
+    const level1Grid = (hasPhase2Snapshot ? debugInfo.level1.gridBeforeGaps : debugInfo.level1.gridAfterRect).clone();
 
     const allRooms = debugInfo.roomTargets || [];
     let alignedBW, alignedBD;
@@ -2710,22 +2729,29 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     }
     // --- 检查结束 ---
 
+    if (!hasPhase2Snapshot) {
+      console.warn('[generateConstrainedLayout] initialGrid 缺少 gridBeforeGaps，回退到 legacy gridAfterRect 路径');
+    }
 
     const groundRooms = allRooms.filter(r => r.floor === 'ground');
     const level1Rooms = allRooms.filter(r => r.floor === 'level1');
     const { mergedRooms: mergedGroundRooms, superRoomMap: groundSuperRoomMap } = mergeMustPairsForFloor(groundRooms);
     const { mergedRooms: mergedLevel1Rooms, superRoomMap: level1SuperRoomMap } = mergeMustPairsForFloor(level1Rooms);
 
-    // Phase 2: area-constrained L/U expansion
-    const phase2Timer = startPhaseTimer('phase2_initialGrid');
-    const groundCtx2 = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: buildSuperRoomMeta(groundSuperRoomMap) };
-    expandRooms(groundGrid, mergedGroundRooms, rng, groundCtx2, false);
-    const groundGridBeforeGaps = groundGrid.clone();
+    let groundGridBeforeGaps = hasPhase2Snapshot ? debugInfo.ground.gridBeforeGaps.clone() : null;
+    let level1GridBeforeGaps = hasPhase2Snapshot ? debugInfo.level1.gridBeforeGaps.clone() : null;
 
-    const level1Ctx2 = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: buildSuperRoomMeta(level1SuperRoomMap) };
-    expandRooms(level1Grid, mergedLevel1Rooms, rng, level1Ctx2, false);
-    const level1GridBeforeGaps = level1Grid.clone();
-    endPhaseTimer(phase2Timer);
+    if (!hasPhase2Snapshot) {
+      const phase2Timer = startPhaseTimer('phase2_initialGrid');
+      const groundCtx2 = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: buildSuperRoomMeta(groundSuperRoomMap) };
+      expandRooms(groundGrid, mergedGroundRooms, rng, groundCtx2, false);
+      groundGridBeforeGaps = groundGrid.clone();
+
+      const level1Ctx2 = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: buildSuperRoomMeta(level1SuperRoomMap) };
+      expandRooms(level1Grid, mergedLevel1Rooms, rng, level1Ctx2, false);
+      level1GridBeforeGaps = level1Grid.clone();
+      endPhaseTimer(phase2Timer);
+    }
 
     // Phase 3: unlimited expansion + fillGaps + areaSwap
     const phase3Timer = startPhaseTimer('phase3_initialGrid');
@@ -2734,15 +2760,23 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     const level1Ctx3 = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: buildSuperRoomMeta(level1SuperRoomMap) };
     expandRooms(level1Grid, mergedLevel1Rooms, rng, level1Ctx3, false, true);
 
-    fillGaps(groundGrid, mergedGroundRooms);
-    fillGaps(level1Grid, mergedLevel1Rooms);
-    runAreaSwap(groundGrid, mergedGroundRooms);
-    runAreaSwap(level1Grid, mergedLevel1Rooms);
+    runTimedPhaseStep('phase3_initialGrid_fillGaps', () => {
+      fillGaps(groundGrid, mergedGroundRooms);
+      fillGaps(level1Grid, mergedLevel1Rooms);
+    });
+    runTimedPhaseStep('phase3_initialGrid_areaSwap_preSplit', () => {
+      runAreaSwap(groundGrid, mergedGroundRooms);
+      runAreaSwap(level1Grid, mergedLevel1Rooms);
+    });
 
-    splitAllSuperRooms(groundGrid, groundSuperRoomMap);
-    splitAllSuperRooms(level1Grid, level1SuperRoomMap);
-    runAreaSwap(groundGrid, groundRooms);
-    runAreaSwap(level1Grid, level1Rooms);
+    runTimedPhaseStep('phase3_initialGrid_splitAllSuperRooms', () => {
+      splitAllSuperRooms(groundGrid, groundSuperRoomMap);
+      splitAllSuperRooms(level1Grid, level1SuperRoomMap);
+    });
+    runTimedPhaseStep('phase3_initialGrid_areaSwap_postSplit', () => {
+      runAreaSwap(groundGrid, groundRooms);
+      runAreaSwap(level1Grid, level1Rooms);
+    });
     endPhaseTimer(phase3Timer);
 
     const finalLayout = {
@@ -3065,19 +3099,25 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     const level1Ctx3 = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: level1SuperMeta };
     timedGen('phase3_expandRooms_level1', () => expandRooms(level1Grid, mergedLevel1Rooms, rng, level1Ctx3, false, true));
 
-    timedGen('phase3_fillGaps_ground', () => fillGaps(groundGrid, mergedGroundRooms));
-    timedGen('phase3_fillGaps_level1', () => fillGaps(level1Grid, mergedLevel1Rooms));
+    runTimedPhaseStep('phase3_fillGaps', () => {
+      timedGen('phase3_fillGaps_ground', () => fillGaps(groundGrid, mergedGroundRooms));
+      timedGen('phase3_fillGaps_level1', () => fillGaps(level1Grid, mergedLevel1Rooms));
+    });
 
-    timedGen('phase3_areaSwap_ground', () => runAreaSwap(groundGrid, mergedGroundRooms));
-    timedGen('phase3_areaSwap_level1', () => runAreaSwap(level1Grid, mergedLevel1Rooms));
+    runTimedPhaseStep('phase3_areaSwap_preSplit', () => {
+      timedGen('phase3_areaSwap_ground', () => runAreaSwap(groundGrid, mergedGroundRooms));
+      timedGen('phase3_areaSwap_level1', () => runAreaSwap(level1Grid, mergedLevel1Rooms));
+    });
   }
 
   // ── Super-room splitting: convert super-rooms back to constituent rooms ──
   // This must happen before finalization to ensure all room IDs in output are original
   console.error(`[CoGrow] Before split - ground roomData keys: ${Object.keys(groundGrid.roomData).join(',')}`);
   console.error(`[CoGrow] Before split - level1 roomData keys: ${Object.keys(level1Grid.roomData).join(',')}`);
-  splitAllSuperRooms(groundGrid, groundSuperRoomMap);
-  splitAllSuperRooms(level1Grid, level1SuperRoomMap);
+  runTimedPhaseStep('phase3_splitAllSuperRooms', () => {
+    splitAllSuperRooms(groundGrid, groundSuperRoomMap);
+    splitAllSuperRooms(level1Grid, level1SuperRoomMap);
+  });
   debugData.ground.gridAfterGaps = groundGrid;
   debugData.level1.gridAfterGaps = level1Grid;
   console.error(`[CoGrow] After split - ground roomData keys: ${Object.keys(groundGrid.roomData).join(',')}`);
@@ -3085,8 +3125,10 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
 
   // ── Phase 3 post-split AreaSwap: re-run corner reduction on original rooms ──
   if (actualRunPhase2And3) {
-    timedGen('phase3_areaSwap_postSplit_ground', () => runAreaSwap(groundGrid, groundRooms));
-    timedGen('phase3_areaSwap_postSplit_level1', () => runAreaSwap(level1Grid, level1Rooms));
+    runTimedPhaseStep('phase3_areaSwap_postSplit', () => {
+      timedGen('phase3_areaSwap_postSplit_ground', () => runAreaSwap(groundGrid, groundRooms));
+      timedGen('phase3_areaSwap_postSplit_level1', () => runAreaSwap(level1Grid, level1Rooms));
+    });
   }
 
   // 3. Finalize layouts from both grids

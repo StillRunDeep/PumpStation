@@ -27,6 +27,7 @@ if (typeof window === 'undefined') {
     debugModeEnabled: process.env.DEBUG_MODE === 'true',
     debugLayoutPhase2: (process.env.DEBUG_LAYOUT || '').includes('phase2'),
     debugLayoutPhase3: (process.env.DEBUG_LAYOUT || '').includes('phase3'),
+    disableAreaCorrectCandidateLimit: process.env.DISABLE_AREA_CORRECT_CANDIDATE_LIMIT === 'true',
     timeCostThreshold: parseFloat(process.env.TIME_THRESHOLD || '5'),
     timeCostLog: [],
     layoutDebugLog: [],
