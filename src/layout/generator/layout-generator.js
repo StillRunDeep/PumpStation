@@ -2645,6 +2645,16 @@ export function buildPartialResult(groundGrid, level1Grid, buildingW, buildingD)
 
 
 
+function attachGridCellsToPlacements(placements, cellMap) {
+  if (!placements || !cellMap) return placements;
+  return Object.fromEntries(Object.entries(placements).map(([id, placement]) => [
+    id,
+    cellMap[id]
+      ? { ...placement, cells: cellMap[id], gridSize: GRID_SIZE }
+      : placement
+  ]));
+}
+
 function timedGen(name, fn) {
   if (!window.debugModeEnabled) return fn();
   const t0 = performance.now();
@@ -2739,6 +2749,10 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
       ground: timedGen('finalizeLayout_ground', () => finalizeLayout(groundGrid).ground),
       level1: timedGen('finalizeLayout_level1', () => finalizeLayout(level1Grid).level1),
     };
+    const groundCells = extractGridCells(groundGrid);
+    const level1Cells = extractGridCells(level1Grid);
+    finalLayout.ground = attachGridCellsToPlacements(finalLayout.ground, groundCells);
+    finalLayout.level1 = attachGridCellsToPlacements(finalLayout.level1, level1Cells);
 
     return {
       id: `${prefix}-${groupId}-${variantIdx}`,
@@ -2746,6 +2760,8 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
       desc: `建筑 ${(alignedBW / 1000).toFixed(1)}m×${(alignedBD / 1000).toFixed(1)}m`,
       groundPlacements: finalLayout.ground,
       level1Placements: finalLayout.level1,
+      groundCells,
+      level1Cells,
       buildingW: alignedBW,
       buildingD: alignedBD,
       groupId,
@@ -2903,16 +2919,18 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     const level1GridForFinalize = level1GridAfterRect.clone();
     splitAllSuperRooms(groundGridForFinalize, groundSuperRoomMap);
     splitAllSuperRooms(level1GridForFinalize, level1SuperRoomMap);
-    const groundLayout = finalizeLayout(groundGridForFinalize).ground;
-    const level1Layout = finalizeLayout(level1GridForFinalize).level1;
+    const groundCells = extractGridCells(groundGridForFinalize);
+    const level1Cells = extractGridCells(level1GridForFinalize);
+    const groundLayout = attachGridCellsToPlacements(finalizeLayout(groundGridForFinalize).ground, groundCells);
+    const level1Layout = attachGridCellsToPlacements(finalizeLayout(level1GridForFinalize).level1, level1Cells);
     return {
       id: `${prefix}-${groupId}-${variantIdx}`,
       label: `约束生长法 (Phase 1)`,
       desc: `建筑 ${(alignedBW / 1000).toFixed(1)}m×${(alignedBD / 1000).toFixed(1)}m [Phase 1]`,
       groundPlacements: groundLayout,
       level1Placements: level1Layout,
-      groundCells: extractGridCells(groundGridForFinalize),
-      level1Cells: extractGridCells(level1GridForFinalize),
+      groundCells,
+      level1Cells,
       buildingW: alignedBW,
       buildingD: alignedBD,
       groupId,
@@ -2932,8 +2950,10 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     const level1GridForFinalize = level1GridAfterRect.clone();
     splitAllSuperRooms(groundGridForFinalize, groundSuperRoomMap);
     splitAllSuperRooms(level1GridForFinalize, level1SuperRoomMap);
-    const groundLayout = finalizeLayout(groundGridForFinalize).ground;
-    const level1Layout = finalizeLayout(level1GridForFinalize).level1;
+    const groundCells = extractGridCells(groundGridForFinalize);
+    const level1Cells = extractGridCells(level1GridForFinalize);
+    const groundLayout = attachGridCellsToPlacements(finalizeLayout(groundGridForFinalize).ground, groundCells);
+    const level1Layout = attachGridCellsToPlacements(finalizeLayout(level1GridForFinalize).level1, level1Cells);
     return {
       id: `${prefix}-${groupId}-${variantIdx}`,
       label: `约束生长法`,
@@ -2945,6 +2965,8 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
       groupId,
       variantIdx,
       _debug: debugData,
+      groundCells,
+      level1Cells,
 
       _relaxedDoorAccess: relaxedDoorAccess,
     };
@@ -2984,16 +3006,18 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     // Split super-rooms before finalizing
     splitAllSuperRooms(groundGridBeforeGaps, groundSuperRoomMap);
     splitAllSuperRooms(level1GridBeforeGaps, level1SuperRoomMap);
-    const groundLayout = finalizeLayout(groundGridBeforeGaps).ground;
-    const level1Layout = finalizeLayout(level1GridBeforeGaps).level1;
+    const groundCells = extractGridCells(groundGridBeforeGaps);
+    const level1Cells = extractGridCells(level1GridBeforeGaps);
+    const groundLayout = attachGridCellsToPlacements(finalizeLayout(groundGridBeforeGaps).ground, groundCells);
+    const level1Layout = attachGridCellsToPlacements(finalizeLayout(level1GridBeforeGaps).level1, level1Cells);
     return {
       id: `${prefix}-${groupId}-${variantIdx}`,
       label: `约束生长法 (Phase 2)`,
       desc: `建筑 ${(alignedBW / 1000).toFixed(1)}m×${(alignedBD / 1000).toFixed(1)}m [Phase 2]`,
       groundPlacements: groundLayout,
       level1Placements: level1Layout,
-      groundCells: extractGridCells(groundGridBeforeGaps),
-      level1Cells: extractGridCells(level1GridBeforeGaps),
+      groundCells,
+      level1Cells,
       buildingW: alignedBW,
       buildingD: alignedBD,
       groupId,
@@ -3011,8 +3035,10 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     // Split super-rooms before finalizing
     splitAllSuperRooms(groundGridBeforeGaps, groundSuperRoomMap);
     splitAllSuperRooms(level1GridBeforeGaps, level1SuperRoomMap);
-    const groundLayout = finalizeLayout(groundGridBeforeGaps).ground;
-    const level1Layout = finalizeLayout(level1GridBeforeGaps).level1;
+    const groundCells = extractGridCells(groundGridBeforeGaps);
+    const level1Cells = extractGridCells(level1GridBeforeGaps);
+    const groundLayout = attachGridCellsToPlacements(finalizeLayout(groundGridBeforeGaps).ground, groundCells);
+    const level1Layout = attachGridCellsToPlacements(finalizeLayout(level1GridBeforeGaps).level1, level1Cells);
     return {
       id: `${prefix}-${groupId}-${variantIdx}`,
       label: `约束生长法`,
@@ -3024,6 +3050,8 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
       groupId,
       variantIdx,
       _debug: debugData,
+      groundCells,
+      level1Cells,
 
       _relaxedDoorAccess: relaxedB,
     };
@@ -3066,6 +3094,10 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     ground: timedGen('finalizeLayout_ground', () => finalizeLayout(groundGrid).ground),
     level1: timedGen('finalizeLayout_level1', () => finalizeLayout(level1Grid).level1),
   };
+  const groundCells = extractGridCells(groundGrid);
+  const level1Cells = extractGridCells(level1Grid);
+  finalLayout.ground = attachGridCellsToPlacements(finalLayout.ground, groundCells);
+  finalLayout.level1 = attachGridCellsToPlacements(finalLayout.level1, level1Cells);
 
   // 计算 Phase 3 完成后的宽松可达性（供全量评分使用）
   const relaxedFinal = timedGen('final_relaxedDoorAccess', () => computeRelaxedDoorAccess(groundGrid, level1Grid));
@@ -3077,8 +3109,8 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     desc: `建筑 ${(alignedBW / 1000).toFixed(1)}m×${(alignedBD / 1000).toFixed(1)}m`,
     groundPlacements: finalLayout.ground,
     level1Placements: finalLayout.level1,
-    groundCells: extractGridCells(groundGrid),
-    level1Cells: extractGridCells(level1Grid),
+    groundCells,
+    level1Cells,
     buildingW: alignedBW,
     buildingD: alignedBD,
     groupId,

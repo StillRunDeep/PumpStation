@@ -1,5 +1,5 @@
 import { ROOM_DEFS } from '../layout/model/room-defs.js'
-import { _r, _l, _t, _dh, _dv, decomposeRoomIntoRects, calculateLabelPosition } from './svg-helpers.js'
+import { _r, _l, _t, _dh, _dv, decomposeRoomIntoRects, calculateLabelPosition, getRoomOutlinePaths } from './svg-helpers.js'
 
 const FONT = 'Microsoft YaHei,sans-serif';
 
@@ -133,16 +133,30 @@ export function renderLayoutSVG(variant, floor, vw, vh, opts = {}) {
         'rgba(255,193,7,0.08)', '#f0a500', 1.5, 'stroke-dasharray="6,3"');
   }
 
-  const resolvedShapes = resolveOverlaps(placements || {});
+  const hasCellGeometry = Object.values(placements || {}).some(p => p?.cells && p?.gridSize);
+  const resolvedShapes = hasCellGeometry ? {} : resolveOverlaps(placements || {});
 
-  for (const [id, shape] of Object.entries(resolvedShapes || {})) {
+  for (const [id, p] of Object.entries(placements || {})) {
     const def = ROOM_DEFS[id];
     if (!def) continue;
 
-    const p = placements[id];
+    const shape = resolvedShapes[id] || { type: 'rect', ...p };
     const rx = ox + p.x * ps, ry = oy + p.y * ps, rw = p.w * ps, rd = p.d * ps;
 
-    if (def.isOpening) {
+    if (p.cells && p.gridSize) {
+      const paths = getRoomOutlinePaths(p.cells);
+      const pathData = paths.map(points => points.map((pt, idx) => {
+        const x = ox + pt.x * p.gridSize * ps;
+        const y = oy + pt.y * p.gridSize * ps;
+        return `${idx === 0 ? 'M' : 'L'} ${x} ${y}`;
+      }).join(' ') + ' Z').join(' ');
+      const stroke = def.strokeColor || '#555';
+      if (def.isOpening) {
+        s += `<path d="${pathData}" fill="#cde6f7" stroke="${stroke}" stroke-width="1.5" stroke-dasharray="4,2"/>`;
+      } else {
+        s += `<path d="${pathData}" fill="${def.color}" stroke="${stroke}" stroke-width="1.5"/>`;
+      }
+    } else if (def.isOpening) {
       s += _r(rx, ry, rw, rd, '#cde6f7', def.strokeColor || '#2471a3', 1.5, 'stroke-dasharray="4,2"');
     } else if (shape.type === 'polygon') {
       const points = shape.points.map(([x, y]) => `${ox + x * ps},${oy + y * ps}`).join(' ');
@@ -151,8 +165,15 @@ export function renderLayoutSVG(variant, floor, vw, vh, opts = {}) {
       s += _r(rx, ry, rw, rd, def.color, def.strokeColor || '#555', 1.5);
     }
 
+    let labelX = rx + rw/2;
+    let labelY = ry + rd/2;
+    if (p.cells && p.gridSize) {
+      const labelPos = calculateLabelPosition(p.cells);
+      labelX = ox + labelPos.x * p.gridSize * ps;
+      labelY = oy + labelPos.y * p.gridSize * ps;
+    }
     const labelSz = Math.max(7, Math.min(10, rw / (def.label.length * 0.7)));
-    s += _t(rx + rw/2, ry + rd/2, def.label, labelSz, '#2c3e50');
+    s += _t(labelX, labelY, def.label, labelSz, '#2c3e50');
   }
 
   if (showDims) {
@@ -202,15 +223,12 @@ export function renderLayoutSVGDual(variant, vw, vh) {
         const p = placements[id];
 
         if (p.cells && p.gridSize) {
-            const rects = decomposeRoomIntoRects(p.cells);
-            let pathData = '';
-            for (const r of rects) {
-                const rx_cell = ox + r.x * p.gridSize * ps;
-                const ry_cell = oy + r.y * p.gridSize * ps;
-                const rw_cell = r.w * p.gridSize * ps;
-                const rh_cell = r.h * p.gridSize * ps;
-                pathData += `M ${rx_cell} ${ry_cell} h ${rw_cell} v ${rh_cell} h ${-rw_cell} Z `;
-            }
+            const paths = getRoomOutlinePaths(p.cells);
+            const pathData = paths.map(points => points.map((pt, idx) => {
+                const x = ox + pt.x * p.gridSize * ps;
+                const y = oy + pt.y * p.gridSize * ps;
+                return `${idx === 0 ? 'M' : 'L'} ${x} ${y}`;
+            }).join(' ') + ' Z').join(' ');
 
             if (def.isOpening) {
                 s += `<path d="${pathData}" fill="#cde6f7" stroke="${def.strokeColor || '#2471a3'}" stroke-width="1" stroke-dasharray="3,2"/>`;

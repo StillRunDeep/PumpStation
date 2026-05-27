@@ -1175,7 +1175,7 @@
   <rect x="24" y="24" width="200" height="84" fill="white" fill-opacity="0.92" stroke="#aaa" stroke-width="1" rx="3"/>
   <text x="30" y="38" class="debug-title">Phase 2 · ground · seed=100</text>
   <text x="30" y="54" class="debug-info">Building: 30m × 20m</text>
-  <text x="30" y="68" class="debug-info">Rooms: 6   Time: 0.03s</text>
+  <text x="30" y="68" class="debug-info">Rooms: 6   Time: 0.09s</text>
   <text x="30" y="82" class="debug-info">Render: cell-accurate</text>
   <text x="30" y="96" class="debug-info">Violations: 0</text>
 </svg>
