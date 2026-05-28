@@ -1022,7 +1022,8 @@ export function renderSectionPreview(ag11, extra = {}) {
     Z_alarm_high: ag11.Z_alarm_high, Z_alarm_low: ag11.Z_alarm_low, Z_max: ag11.Z_max,
   }
 
-  const inputs = parseInputs(N, placeholderAg21, ag31Params, ag11.S || 1, topology, {
+  const safeS = Math.min(ag11.S || 1, 100)
+  const inputs = parseInputs(N, placeholderAg21, ag31Params, safeS, topology, {
     Z_sump, Q_single, H_design, P_motor, catalogPump, outletWall,
   })
   const geo = computeGeometry(inputs)
