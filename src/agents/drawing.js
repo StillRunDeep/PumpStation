@@ -315,17 +315,29 @@ function buildLayoutMap(topology, geo, inputs) {
   const { SCALE_MAIN, room_ox, room_x2, room_y2, hdr_y } = geo
   const { DN_branch, DN_main, e_wall, w_pump } = inputs
 
-  // 建立邻接表
+  // 建立邻接表（含设备内部节点连接，否则 BFS 无法穿越设备）
   const adj = {}
   for (const n of nodes) adj[n.id] = []
   for (const p of pipes) {
     adj[p.node1]?.push(p.node2)
     adj[p.node2]?.push(p.node1)
   }
+  for (const d of devices) {
+    if (d.nodeIds?.length >= 2) {
+      for (let i = 0; i < d.nodeIds.length; i++) {
+        for (let j = i + 1; j < d.nodeIds.length; j++) {
+          const a = d.nodeIds[i], b = d.nodeIds[j]
+          if (!adj[a]) adj[a] = []
+          if (!adj[b]) adj[b] = []
+          adj[a].push(b)
+          adj[b].push(a)
+        }
+      }
+    }
+  }
 
   // 找关键设备
   const pumps = getPumpsInOrder(topology)
-
   const junction = devices.find(d => d.type === 'junction')
   const sourceNode = nodes.find(n => n.label === '进水')
   const sinkNode = nodes.find(n => n.label === '出水')
@@ -333,94 +345,118 @@ function buildLayoutMap(topology, geo, inputs) {
   const spineEndX = room_x2 - e_wall * SCALE_MAIN
   const sumpLayout = buildSumpLayout(pumps, geo, inputs)
 
-  // 水泵 X 坐标按集水坑分格布置：泵宽 + 200mm 隔墙
   const pumpXs = sumpLayout.pumpCenters.map(p => p.x)
-
-  // 最小直管段
   const minStr_px = Math.max(2 * DN_branch, 300) / 1000 * SCALE_MAIN
+
+  const junctionInNodeId = junction?.nodeIds?.[0]
+  const junctionOutNodeId = junction?.nodeIds?.[junction?.nodeIds?.length - 1]
 
   // ── 主分支（每泵一个梳齿）──────────────────────────────────────────
   const branches = pumps.map((pump, i) => {
     const pumpOutNodeId = pump.nodeIds?.[0]
-    const junctionInNodeId = junction?.nodeIds?.[0]
 
-    // BFS 找到从泵出口到汇流点入口的路径 (顺序: 止回阀 -> 闸阀)
+    // BFS 从泵出口到汇流点（设备内部节点已互通，路径可穿越设备）
     const path = tracePath(pumpOutNodeId, [junctionInNodeId], adj)
+    const seen = new Set()
     const chainDevices = path
       .map(nodeId => devices.find(d => d.nodeIds?.includes(nodeId)))
-      .filter(dev => dev && dev.id !== junction?.id && dev.type !== 'pump')
+      .filter(dev => {
+        if (!dev || dev.id === junction?.id || dev.type === 'pump') return false
+        if (seen.has(dev.id)) return false
+        seen.add(dev.id)
+        return true
+      })
 
     const items = []
-    
-    // 【核心修复】：从穿楼板处(底部)开始，向梳脊(上方)逆推 Y 坐标！
-    let curY = room_y2 
-    
-    // 弯头（水泵穿上来后的第一个转向件）
+    // 从穿楼板处(底部)开始，向梳脊(上方)逆推 Y 坐标
+    let curY = room_y2
     const elbow_r = elbowCTF(DN_branch) / 1000 * SCALE_MAIN * 0.5
-    curY -= elbow_r * 2  // 向上移动，越过弯头占据的空间
+    curY -= elbow_r * 2
 
     chainDevices.forEach(dev => {
       const hl = deviceHalfLen(dev, DN_branch, SCALE_MAIN)
-      curY -= minStr_px + hl // 向上移动：跨过直管段和阀门的下半部分
+      curY -= minStr_px + hl
       items.push({ device: dev, planX: pumpXs[i], planY: curY, halfLen: hl })
-      curY -= hl // 向上移动：跨过阀门的上半部分，准备迎接下一个设备
+      curY -= hl
     })
 
-    // 泵本身依然记在坑底
     const pump_y = room_y2 + 10
     items.push({ device: pump, planX: pumpXs[i], planY: pump_y, halfLen: 0, isPump: true })
 
     return { pump, items, teeX: pumpXs[i] }
   })
 
-  // ── 旁通分支 ─────────────────────────────────────────────────────────
-  const bypass_y = hdr_y + 40  // 旁通管在主梳脊下方
-  const junctionInNodeId = junction?.nodeIds?.[0]
-  const bypassPath = sourceNode ? tracePath(sourceNode.id, [junctionInNodeId], adj) : []
-  const bypassDevices = bypassPath
+  // ── 回流支路（汇流点 → 集水坑方向）──────────────────────────────────
+  // 从 junction 泵侧节点出发，追踪到 source（进水），即回流路径
+  const returnPath = sourceNode ? tracePath(junctionInNodeId, [sourceNode.id], adj) : []
+  const returnSeen = new Set()
+  const returnDevices = returnPath
     .map(nodeId => devices.find(d => d.nodeIds?.includes(nodeId)))
-    .filter(Boolean)
+    .filter(dev => {
+      if (!dev || dev.type === 'junction' || dev.type === 'pump') return false
+      if (returnSeen.has(dev.id)) return false
+      returnSeen.add(dev.id)
+      return true
+    })
 
-  let bypass_x = room_ox + e_wall * SCALE_MAIN
-  const bypassChain = bypassDevices.map(dev => {
+  // 回流管 X：放在最左侧泵支路左边（留 e_wall 间距）
+  const firstPumpX = pumpXs.length > 0 ? pumpXs[0] : spineStartX
+  const returnPipeX = Math.max(room_ox + 8, firstPumpX - e_wall * SCALE_MAIN)
+
+  // 从主管（hdr_y）向下排布设备至坑口（正 Y 方向）
+  let retY = hdr_y
+  const returnChain = returnDevices.map(dev => {
     const hl = deviceHalfLen(dev, DN_branch, SCALE_MAIN)
-    bypass_x += minStr_px + hl
-    const item = { device: dev, planX: bypass_x, planY: bypass_y, halfLen: hl }
-    bypass_x += hl
+    retY += minStr_px + hl
+    const item = { device: dev, planX: returnPipeX, planY: retY, halfLen: hl }
+    retY += hl
     return item
   })
 
   // ── 主管阀门链（汇流点出口 → 出水口）─────────────────────────────────
-  const junctionOutNodeId = junction?.nodeIds?.[junction.nodeIds.length - 1]
   const mainPath = sinkNode ? tracePath(junctionOutNodeId, [sinkNode.id], adj) : []
+  const mainSeen = new Set()
   const mainDevices = mainPath
     .map(nodeId => devices.find(d => d.nodeIds?.includes(nodeId)))
-    .filter(Boolean)
+    .filter(dev => {
+      if (!dev || dev.type === 'junction') return false
+      if (mainSeen.has(dev.id)) return false
+      mainSeen.add(dev.id)
+      return true
+    })
 
+  // 主管阀门按真实尺寸排布（从最后一个泵 tee 右侧起）
   const lastPumpX = pumpXs.length ? Math.max(...pumpXs) : spineStartX
-  const mainStartX = Math.min(lastPumpX + w_pump * SCALE_MAIN / 2 + e_wall * SCALE_MAIN, spineEndX)
-  const mainStep = mainDevices.length
-    ? Math.max(24, (spineEndX - mainStartX) / (mainDevices.length + 1))
-    : 0
-  const mainChain = mainDevices.map((dev, i) => {
+  const mainStartX = lastPumpX + (w_pump / 2) * SCALE_MAIN + minStr_px
+  let mainCurX = mainStartX
+  const mainChain = mainDevices.map(dev => {
     const hl = deviceHalfLen(dev, DN_main, SCALE_MAIN)
-    const planX = Math.min(mainStartX + (i + 1) * mainStep, spineEndX)
-    return { device: dev, planX, planY: hdr_y, halfLen: hl }
+    mainCurX += hl
+    const item = { device: dev, planX: Math.min(mainCurX, spineEndX - hl), planY: hdr_y, halfLen: hl }
+    mainCurX += hl + minStr_px
+    return item
   })
 
-  const mainEndX = spineEndX
+  // 主管实际起止：从 returnPipeX（或第一泵 tee）到出水口（东墙）
+  const headerStartX = Math.min(returnPipeX, firstPumpX)
+  const outletEndX = room_x2
+
   return {
     pumpsInOrder: pumps,
     branches,
-    bypassChain,
+    returnChain,
+    returnPipeX,
+    bypassChain: returnChain,
     mainChain,
     pumpXs,
     teeXs: pumpXs,
     spineStartX,
     spineEndX,
-    mainEndX,
+    headerStartX,
+    outletEndX,
+    mainEndX: spineEndX,
     hdr_y,
-    bypass_y,
+    bypass_y: hdr_y + 40,
     sumpLayout,
     representativeBranch: branches[0] || null,
   }
@@ -555,11 +591,13 @@ function buildPlanView(inputs, geo, layoutMap) {
   s += _r(room_ox, room_oy, L * SCALE_MAIN, W * SCALE_MAIN, '#fcfeff', '#2980b9', 2)
   s += _t((room_ox + room_x2) / 2, room_oy - 10, '维护间', 10, '#2980b9', 'middle', 'bold')
 
-  // ── 梳脊（主管）────────────────────────────────────────────────────
-  const spineStartX = layoutMap?.spineStartX ?? (room_ox + e_wall * SCALE_MAIN)
-  const spineEndX = layoutMap?.mainEndX ?? (room_x2 - e_wall * SCALE_MAIN)
-  s += _l(spineStartX, hdr_y, spineEndX, hdr_y, '#1f78a8', 3)
-  s += _t(spineStartX + 5, hdr_y - 5, `DN${DN_label} 出水总管`, 9, '#2980b9', 'start')
+  // ── 梳脊（主管）：从最左侧接口到出水口（东墙）────────────────────────
+  const headerStartX = layoutMap?.headerStartX ?? layoutMap?.spineStartX ?? (room_ox + e_wall * SCALE_MAIN)
+  const outletEndX = layoutMap?.outletEndX ?? layoutMap?.mainEndX ?? (room_x2 - e_wall * SCALE_MAIN)
+  s += _l(headerStartX, hdr_y, outletEndX, hdr_y, '#1f78a8', 3)
+  // 出水口穿墙符号（东墙）
+  s += _r(outletEndX - 4, hdr_y - 5, 8, 10, '#e8f4fd', '#1f78a8', 1.5)
+  s += _t(outletEndX - 8, hdr_y - 10, `DN${DN_label} 出水总管`, 9, '#2980b9', 'end')
 
   // ── 主管阀门（汇流点右侧）──────────────────────────────────────────
   if (layoutMap?.mainChain?.length) {
@@ -651,26 +689,36 @@ function buildPlanView(inputs, geo, layoutMap) {
     }
   }
 
-  // ── 旁通管 ──────────────────────────────────────────────────────────
-  if (layoutMap?.bypassChain?.length) {
-    const bp_left = room_ox + e_wall * SCALE_MAIN
-    const bp_right = room_x2 - e_wall * SCALE_MAIN
-    s += _l(bp_left, bypass_y, bp_right, bypass_y, '#2980b9', 1.5)
-    s += _l(bp_right, hdr_y, bp_right, bypass_y, '#2980b9', 1.5)
-    s += _l(bp_left, hdr_y, bp_left, bypass_y, '#2980b9', 1.5)
-    s += _t((bp_left + bp_right) / 2, bypass_y - 6, '旁通管', 9, '#2980b9', 'middle')
+  // ── 回流管（从主管向下回到集水坑）──────────────────────────────────
+  const returnItems = layoutMap?.returnChain || []
+  const returnPipeX = layoutMap?.returnPipeX ?? (room_ox + e_wall * SCALE_MAIN * 0.5)
+  if (returnItems.length > 0 || (layoutMap && returnPipeX >= room_ox)) {
+    // 在主管上标出回流接口（三通）
+    s += _tee(returnPipeX, hdr_y, 4.5, '#7f8c8d')
 
-    for (const { device, planX, planY, halfLen } of layoutMap.bypassChain) {
+    let retLastY = hdr_y
+    for (const { device, planX, planY, halfLen } of returnItems) {
+      s += _l(planX, retLastY, planX, planY, '#7f8c8d', 1.5)
       if (device.type === 'gate_valve') {
-        s += `<g class="valve-group" data-type="旁通闸阀" data-dn="${DN_branch}">`
-        s += _gateValve(planX, planY, halfLen, true, '#c0392b')
+        s += `<g class="valve-group" data-type="回流闸阀" data-dn="${DN_branch}">`
+        s += _gateValve(planX, planY, halfLen, false, '#8e44ad')
         s += '</g>'
       } else if (device.type === 'check_valve') {
-        s += `<g class="valve-group" data-type="旁通止回阀" data-dn="${DN_branch}">`
-        s += _checkValve(planX, planY, halfLen, true, '#c0392b')
+        s += `<g class="valve-group" data-type="回流止回阀" data-dn="${DN_branch}">`
+        s += _checkValve(planX, planY, halfLen, false, '#8e44ad')
+        s += '</g>'
+      } else if (device.type === 'flowmeter') {
+        const r_ret = DN_branch / 1000 * SCALE_MAIN
+        s += `<g class="valve-group" data-type="回流流量计" data-dn="${DN_branch}">`
+        s += _flowmeter(planX, planY, halfLen, r_ret / 2, false, '#8e44ad')
         s += '</g>'
       }
+      retLastY = planY
     }
+    // 连接到坑口（穿楼板）
+    s += _l(returnPipeX, retLastY, returnPipeX, room_y2, '#7f8c8d', 1.5)
+    s += `<circle cx="${returnPipeX.toFixed(1)}" cy="${room_y2.toFixed(1)}" r="5" fill="#fff" stroke="#7f8c8d" stroke-width="1.5" stroke-dasharray="2,2"/>`
+    s += _t(returnPipeX, room_y2 + 13, '回流', 8, '#8e44ad', 'middle')
   }
 
   // ── 尺寸标注 ────────────────────────────────────────────────────────
