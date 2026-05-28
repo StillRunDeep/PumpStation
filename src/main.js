@@ -21,7 +21,7 @@ import { initLayoutController, generateInitialLayouts } from './ui/layout-contro
 
 import { renderRainfall, renderTopology, renderPoolDepth, renderPipeSizing, renderMaintenanceRoom, renderPumpSpec, renderRainfallCard, renderSchemeOptions } from './ui/results-panel.js'
 import { showAg41Notify } from './ui/layout-panel.js'
-import { initTopologyEditor, setTopologyFromN, getCurrentTopology } from './ui/topology-editor.js'
+import { initTopologyEditor, setTopologyFromN, getCurrentTopology, getOutletWall, setOutletWall } from './ui/topology-editor.js'
 
 let _lastTopoN     = null
 let _lastTopoSpare = 0
@@ -301,6 +301,7 @@ function handleSchemeChange(id) {
       P_motor: ag2Result?.P_motor,
       catalogPump: moduleCache.ag12?.displayMatches?.[0] ?? null,
       Z_sump: ag00Result.Z_sump,
+      outletWall: getOutletWall(),
     })
   }
   // 同步更新方案卡 UI
@@ -468,6 +469,7 @@ async function runCalculation() {
 
   // AG0-1: 参数验证（保留，用于获取 mode、N 等下游参数）
   const ag00 = runUserParams(ag00Params)
+  moduleCache.ag00 = ag00
 
   const panel = document.getElementById('results-panel')
   panel.hidden = false
@@ -617,6 +619,7 @@ async function runCalculation() {
     P_motor: ag12?.P_motor,
     catalogPump: moduleCache.ag12?.displayMatches?.[0] ?? null,
     Z_sump: ag00.Z_sump,
+    outletWall: getOutletWall(),
   })
 
   // Update repair_zone hint from AG2-1 before reading AG4-1 params
@@ -632,9 +635,42 @@ async function runCalculation() {
 
 // ── 初始化 AG0-1 拓扑编辑器 ──────────────────────────────────────────
 const _initN = parseInt(document.getElementById('inp-N').value, 10) || 2
-initTopologyEditor('topology-editor-wrap', () => {})
+
+// 出水方向变化时（点拓扑编辑器里的方向按钮）立即重新渲染预览图
+function _onOutletWallChange() {
+  const ag21 = moduleCache.ag21
+  const ag11 = moduleCache.ag11
+  const ag12 = moduleCache.ag12
+  const ag13 = moduleCache.ag13
+  const ag00 = moduleCache.ag00
+  if (!ag21 || !ag11 || !ag00) return
+  // 只重新渲染 drawing，不重算房间尺寸
+  const ag31Params = {
+    h_pool: ag11.D, h_active: ag11.Z_max - ag11.Z_stop,
+    Z_stop: ag11.Z_stop, Z_start1: ag11.Z_start1, Z_start2: ag11.Z_start2,
+    Z_alarm_high: ag11.Z_alarm_high, Z_alarm_low: ag11.Z_alarm_low, Z_max: ag11.Z_max,
+  }
+  const baseTopo = ag00.topo?.topology
+  const enrichedTopo = baseTopo ?? getCurrentTopology()
+  runDrawing(ag00.N, ag21, ag31Params, ag11.S, enrichedTopo, {
+    Q_single: ag00.Q_pump, H_design: ag12?.H_total, P_motor: ag12?.P_motor,
+    catalogPump: moduleCache.ag12?.displayMatches?.[0] ?? null,
+    Z_sump: ag00.Z_sump, outletWall: getOutletWall(),
+  })
+}
+
+initTopologyEditor('topology-editor-wrap', _onOutletWallChange)
 setTopologyFromN(_initN)
 _lastTopoN = _initN
+
+// SVG 平面图中的方向三角形点击（事件委托）
+document.getElementById('svg-ag31').addEventListener('click', e => {
+  const tri = e.target.closest('[data-outlet-dir]')
+  if (!tri) return
+  const wall = tri.dataset.outletDir
+  setOutletWall(wall)
+  _onOutletWallChange()
+})
 
 // 初始化方案选项卡
 document.getElementById('scheme-options').innerHTML = renderSchemeOptions(currentSchemeId)

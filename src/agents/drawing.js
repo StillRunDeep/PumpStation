@@ -33,7 +33,7 @@ function parseInputs(N, ag21, params, S, topology, extraInfo) {
     valvesAfterJunction = [],
   } = ag21
   const { h_pool, h_active, Z_stop: stopLevel, Z_start1: startLevel, Z_start2, Z_alarm_high: alarmLevel, Z_alarm_low, Z_max } = params
-  const { Q_single, H_design, P_motor, catalogPump, Z_sump } = extraInfo
+  const { Q_single, H_design, P_motor, catalogPump, Z_sump, outletWall = 'E' } = extraInfo
 
   const L_pool = Math.max(L, Math.sqrt(S * 1.5))
   const D_pool = S / L_pool
@@ -48,7 +48,7 @@ function parseInputs(N, ag21, params, S, topology, extraInfo) {
     hasCatalogDims, DN_branch, DN_main, DN_label, c_wall_m, L_elbow_m,
     valvesAfterJunction,
     h_pool, h_active, stopLevel, startLevel, Z_start2, alarmLevel, Z_alarm_low, Z_max,
-    Q_single, H_design, P_motor, catalogPump, Z_sump,
+    Q_single, H_design, P_motor, catalogPump, Z_sump, outletWall,
     L_pool, D_pool, room_H, Z_top, pumpsInOrder,
   }
 }
@@ -558,7 +558,7 @@ function buildPlanView(inputs, geo, layoutMap) {
     L, W, d_spacing, e_wall, w_pump, d_pump, N_total,
     hasCatalogDims, DN_branch, DN_main, DN_label,
     Q_single, H_design, P_motor,
-    pumpsInOrder,
+    pumpsInOrder, outletWall = 'E',
   } = inputs
 
   const { SCALE_MAIN, PW, PH, PLAN_X, room_ox, room_oy, room_x2, room_y2, hdr_y } = geo
@@ -726,6 +726,27 @@ function buildPlanView(inputs, geo, layoutMap) {
   s += _l(bx, by_bar - 3, bx, by_bar + 3, '#333', 1.5)
   s += _l(bx + bar_len, by_bar - 3, bx + bar_len, by_bar + 3, '#333', 1.5)
   s += _t(bx + bar_len / 2, by_bar - 5, '1m', 9, '#333')
+
+  // ── 出水方向三角形标记（可点击）───────────────────────────────────────
+  const mid_x = (room_ox + room_x2) / 2
+  const mid_y = (room_oy + room_y2) / 2
+  const TRI_SIZE = 10
+  const TRI_OFFSET = 14  // 距墙内侧
+  const dirConfigs = [
+    { wall: 'N', cx: mid_x, cy: room_oy + TRI_OFFSET, pts: `0,${TRI_SIZE} ${TRI_SIZE},-${TRI_SIZE} -${TRI_SIZE},-${TRI_SIZE}` },
+    { wall: 'S', cx: mid_x, cy: room_y2 - TRI_OFFSET, pts: `0,-${TRI_SIZE} ${TRI_SIZE},${TRI_SIZE} -${TRI_SIZE},${TRI_SIZE}` },
+    { wall: 'E', cx: room_x2 - TRI_OFFSET, cy: hdr_y,  pts: `${TRI_SIZE},0 -${TRI_SIZE},${TRI_SIZE} -${TRI_SIZE},-${TRI_SIZE}` },
+    { wall: 'W', cx: room_ox + TRI_OFFSET, cy: mid_y,  pts: `-${TRI_SIZE},0 ${TRI_SIZE},${TRI_SIZE} ${TRI_SIZE},-${TRI_SIZE}` },
+  ]
+  for (const { wall, cx, cy, pts } of dirConfigs) {
+    const active = wall === outletWall
+    const fill = active ? '#e74c3c' : '#bdc3c7'
+    const stroke = active ? '#c0392b' : '#95a5a6'
+    s += `<g class="outlet-dir-tri" data-outlet-dir="${wall}" style="cursor:pointer" transform="translate(${cx.toFixed(1)},${cy.toFixed(1)})">`
+    s += `<polygon points="${pts}" fill="${fill}" stroke="${stroke}" stroke-width="1.5" opacity="${active ? 1 : 0.6}"/>`
+    if (active) s += `<text y="20" text-anchor="middle" font-size="8" fill="#c0392b" font-weight="bold">出水</text>`
+    s += `</g>`
+  }
 
   return { s, SCALE_MAIN, PW, PH, CANVAS_W: geo.CANVAS_W }
 }

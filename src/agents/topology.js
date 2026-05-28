@@ -274,6 +274,7 @@ export function generateDefaultTopology(N, N_spare = 0) {
     nodes,
     devices,
     pipes,
+    outletWall: 'E',
   }
 }
 
