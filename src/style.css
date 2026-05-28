@@ -159,10 +159,58 @@ details .adv-grid { margin-top: 12px; }
 .btn-calculate:hover  { opacity: .92; }
 .btn-calculate:active { transform: scale(.98); }
 
-/* ── Results ── */
-.results-grid {
+/* ── Two-column page layout ── */
+.page-two-col {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(300px, 420px) 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+.page-left {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+.page-right {
+  position: sticky;
+  top: 16px;
+  height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.page-right .card-ag31-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.page-right .card-ag31-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.page-right #svg-ag31 {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+@media (max-width: 900px) {
+  .page-two-col { grid-template-columns: 1fr; }
+  .page-right { position: static; height: auto; }
+}
+
+/* ── Results (legacy) ── */
+.results-grid {
+  display: flex;
+  flex-direction: column;
   gap: 20px;
 }
 @media (max-width: 720px) { .results-grid { grid-template-columns: 1fr; } }
@@ -244,9 +292,8 @@ details[open] > .card-header::before {
 .card-pipe-sizing .card-header { background: var(--color-ag13); }
 .card-ag31 .card-header { background: #117a65; }
 .card-ag41 .card-header { background: var(--color-ag41); }
-.card-ag31-wrap { grid-column: 1 / -1; }
 .card-ag41-wrap { grid-column: 1 / -1; }
-#svg-ag31 { display: block; width: 100%; height: 520px; cursor: grab; background: #f4f6f8; }
+#svg-ag31 { display: block; width: 100%; height: 100%; min-height: 400px; cursor: grab; background: #f4f6f8; }
 #svg-ag31:active { cursor: grabbing; }
 #svg-ag41 { display: block; width: 100%; height: 560px; cursor: grab; background: #f4f6f8; }
 #svg-ag41:active { cursor: grabbing; }
@@ -1227,6 +1274,11 @@ svg.section-drag-active [data-zoom-handle] {
 /* 仅在有卡片展开时，隐藏其他非展开卡片 */
 body.focus-mode.has-open-card .agent-card:not([open]) {
   display: none !important;
+}
+
+/* 右栏预览（AG3-1）始终可见，不参与向导隐藏 */
+body.focus-mode.has-open-card .page-right .agent-card:not([open]) {
+  display: flex !important;
 }
 
 body.focus-mode .page-header {

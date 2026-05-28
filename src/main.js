@@ -699,6 +699,10 @@ let isFocusMode = false;
  */
 function initFocusMode() {
 
+  // Cards in the sticky right column (AG3-1) are always visible and excluded from wizard nav
+  const wizardCards = () =>
+    Array.from(document.querySelectorAll('.agent-card')).filter(c => !c.closest('.page-right'))
+
   // Inject Navigation Bar
   const navBar = document.createElement('div');
   navBar.id = 'wizard-nav-bar';
@@ -719,7 +723,7 @@ function initFocusMode() {
     }
     navBar.style.display = 'flex';
 
-    const allCards = Array.from(document.querySelectorAll('.agent-card'));
+    const allCards = wizardCards();
     const resultsPanel = document.getElementById('results-panel');
     const isResultsHidden = resultsPanel ? resultsPanel.hidden : true;
 
@@ -786,16 +790,17 @@ function initFocusMode() {
 
   // Global toggle listener (capture phase) to enforce single open and manage modes
   document.addEventListener('toggle', (e) => {
-    if (e.target.classList.contains('agent-card')) {
-      const allCards = document.querySelectorAll('.agent-card');
-      const openCards = Array.from(allCards).filter(c => c.open);
+    // Ignore cards in the sticky right column (AG3-1) — they stay open independently
+    if (e.target.classList.contains('agent-card') && !e.target.closest('.page-right')) {
+      const allCards = wizardCards();
+      const openCards = allCards.filter(c => c.open);
 
       if (e.target.open) {
         // Just opened a card: Enter focus mode, hide others
         isFocusMode = true;
         document.body.classList.add('focus-mode');
         document.body.classList.add('has-open-card');
-        
+
         allCards.forEach(c => {
           if (c !== e.target && c.open) c.removeAttribute('open');
         });
@@ -812,8 +817,8 @@ function initFocusMode() {
   }, true);
 
   // Check initial state: if any card is already open, enter focus mode
-  const allCards = document.querySelectorAll('.agent-card');
-  const openCards = Array.from(allCards).filter(c => c.open);
+  const allCards = wizardCards();
+  const openCards = allCards.filter(c => c.open);
   if (openCards.length > 0) {
     isFocusMode = true;
     document.body.classList.add('focus-mode');
