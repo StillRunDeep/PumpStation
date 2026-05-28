@@ -16,7 +16,7 @@ import { runMaintenanceRoom } from './agents/maintenance-room.js'
 import { SPACE_RULES_DEFAULT } from './data/fitting-dims.js'
 import { runPumpSpec } from './agents/pump-spec.js'
 import { runPipeSizing, PIPE_SCHEMES } from './agents/pipe-sizing.js'
-import { runDrawing } from './agents/drawing.js'
+import { runDrawing, renderSectionPreview } from './agents/drawing.js'
 import { initLayoutController, generateInitialLayouts } from './ui/layout-controller.js'
 
 import { renderRainfall, renderTopology, renderPoolDepth, renderPipeSizing, renderMaintenanceRoom, renderPumpSpec, renderRainfallCard, renderSchemeOptions } from './ui/results-panel.js'
@@ -157,10 +157,11 @@ function recalcAG11() {
   const result = runPoolDepth({ V_design, Z_bottom, D, A_base, N, Z, Q_pump, F_b, F_s })
   moduleCache.ag11 = result
   document.getElementById('card-ag11').innerHTML = renderPoolDepth(result)
-  // 自动写入下游卡片字段
   if (result.valid) {
     setVal('pump-Z-stop', result.Z_stop)
     setVal('pump-Q-pump', Q_pump)
+    // 逐步预览：立即渲染剖面图（水位线 + 池轮廓）
+    renderSectionPreview(result, _sectionPreviewExtra())
   }
   return result
 }
@@ -185,12 +186,13 @@ function recalcAG12() {
   const result = runPumpSpec({ Q_single, Z_stop, Z_discharge, η_hyd, η_mot, NPSH_r, H_pipe_loss }, isNaN(motor_o) ? null : motor_o)
   moduleCache.ag12 = result
   document.getElementById('card-ag12').innerHTML = renderPumpSpec(result)
-  // 自动写入下游卡片字段
   if (result.valid) {
     setVal('pipe-H-total', result.H_total)
     setVal('pipe-Q-pump',  Q_pump)
     setVal('pipe-Z-stop',  Z_stop)
     setVal('pipe-pump-outlet-dn', result.DN_pump_outlet ?? '')
+    // 逐步预览：叠加泵符号 + 扬程标注
+    if (moduleCache.ag11) renderSectionPreview(moduleCache.ag11, _sectionPreviewExtra())
   }
   return result
 }
@@ -227,6 +229,8 @@ function recalcAG13() {
   })
   moduleCache.ag13 = result
   document.getElementById('card-ag13').innerHTML = renderPipeSizing(result)
+  // 逐步预览：叠加出水管 DN 标注
+  if (moduleCache.ag11) renderSectionPreview(moduleCache.ag11, _sectionPreviewExtra())
   return result
 }
 
@@ -635,6 +639,25 @@ async function runCalculation() {
 }
 
 // ── Event wiring ──────────────────────────────────────────────────────
+
+// 组装当前可用的剖面预览附加信息（累积自各步骤）
+function _sectionPreviewExtra() {
+  const ag12 = moduleCache.ag12
+  const ag13 = moduleCache.ag13
+  const ag00 = moduleCache.ag00
+  return {
+    Z_sump:      ag00?.Z_sump ?? null,
+    Q_single:    ag00?.Q_pump != null ? ag00.Q_pump * 3600 : undefined,
+    H_design:    ag12?.H_total,
+    P_motor:     ag12?.P_motor,
+    catalogPump: moduleCache.ag12?.displayMatches?.[0] ?? null,
+    DN_branch:   ag13?.DN_pumpOut   ?? 150,
+    DN_main:     ag13?.DN_mainOutlet ?? 300,
+    topology:    getCurrentTopology(),
+    N:           ag00?.N ?? (parseInt(document.getElementById('inp-N').value, 10) || 2),
+    outletWall:  getOutletWall(),
+  }
+}
 
 // ── 初始化 AG0-1 拓扑编辑器 ──────────────────────────────────────────
 const _initN = parseInt(document.getElementById('inp-N').value, 10) || 2

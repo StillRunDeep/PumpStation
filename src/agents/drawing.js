@@ -983,6 +983,59 @@ function setupInteractions(el, planData) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// ── 逐步预览（AG1-1 / AG1-2 / AG1-3 完成后渲染剖面，平面图留占位）────────────
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * 在 AG2-1 计算完成之前，用 AG1-x 结果渲染剖面图 + 灰色平面图占位区。
+ *
+ * @param {Object} ag11  - runPoolDepth 输出 { D, S, Z_stop, Z_start1, Z_start2, Z_alarm_high, Z_alarm_low, Z_max }
+ * @param {Object} extra - 可用的累积信息 { Z_sump, Q_single, H_design, P_motor, catalogPump, DN_branch, DN_main, topology, N }
+ */
+export function renderSectionPreview(ag11, extra = {}) {
+  const el = document.getElementById('svg-ag31')
+  if (!el || !ag11?.valid) return
+
+  const {
+    Z_sump = null, Q_single, H_design, P_motor, catalogPump,
+    DN_branch = 150, DN_main = 300, topology = null, N = 2, outletWall = 'E',
+  } = extra
+
+  // 最小化的 ag21 占位，让 parseInputs / computeGeometry 能正常运行
+  const placeholderAg21 = {
+    L: 6.0, W: 5.0, d_spacing: 1.0, e_wall: 0.8,
+    w_pump: 0.6, d_pump: 0.8, N_total: Math.max(N, 2), h_room: null,
+    hasCatalogDims: false, DN_branch, DN_main, DN_label: DN_main,
+    c_wall_m: 0.8, L_elbow_m: elbowCTF(DN_branch) / 1000,
+    valvesAfterJunction: [],
+  }
+  const ag31Params = {
+    h_pool: ag11.D, h_active: (ag11.Z_max ?? ag11.Z_alarm_high) - ag11.Z_stop,
+    Z_stop: ag11.Z_stop, Z_start1: ag11.Z_start1, Z_start2: ag11.Z_start2,
+    Z_alarm_high: ag11.Z_alarm_high, Z_alarm_low: ag11.Z_alarm_low, Z_max: ag11.Z_max,
+  }
+
+  const inputs = parseInputs(N, placeholderAg21, ag31Params, ag11.S || 1, topology, {
+    Z_sump, Q_single, H_design, P_motor, catalogPump, outletWall,
+  })
+  const geo = computeGeometry(inputs)
+  const layoutMap = topology ? buildLayoutMap(topology, geo, inputs) : null
+  const sectionData = buildSectionView(inputs, geo, layoutMap)
+  const infoSvg = buildInfoColumn(geo)
+  const minimapSvg = buildMinimap(inputs, geo)
+
+  // 平面图区域灰色占位
+  const { PW, PH, PLAN_X } = geo
+  const mid_y = PH / 2
+  let planHolder = _r(PLAN_X, 0, PW, PH, '#f5f6f7', 'none')
+  planHolder += _t(PLAN_X + PW / 2, mid_y - 10, '平面图', 13, '#bdc3c7', 'middle', 'bold')
+  planHolder += _t(PLAN_X + PW / 2, mid_y + 12, '等待泵房维护间计算完成…', 10, '#bdc3c7', 'middle')
+
+  el.setAttribute('viewBox', `0 0 ${geo.CANVAS_W} ${PH}`)
+  el.innerHTML = infoSvg + planHolder + sectionData.s + minimapSvg
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // ── 主入口 ────────────────────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════
 
