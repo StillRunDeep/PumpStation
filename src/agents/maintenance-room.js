@@ -214,21 +214,47 @@ function calcRoomLength(N_total, w_pump, d_spacing, e_wall, DN_branch, DN_main, 
 
 /**
  * 计算维护间净宽 W
+ * 设备链长度由拓扑实际分支路径驱动（不再硬编码止回阀+闸阀）
  */
-function calcRoomWidth(d_pump, DN_branch, DN_main, spaceRules) {
+function calcRoomWidth(d_pump, DN_branch, DN_main, spaceRules, valvesAfterJunction, topology) {
   const s = spaceRules || SPACE_RULES_DEFAULT
   const pipeToWall_m = s.pipeToWall_mm / 1000
   const L_str   = Math.max(s.minStraight_mm, 2 * DN_branch) / 1000
   const L_elbow = elbowCTF(DN_branch) / 1000
-  const L_cv    = lookupFF(CHECK_VALVE_FF, DN_branch) / 1000
-  const L_gv    = lookupFF(GATE_VALVE_FF, DN_branch) / 1000
   const L_tee   = DN_main / 1000
 
-  const W_pipe = pipeToWall_m + L_elbow + L_str + L_cv + L_str + L_gv + L_tee + pipeToWall_m
+  let deviceChainLen = 0
+  const deviceChainItems = []
+
+  if (valvesAfterJunction.length > 0 && topology?.devices) {
+    const pumpRoomDevices = topology.devices.filter(d => d.roomId === 'pump_room')
+    for (let i = 0; i < valvesAfterJunction.length; i++) {
+      const dev = pumpRoomDevices.find(d => d.id === valvesAfterJunction[i])
+      if (!dev) continue
+      const L_dev = dev.type === 'gate_valve'
+        ? lookupFF(GATE_VALVE_FF, DN_branch) / 1000
+        : lookupFF(CHECK_VALVE_FF, DN_branch) / 1000
+      deviceChainItems.push({ type: dev.type, label: dev.label, length_m: L_dev })
+      deviceChainLen += L_dev
+      if (i < valvesAfterJunction.length - 1) deviceChainLen += L_str
+    }
+  } else {
+    // 无拓扑数据时：退路 — 假设 1 止回阀 + 1 闸阀
+    const L_cv = lookupFF(CHECK_VALVE_FF, DN_branch) / 1000
+    const L_gv = lookupFF(GATE_VALVE_FF, DN_branch) / 1000
+    deviceChainLen = L_cv + L_str + L_gv
+    deviceChainItems.push({ type: 'check_valve', label: '止', length_m: L_cv })
+    deviceChainItems.push({ type: 'gate_valve',  label: '闸', length_m: L_gv })
+  }
+
+  const W_pipe = pipeToWall_m + L_elbow + L_str + deviceChainLen + L_tee + pipeToWall_m
   const W_equip = d_pump + 0.5
   const W_legacy = Math.max(1.2, W_equip) + 0.3
 
-  return { W: Math.max(2.5, ceilTo01(Math.max(W_pipe, W_legacy))), W_pipe, W_equip }
+  return {
+    W: Math.max(2.5, ceilTo01(Math.max(W_pipe, W_legacy))),
+    W_pipe, W_equip, deviceChainItems,
+  }
 }
 
 /**
@@ -254,18 +280,25 @@ function calculateRoomDimensions(N, N_spare, options) {
     h_room: h_room_input = null,
     spaceRules = SPACE_RULES_DEFAULT,
     topology = null,
+    outletWall = 'E',
   } = options
 
   const N_total = N + N_spare
   const { w_pump, d_pump, hasCatalogDims } = getPumpDims(catalogPump)
   const { numPipes, valvesAfterJunction } = analyzeTopology(topology)
 
-  const { L, L_pipe, L_pumpBased, junction_length } = calcRoomLength(
+  const { L: L_raw, L_pipe, L_pumpBased, junction_length } = calcRoomLength(
     N_total, w_pump, d_spacing, e_wall, DN_branch, DN_main, spaceRules, numPipes, valvesAfterJunction, topology)
 
-  const { W, W_pipe, W_equip } = calcRoomWidth(d_pump, DN_branch, DN_main, spaceRules)
+  const { W: W_raw, W_pipe, W_equip, deviceChainItems } = calcRoomWidth(
+    d_pump, DN_branch, DN_main, spaceRules, valvesAfterJunction, topology)
 
   const { h_room, h_room_source, h_room_default } = calcRoomHeight(d_pump, h_room_input)
+
+  // 当出水口朝北/南墙时，主管沿 W 轴排布，泵排沿 W 轴 → L 和 W 对调
+  const mainPipeAxis = (outletWall === 'N' || outletWall === 'S') ? 'W' : 'L'
+  const L = mainPipeAxis === 'W' ? W_raw : L_raw
+  const W = mainPipeAxis === 'W' ? L_raw : W_raw
 
   return {
     w_pump, d_pump, d_spacing, e_wall, N_total, hasCatalogDims,
@@ -274,8 +307,8 @@ function calculateRoomDimensions(N, N_spare, options) {
     c_wall_m: (spaceRules.pipeToWall_mm || SPACE_RULES_DEFAULT.pipeToWall_mm) / 1000,
     L, W, h_room, h_room_source, h_room_default,
     L_pipe, L_pumpBased, junction_length, W_pipe, W_equip,
-    catalogPump,
-    h_room_input,
+    catalogPump, h_room_input,
+    outletWall, mainPipeAxis, deviceChainItems,
   }
 }
 
@@ -455,6 +488,10 @@ function buildAllOutputs(N, N_spare, params, options, spaceRules) {
     numPipes: params.numPipes,
     junction_length: params.junction_length,
     valvesAfterJunction: params.valvesAfterJunction,
+    deviceChainItems: params.deviceChainItems,
+    // 出水口方向与主管轴线（供 drawing.js 使用）
+    outletWall: params.outletWall,
+    mainPipeAxis: params.mainPipeAxis,
   }
 }
 
