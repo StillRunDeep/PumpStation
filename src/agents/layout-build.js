@@ -166,10 +166,7 @@ export async function optimizeVariant(parent) {
   const ctx = await getGenerationContext();
   const seed = Math.floor(Math.random() * 100000);
 
-  const runParams = {
-    runPhase2And3: true,  // optimizeVariant 总是执行完整 Phase 2/3
-  };
-  const rawChild = generateMutatedLayout(parent, 'unverified_smart', seed, ctx, 'Opt', 1, 'OPT', runParams);
+  const rawChild = generateMutatedLayout(parent, 'unverified_smart', seed, ctx, 'Opt', 1, 'OPT');
   const candidate = evaluateTemplate(rawChild);
 
   Object.assign(candidate, scoreLayout(candidate));
@@ -192,7 +189,7 @@ export async function runAG41(existingVariants = [], isCancelled = () => false, 
 
   const runParams = {
     stopPhase: options.stopPhase || 3,
-    runPhase2And3: options.detailedLayout === true, // Only run Phase 2/3 when explicitly opted in
+    detailedLayout: options.detailedLayout !== false, // Default to true unless explicitly set to false
   };
 
   const pushResult = (layout) => results.push(evaluateTemplate(layout));
@@ -371,51 +368,22 @@ export function computeMutatedLayout(parent) {
   return hints;
 }
 
-export async function runPhase3Optimization(variants, { onItemDone } = {}) {
+export async function runPhase3Optimization(variants) {
   const ctx = await getGenerationContext();
   const results = [];
 
-  for (const [index, variant] of variants.entries()) {
-    const debugInfo = variant?._debug;
-    const hasPhase2Snapshot = !!(debugInfo?.ground?.gridBeforeGaps && debugInfo?.level1?.gridBeforeGaps);
-    const hasLegacyRectSnapshot = !!(debugInfo?.ground?.gridAfterRect && debugInfo?.level1?.gridAfterRect);
-    if (!hasPhase2Snapshot && !hasLegacyRectSnapshot) {
-      console.warn(`[runPhase3Optimization] 跳过 ${variant?.id || 'unknown'}：缺少可用快照（需要 gridBeforeGaps 或 legacy gridAfterRect）`);
-      continue;
-    }
-    if (!hasPhase2Snapshot) {
-      console.warn(`[runPhase3Optimization] ${variant?.id || 'unknown'} 缺少 gridBeforeGaps，回退到 legacy gridAfterRect 路径`);
-    }
-
+  for (const variant of variants) {
     const runParams = {
       detailedLayout: true,
       initialGrid: variant,
     };
-    const optimized = evaluateTemplate(generateConstrainedLayout(
-      Math.random() * 1000,
-      ctx.buildingW,
-      ctx.buildingD,
-      ctx.roomTargetAreas,
-      runParams,
-      'Opt',
-      variant.variantIdx,
-      variant.id.slice(0, 3)
-    ));
+    const optimized = generateConstrainedLayout(Math.random() * 1000, ctx.buildingW, ctx.buildingD, ctx.roomTargetAreas, runParams, 'Opt', variant.variantIdx, variant.id.slice(0, 3));
+    results.push(evaluateTemplate(optimized));
+  }
 
-    applyCheckpointB([optimized], ctx);
-    Object.assign(optimized, scoreLayout(optimized));
-    results.push(optimized);
-
-    if (onItemDone) {
-      await onItemDone({
-        originalVariant: variant,
-        optimizedVariant: optimized,
-        index,
-        total: variants.length,
-      });
-    }
-
-    await yieldToEventLoop();
+  applyCheckpointB(results, ctx);
+  for (const r of results) {
+    Object.assign(r, scoreLayout(r));
   }
 
   return results;

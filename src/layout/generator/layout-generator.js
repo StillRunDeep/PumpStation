@@ -755,7 +755,7 @@ function findSmartLineExpansion(grid, roomId) {
  * Counts the number of vertices (corners) of a room's orthogonal polygon on the grid.
  * A rectangle has 4, L-shape has 6, U-shape has 8.
  */
-function countRoomVertices(grid, roomId, { stopAfter = Infinity } = {}) {
+function countRoomVertices(grid, roomId) {
     const bbox = grid.getBoundingBox(roomId);
     if (!bbox) return 0;
 
@@ -778,15 +778,8 @@ function countRoomVertices(grid, roomId, { stopAfter = Infinity } = {}) {
                     vertices += 2;
                 }
             }
-            if (vertices > stopAfter) return vertices;
+            if (vertices > 8) return vertices; // 早退：超限后无需继续
         }
-    }
-    if (window.debugModeEnabled && vertices % 2 !== 0) {
-        console.warn(`[countRoomVertices] ${roomId} returned odd vertex count ${vertices}`, {
-            bbox,
-            cellCount: grid.roomData[roomId]?.length || 0,
-            connected: isRoomConnected(grid, roomId),
-        });
     }
     return vertices;
 }
@@ -2233,51 +2226,24 @@ function findShapeOperations(grid, roomId) {
   return results;
 }
 
-function isDebugPhase3() {
-  return window.debugModeEnabled || window.debugLayoutPhase3;
-}
-
-function addPerf(profile, name, duration, count = 1) {
-  if (!profile) return;
-  if (!profile[name]) profile[name] = { duration: 0, count: 0 };
-  profile[name].duration += duration;
-  profile[name].count += count;
-}
-
-function flushPerfProfile(prefix, profile) {
-  if (!profile || !window.debugModeEnabled) return;
-  if (!window.timeCostLog) window.timeCostLog = [];
-  for (const [name, { duration, count }] of Object.entries(profile)) {
-    window.timeCostLog.push({ fn: `${prefix}/${name}`, duration: duration / 1000, count });
-  }
-}
-
 /**
  * ShapeOp：找使 A 自身顶点严格减少 ≥ 2 的最优形状操作（Fill 或 Trim）。
  * Fill 约束：来源房间连通 + 面积偏差 ≤ 30%。
  * Trim 约束：接收房间连通 + 面积偏差 ≤ 30%；A 自身连通。
  * @returns {object|null} { roomId, type, cells, aVertexReduction }
  */
-function findBestShapeOperation(grid, rooms, roomMap, perf = null) {
+function findBestShapeOperation(grid, rooms, roomMap) {
   let best = null;
   let maxAReduction = 1;
-  const vertexBeforeByRoom = new Map(rooms.map(r => [r.id, countRoomVertices(grid, r.id)]));
 
   for (const room of rooms) {
-    const opsStart = perf ? performance.now() : 0;
     const ops = findShapeOperations(grid, room.id);
-    addPerf(perf, 'findShapeOperations', performance.now() - opsStart);
-    const vertexStart = perf ? performance.now() : 0;
-    const currentVertices = vertexBeforeByRoom.get(room.id) || 0;
-    addPerf(perf, 'countRoomVertices', performance.now() - vertexStart);
-    if (isDebugPhase3()) console.log(`  [ShapeOp] ${room.id}: ${currentVertices}顶点, ${ops.length}候选`);
+    console.log(`  [ShapeOp] ${room.id}: ${countRoomVertices(grid, room.id)}顶点, ${ops.length}候选`);
     if (ops.length === 0) continue;
 
-    const vBefore = currentVertices;
+    const vBefore = countRoomVertices(grid, room.id);
 
     for (const op of ops) {
-      addPerf(perf, 'shapeOpCandidates', 0, 1);
-      const cloneStart = perf ? performance.now() : 0;
       const tempGrid = grid.clone();
       let affectedIds;
 
@@ -2298,49 +2264,35 @@ function findBestShapeOperation(grid, rooms, roomMap, perf = null) {
         }
         affectedIds = [...new Set(op.cells.map(c => c.receiverId))];
       }
-      addPerf(perf, 'cloneAndApply', performance.now() - cloneStart);
 
-      const vAfterStart = perf ? performance.now() : 0;
       const vAfter = countRoomVertices(tempGrid, room.id);
       const aReduction = vBefore - vAfter;
-      addPerf(perf, 'countRoomVertices', performance.now() - vAfterStart);
 
       // 计算邻居顶点变化（用于次要排序和日志）
       let neighborVBefore = 0, neighborVAfter = 0;
-      const neighborVertexStart = perf ? performance.now() : 0;
       for (const nid of affectedIds) {
-        neighborVBefore += vertexBeforeByRoom.get(nid) ?? countRoomVertices(grid, nid);
+        neighborVBefore += countRoomVertices(grid, nid);
         neighborVAfter  += countRoomVertices(tempGrid, nid);
       }
-      addPerf(perf, 'shapeOpNeighborVertices', performance.now() - neighborVertexStart, affectedIds.length * 2);
-      addPerf(perf, 'countRoomVertices', performance.now() - neighborVertexStart, affectedIds.length * 2);
       const globalReduction = aReduction - (neighborVAfter - neighborVBefore);
 
       let ok = true; let rejectReason = '';
 
       // A 连通检查（trim 时 A 可能被切断）
-      const selfConnectedStart = perf ? performance.now() : 0;
       if (!isRoomConnected(tempGrid, room.id)) { ok = false; rejectReason = `${room.id}不连通`; }
-      addPerf(perf, 'shapeOpConnectivity', performance.now() - selfConnectedStart);
-      addPerf(perf, 'isRoomConnected', performance.now() - selfConnectedStart);
 
       if (ok) {
         for (const nid of affectedIds) {
-          const connectedStart = perf ? performance.now() : 0;
           if (!isRoomConnected(tempGrid, nid)) { ok = false; rejectReason = `${nid}不连通`; break; }
-          addPerf(perf, 'shapeOpConnectivity', performance.now() - connectedStart);
-          addPerf(perf, 'isRoomConnected', performance.now() - connectedStart);
           const r = roomMap.get(nid);
           if (r) {
-            const areaCheckStart = perf ? performance.now() : 0;
             const dev = Math.abs((tempGrid.roomData[nid]?.length || 0) / (r.targetGridCount || 1) - 1);
-            addPerf(perf, 'shapeOpAreaChecks', performance.now() - areaCheckStart);
             if (dev > PHASE3_AREA_DEVIATION * 2) { ok = false; rejectReason = `${nid}面积偏差${(dev*100).toFixed(0)}%`; break; }
           }
         }
       }
 
-      if (isDebugPhase3()) console.log(`    [${op.type}] 格数${op.cells.length} [${affectedIds.join(',')}↔${room.id}]: A顶点${vBefore}→${vAfter}(减${aReduction}) 全局净减${globalReduction} ${aReduction>=2?(ok?'✓':'✗ '+rejectReason):'✗ 顶点减少不足'}`);
+      console.log(`    [${op.type}] 格数${op.cells.length} [${affectedIds.join(',')}↔${room.id}]: A顶点${vBefore}→${vAfter}(减${aReduction}) 全局净减${globalReduction} ${aReduction>=2?(ok?'✓':'✗ '+rejectReason):'✗ 顶点减少不足'}`);
       if (aReduction < 2 || !ok) continue;
 
       // 主排序：A顶点减少量；次排序：全局净减少量（邻居顶点尽量不增加）
@@ -2378,7 +2330,6 @@ function applyShapeTrim(grid, roomId, cells) {
  */
 function runAreaCorrect(grid, rooms, roomMap) {
   const DIRS = [[1,0],[-1,0],[0,1],[0,-1]];
-  const MAX_CANDIDATES_PER_ROOM = window.disableAreaCorrectCandidateLimit ? Infinity : 120;
   let anyMoved = false;
 
   const overRooms = rooms
@@ -2390,27 +2341,13 @@ function runAreaCorrect(grid, rooms, roomMap) {
     const cells = grid.roomData[room.id] || [];
     let bestMove = null;
     let bestScore = -Infinity;
-    const candidates = [];
 
     for (const cell of cells) {
-      const neighborIds = DIRS
-        .map(([dx, dy]) => grid.getCell(cell.x + dx, cell.y + dy))
-        .filter(id => id && id !== 0 && id !== -1 && id !== room.id);
-      if (neighborIds.length === 0) continue;
-      const neighborSet = new Set(neighborIds);
-      const ownNeighbors = DIRS.filter(([dx, dy]) => grid.getCell(cell.x + dx, cell.y + dy) === room.id).length;
-      const protrusionScore = 4 - ownNeighbors;
+      const neighborSet = new Set(
+        DIRS.map(([dx, dy]) => grid.getCell(cell.x + dx, cell.y + dy))
+            .filter(id => id && id !== 0 && id !== -1 && id !== room.id)
+      );
       for (const neighborId of neighborSet) {
-        const neighborTarget = roomMap.get(neighborId)?.targetGridCount || 1;
-        const neighborActual = grid.roomData[neighborId]?.length || 0;
-        const neighborDeficit = Math.max(0, neighborTarget - neighborActual);
-        candidates.push({ cell, neighborId, rank: neighborDeficit * 10 + protrusionScore });
-      }
-    }
-
-    candidates.sort((a, b) => b.rank - a.rank);
-
-    for (const { cell, neighborId } of candidates.slice(0, MAX_CANDIDATES_PER_ROOM)) {
         const tempGrid = grid.clone();
         tempGrid.roomData[room.id] = tempGrid.roomData[room.id].filter(c => !(c.x === cell.x && c.y === cell.y));
         tempGrid.addRoomCell(neighborId, cell.x, cell.y);
@@ -2434,6 +2371,7 @@ function runAreaCorrect(grid, rooms, roomMap) {
           bestScore = score;
           bestMove = { cell, neighborId, globalReduction };
         }
+      }
     }
 
     if (bestMove) {
@@ -2457,8 +2395,6 @@ function runAreaCorrect(grid, rooms, roomMap) {
 function runAreaSwap(grid, rooms) {
   const MAX_ITERATIONS = 50;
   const roomMap = new Map(rooms.map(r => [r.id, r]));
-  const perf = window.debugModeEnabled ? {} : null;
-  const totalStart = perf ? performance.now() : 0;
 
   const initialVertices = rooms.reduce((sum, r) => sum + countRoomVertices(grid, r.id), 0);
   console.log(`[AreaSwap] 开始：${rooms.length} 个房间，总顶点数 ${initialVertices}`);
@@ -2468,9 +2404,7 @@ function runAreaSwap(grid, rooms) {
   }
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
-    const bestStart = perf ? performance.now() : 0;
-    const op = findBestShapeOperation(grid, rooms, roomMap, perf);
-    addPerf(perf, 'findBestShapeOperation', performance.now() - bestStart);
+    const op = findBestShapeOperation(grid, rooms, roomMap);
     if (op) {
       const { roomId, type, cells, aVertexReduction } = op;
       if (type === 'fill') {
@@ -2485,9 +2419,7 @@ function runAreaSwap(grid, rooms) {
       continue;
     }
 
-    const correctedStart = perf ? performance.now() : 0;
     const corrected = runAreaCorrect(grid, rooms, roomMap);
-    addPerf(perf, 'runAreaCorrect', performance.now() - correctedStart);
     if (corrected) continue;
 
     console.log(`[AreaSwap] 收敛，共迭代 ${i} 次`);
@@ -2495,8 +2427,6 @@ function runAreaSwap(grid, rooms) {
   }
 
   const finalVertices = rooms.reduce((sum, r) => sum + countRoomVertices(grid, r.id), 0);
-  addPerf(perf, 'total', performance.now() - totalStart);
-  flushPerfProfile('runAreaSwap', perf);
   console.log(`[AreaSwap] 结束：总顶点数 ${initialVertices} → ${finalVertices}`);
   for (const r of rooms) {
     const actual = grid.roomData[r.id]?.length || 0;
@@ -2651,16 +2581,6 @@ export function buildPartialResult(groundGrid, level1Grid, buildingW, buildingD)
 
 
 
-function attachGridCellsToPlacements(placements, cellMap) {
-  if (!placements || !cellMap) return placements;
-  return Object.fromEntries(Object.entries(placements).map(([id, placement]) => [
-    id,
-    cellMap[id]
-      ? { ...placement, cells: cellMap[id], gridSize: GRID_SIZE }
-      : placement
-  ]));
-}
-
 function timedGen(name, fn) {
   if (!window.debugModeEnabled) return fn();
   const t0 = performance.now();
@@ -2671,48 +2591,18 @@ function timedGen(name, fn) {
   return result;
 }
 
-function startPhaseTimer(name) {
-  if (!window.debugModeEnabled) return null;
-  const label = `generateConstrainedLayout/${name}`;
-  console.time(label);
-  return { label, t0: performance.now() };
-}
-
-function endPhaseTimer(timer) {
-  if (!timer) return;
-  const duration = (performance.now() - timer.t0) / 1000;
-  console.timeEnd(timer.label);
-  if (!window.timeCostLog) window.timeCostLog = [];
-  window.timeCostLog.push({ fn: timer.label, duration });
-}
-
-function runTimedPhaseStep(name, fn) {
-  const timer = startPhaseTimer(name);
-  const result = fn();
-  endPhaseTimer(timer);
-  return result;
-}
-
 export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParams = {}, groupId = 'CG', variantIdx = 1, prefix = 'R', initialSeeds = null) {
-  const { bypassCheckpointA = false, runPhase2And3 = false, initialGrid = null, stopPhase = 3 } = runParams;
-  // 向后兼容：如果提供了 detailedLayout 但没提供 runPhase2And3，使用 detailedLayout 的值
-  const actualRunPhase2And3 = runParams.hasOwnProperty('runPhase2And3') ? runPhase2And3 : (runParams.detailedLayout === true);
+  const { bypassCheckpointA = false, detailedLayout = false, initialGrid = null, stopPhase = 3 } = runParams;
   const rng = makeRng(seed);
 
-  if (actualRunPhase2And3 && initialGrid) {
+  if (detailedLayout && initialGrid) {
     // --- 终极防御性检查 ---
     // initialGrid 可能是 variant 对象（包含_debug），或直接是_debug对象
     const debugInfo = initialGrid._debug || initialGrid;
     if (!debugInfo) throw new Error('detailedLayout: initialGrid._debug或initialGrid不存在');
 
-    const hasPhase2Snapshot = !!(debugInfo.ground?.gridBeforeGaps && debugInfo.level1?.gridBeforeGaps);
-    const hasLegacyRectSnapshot = !!(debugInfo.ground?.gridAfterRect && debugInfo.level1?.gridAfterRect);
-    if (!hasPhase2Snapshot && !hasLegacyRectSnapshot) {
-      throw new Error('detailedLayout: initialGrid 缺少可用快照（需要 gridBeforeGaps 或 legacy gridAfterRect）');
-    }
-
-    const groundGrid = (hasPhase2Snapshot ? debugInfo.ground.gridBeforeGaps : debugInfo.ground.gridAfterRect).clone();
-    const level1Grid = (hasPhase2Snapshot ? debugInfo.level1.gridBeforeGaps : debugInfo.level1.gridAfterRect).clone();
+    const groundGrid = (debugInfo.ground?.gridBeforeGaps || debugInfo.ground?.gridAfterRect).clone();
+    const level1Grid = (debugInfo.level1?.gridBeforeGaps || debugInfo.level1?.gridAfterRect).clone();
 
     const allRooms = debugInfo.roomTargets || [];
     let alignedBW, alignedBD;
@@ -2729,64 +2619,57 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     }
     // --- 检查结束 ---
 
-    if (!hasPhase2Snapshot) {
-      console.warn('[generateConstrainedLayout] initialGrid 缺少 gridBeforeGaps，回退到 legacy gridAfterRect 路径');
-    }
 
     const groundRooms = allRooms.filter(r => r.floor === 'ground');
     const level1Rooms = allRooms.filter(r => r.floor === 'level1');
     const { mergedRooms: mergedGroundRooms, superRoomMap: groundSuperRoomMap } = mergeMustPairsForFloor(groundRooms);
     const { mergedRooms: mergedLevel1Rooms, superRoomMap: level1SuperRoomMap } = mergeMustPairsForFloor(level1Rooms);
 
-    let groundGridBeforeGaps = hasPhase2Snapshot ? debugInfo.ground.gridBeforeGaps.clone() : null;
-    let level1GridBeforeGaps = hasPhase2Snapshot ? debugInfo.level1.gridBeforeGaps.clone() : null;
+    // Step 6A: 无面积限制 L/U 生长
+    const variantTag = `[Var${variantIdx}]`;
+    console.log(`${variantTag}[Phase3] 开始无面积限制生长`);
+    const groundBefore = Object.fromEntries(mergedGroundRooms.map(r => [r.id, groundGrid.roomData[r.id]?.length || 0]));
+    const level1Before = Object.fromEntries(mergedLevel1Rooms.map(r => [r.id, level1Grid.roomData[r.id]?.length || 0]));
+    console.log(`${variantTag}[Phase3] 优化前: ground=${Object.values(groundBefore).reduce((a,b)=>a+b,0)}, level1=${Object.values(level1Before).reduce((a,b)=>a+b,0)}`);
 
-    if (!hasPhase2Snapshot) {
-      const phase2Timer = startPhaseTimer('phase2_initialGrid');
-      const groundCtx2 = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: buildSuperRoomMeta(groundSuperRoomMap) };
-      expandRooms(groundGrid, mergedGroundRooms, rng, groundCtx2, false);
-      groundGridBeforeGaps = groundGrid.clone();
-
-      const level1Ctx2 = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: buildSuperRoomMeta(level1SuperRoomMap) };
-      expandRooms(level1Grid, mergedLevel1Rooms, rng, level1Ctx2, false);
-      level1GridBeforeGaps = level1Grid.clone();
-      endPhaseTimer(phase2Timer);
+    // 样本房间扩展前的位置
+    const sampleRoom = mergedGroundRooms[0];
+    let sampleBefore = null;
+    if (sampleRoom) {
+      const beforeBbox = groundGrid.getBoundingBox(sampleRoom.id);
+      sampleBefore = beforeBbox ? `(${beforeBbox.minX},${beforeBbox.minY}) ${beforeBbox.maxX - beforeBbox.minX + 1}x${beforeBbox.maxY - beforeBbox.minY + 1}` : 'N/A';
     }
 
-    // Phase 3: unlimited expansion + fillGaps + areaSwap
-    const phase3Timer = startPhaseTimer('phase3_initialGrid');
-    const groundCtx3 = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: buildSuperRoomMeta(groundSuperRoomMap) };
-    expandRooms(groundGrid, mergedGroundRooms, rng, groundCtx3, false, true);
-    const level1Ctx3 = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: buildSuperRoomMeta(level1SuperRoomMap) };
-    expandRooms(level1Grid, mergedLevel1Rooms, rng, level1Ctx3, false, true);
+    const groundCtx = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: buildSuperRoomMeta(groundSuperRoomMap) };
+    expandRooms(groundGrid, mergedGroundRooms, rng, groundCtx, false, true);
+    const groundAfter = Object.fromEntries(mergedGroundRooms.map(r => [r.id, groundGrid.roomData[r.id]?.length || 0]));
 
-    runTimedPhaseStep('phase3_initialGrid_fillGaps', () => {
-      fillGaps(groundGrid, mergedGroundRooms);
-      fillGaps(level1Grid, mergedLevel1Rooms);
-    });
-    runTimedPhaseStep('phase3_initialGrid_areaSwap_preSplit', () => {
-      runAreaSwap(groundGrid, mergedGroundRooms);
-      runAreaSwap(level1Grid, mergedLevel1Rooms);
-    });
+    const level1Ctx = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: buildSuperRoomMeta(level1SuperRoomMap) };
+    expandRooms(level1Grid, mergedLevel1Rooms, rng, level1Ctx, false, true);
+    const level1After = Object.fromEntries(mergedLevel1Rooms.map(r => [r.id, level1Grid.roomData[r.id]?.length || 0]));
 
-    runTimedPhaseStep('phase3_initialGrid_splitAllSuperRooms', () => {
-      splitAllSuperRooms(groundGrid, groundSuperRoomMap);
-      splitAllSuperRooms(level1Grid, level1SuperRoomMap);
-    });
-    runTimedPhaseStep('phase3_initialGrid_areaSwap_postSplit', () => {
-      runAreaSwap(groundGrid, groundRooms);
-      runAreaSwap(level1Grid, level1Rooms);
-    });
-    endPhaseTimer(phase3Timer);
+    const gGrowth = Object.values(groundAfter).reduce((a,b)=>a+b,0) - Object.values(groundBefore).reduce((a,b)=>a+b,0);
+    const l1Growth = Object.values(level1After).reduce((a,b)=>a+b,0) - Object.values(level1Before).reduce((a,b)=>a+b,0);
+    const totalGridCells = (alignedBW / GRID_SIZE) * (alignedBD / GRID_SIZE);
+    const groundUsage = ((Object.values(groundAfter).reduce((a,b)=>a+b,0) / totalGridCells) * 100).toFixed(1);
+    const level1Usage = ((Object.values(level1After).reduce((a,b)=>a+b,0) / totalGridCells) * 100).toFixed(1);
+    console.log(`${variantTag}[Phase3] 优化后: ground增长${gGrowth}(占${groundUsage}%), level1增长${l1Growth}(占${level1Usage}%)`);
+
+    // 输出样本房间的前后对比
+    if (sampleRoom) {
+      const afterBbox = groundGrid.getBoundingBox(sampleRoom.id);
+      const sampleAfter = afterBbox ? `(${afterBbox.minX},${afterBbox.minY}) ${afterBbox.maxX - afterBbox.minX + 1}x${afterBbox.maxY - afterBbox.minY + 1}` : 'N/A';
+      console.log(`${variantTag}[Phase3] 房间${sampleRoom.id}: ${sampleBefore} → ${sampleAfter}`);
+    }
+
+
+    splitAllSuperRooms(groundGrid, groundSuperRoomMap);
+    splitAllSuperRooms(level1Grid, level1SuperRoomMap);
 
     const finalLayout = {
       ground: timedGen('finalizeLayout_ground', () => finalizeLayout(groundGrid).ground),
       level1: timedGen('finalizeLayout_level1', () => finalizeLayout(level1Grid).level1),
     };
-    const groundCells = extractGridCells(groundGrid);
-    const level1Cells = extractGridCells(level1Grid);
-    finalLayout.ground = attachGridCellsToPlacements(finalLayout.ground, groundCells);
-    finalLayout.level1 = attachGridCellsToPlacements(finalLayout.level1, level1Cells);
 
     return {
       id: `${prefix}-${groupId}-${variantIdx}`,
@@ -2794,17 +2677,13 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
       desc: `建筑 ${(alignedBW / 1000).toFixed(1)}m×${(alignedBD / 1000).toFixed(1)}m`,
       groundPlacements: finalLayout.ground,
       level1Placements: finalLayout.level1,
-      groundCells,
-      level1Cells,
       buildingW: alignedBW,
       buildingD: alignedBD,
       groupId,
       variantIdx,
-      _debug: {
-        ...debugInfo,
-        ground: { ...debugInfo.ground, gridBeforeGaps: groundGridBeforeGaps, gridAfterGaps: groundGrid },
-        level1: { ...debugInfo.level1, gridBeforeGaps: level1GridBeforeGaps, gridAfterGaps: level1Grid },
-      },
+      _debug: { ...debugInfo, ground: { ...debugInfo.ground, gridAfterGaps: groundGrid }, level1: { ...debugInfo.level1, gridAfterGaps: level1Grid } },
+
+      detailedLayout,
       _relaxedDoorAccess: initialGrid._relaxedDoorAccess,
     };
   }
@@ -2897,16 +2776,19 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
   };
 
   // --- Checkpoint A (Phase 1 snapshot evaluation) ---
-  const phase1Timer = startPhaseTimer('phase1');
   const groundCtx = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: groundSuperMeta };
   timedGen('phase1_expandRooms_ground', () => expandRooms(groundGrid, mergedGroundRooms, rng, groundCtx, stopPhase === 1));
   groundGridAfterRect = groundGrid.clone();
   debugData.ground.gridAfterRect = groundGridAfterRect;
+  groundGridBeforeGaps = groundGrid.clone();
+  debugData.ground.gridBeforeGaps = groundGridBeforeGaps;
 
   const level1Ctx = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: level1SuperMeta };
   timedGen('phase1_expandRooms_level1', () => expandRooms(level1Grid, mergedLevel1Rooms, rng, level1Ctx, stopPhase === 1));
   level1GridAfterRect = level1Grid.clone();
   debugData.level1.gridAfterRect = level1GridAfterRect;
+  level1GridBeforeGaps = level1Grid.clone();
+  debugData.level1.gridBeforeGaps = level1GridBeforeGaps;
 
 
   // Split super-rooms in snapshots before Checkpoint A evaluation
@@ -2921,7 +2803,6 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
   // that bridges to the exterior wall / corridor are considered virtually connected.
   // Strict door-access is still used in Checkpoint B and full scoring (Step 9).
   const relaxedDoorAccess = timedGen('checkpointA_relaxedDoorAccess', () => computeRelaxedDoorAccess(groundAfterRectForEval, level1AfterRectForEval));
-  endPhaseTimer(phase1Timer);
 
   // 在过滤前，将桥接调试信息附加到 must_adjacent 违规项上
   const violationsWithDebug = evaluated.violations.map(v => {
@@ -2948,46 +2829,39 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
 
   // ── Early return for Phase 1 (stopPhase = 1) ──
   if (stopPhase === 1) {
-    // Clone before splitting so debugData.ground.gridAfterRect keeps merged IDs (needed by initialGrid path)
-    const groundGridForFinalize = groundGridAfterRect.clone();
-    const level1GridForFinalize = level1GridAfterRect.clone();
-    splitAllSuperRooms(groundGridForFinalize, groundSuperRoomMap);
-    splitAllSuperRooms(level1GridForFinalize, level1SuperRoomMap);
-    const groundCells = extractGridCells(groundGridForFinalize);
-    const level1Cells = extractGridCells(level1GridForFinalize);
-    const groundLayout = attachGridCellsToPlacements(finalizeLayout(groundGridForFinalize).ground, groundCells);
-    const level1Layout = attachGridCellsToPlacements(finalizeLayout(level1GridForFinalize).level1, level1Cells);
+    // Split super-rooms before finalizing
+    splitAllSuperRooms(groundGridAfterRect, groundSuperRoomMap);
+    splitAllSuperRooms(level1GridAfterRect, level1SuperRoomMap);
+    const groundLayout = finalizeLayout(groundGridAfterRect).ground;
+    const level1Layout = finalizeLayout(level1GridAfterRect).level1;
     return {
       id: `${prefix}-${groupId}-${variantIdx}`,
       label: `约束生长法 (Phase 1)`,
       desc: `建筑 ${(alignedBW / 1000).toFixed(1)}m×${(alignedBD / 1000).toFixed(1)}m [Phase 1]`,
       groundPlacements: groundLayout,
       level1Placements: level1Layout,
-      groundCells,
-      level1Cells,
+      groundCells: extractGridCells(groundGridAfterRect),
+      level1Cells: extractGridCells(level1GridAfterRect),
       buildingW: alignedBW,
       buildingD: alignedBD,
       groupId,
       variantIdx,
 
+      detailedLayout,
       stopPhase: 1,
       _debug: debugData,
     };
   }
 
-  // Phase 2+3 execution control: skipped if runPhase2And3 is false
-  const skipPhase2And3 = !actualRunPhase2And3;
+  // Phase 2+3 execution control: skipped if detailedLayout is false
+  const skipPhase2And3 = !detailedLayout;
 
   if (skipPhase2And3) {
-    // Clone before splitting so debugData.ground.gridAfterRect keeps merged IDs (needed by initialGrid path)
-    const groundGridForFinalize = groundGridAfterRect.clone();
-    const level1GridForFinalize = level1GridAfterRect.clone();
-    splitAllSuperRooms(groundGridForFinalize, groundSuperRoomMap);
-    splitAllSuperRooms(level1GridForFinalize, level1SuperRoomMap);
-    const groundCells = extractGridCells(groundGridForFinalize);
-    const level1Cells = extractGridCells(level1GridForFinalize);
-    const groundLayout = attachGridCellsToPlacements(finalizeLayout(groundGridForFinalize).ground, groundCells);
-    const level1Layout = attachGridCellsToPlacements(finalizeLayout(level1GridForFinalize).level1, level1Cells);
+    // Split super-rooms before finalizing
+    splitAllSuperRooms(groundGridAfterRect, groundSuperRoomMap);
+    splitAllSuperRooms(level1GridAfterRect, level1SuperRoomMap);
+    const groundLayout = finalizeLayout(groundGridAfterRect).ground;
+    const level1Layout = finalizeLayout(level1GridAfterRect).level1;
     return {
       id: `${prefix}-${groupId}-${variantIdx}`,
       label: `约束生长法`,
@@ -2999,16 +2873,15 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
       groupId,
       variantIdx,
       _debug: debugData,
-      groundCells,
-      level1Cells,
 
+      detailedLayout,
       _relaxedDoorAccess: relaxedDoorAccess,
     };
   }
 
   // ── Phase 2 (Step 6A): 对通过 Checkpoint A 的方案，继续跑有面积约束的 L/U 形扩展 ────────
-  const phase2Timer = startPhaseTimer('phase2');
-  if (actualRunPhase2And3) {
+  //调试模式：window.debugModeEnabled 默认false，单模块屏蔽：debugCurrentModuleEnabled 默认 true
+  if (window.debugCurrentModuleEnabled) {
     const groundCtx = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: groundSuperMeta };
     timedGen('phase2_expandRooms_ground', () => expandRooms(groundGrid, mergedGroundRooms, rng, groundCtx, false));
     groundGridBeforeGaps = groundGrid.clone();
@@ -3033,46 +2906,42 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
   const evaluatedB = { ...timedGen('checkpointB_evaluateTemplate', () => evaluateTemplate(snapshotB, { skipDoors: true })), _relaxedDoorAccess: relaxedB };
   const checkpointBDiagnostic = scoreSpatialQuality(evaluatedB);
   const CHECKPOINT_B_THRESHOLD = -1000; // 总惩罚绝对值 < 1000 才通过
-  endPhaseTimer(phase2Timer);
 
   // ── Early return for Phase 2 (stopPhase = 2) ──
   if (stopPhase === 2) {
     // Split super-rooms before finalizing
     splitAllSuperRooms(groundGridBeforeGaps, groundSuperRoomMap);
     splitAllSuperRooms(level1GridBeforeGaps, level1SuperRoomMap);
-    const groundCells = extractGridCells(groundGridBeforeGaps);
-    const level1Cells = extractGridCells(level1GridBeforeGaps);
-    const groundLayout = attachGridCellsToPlacements(finalizeLayout(groundGridBeforeGaps).ground, groundCells);
-    const level1Layout = attachGridCellsToPlacements(finalizeLayout(level1GridBeforeGaps).level1, level1Cells);
+    const groundLayout = finalizeLayout(groundGridBeforeGaps).ground;
+    const level1Layout = finalizeLayout(level1GridBeforeGaps).level1;
     return {
       id: `${prefix}-${groupId}-${variantIdx}`,
       label: `约束生长法 (Phase 2)`,
       desc: `建筑 ${(alignedBW / 1000).toFixed(1)}m×${(alignedBD / 1000).toFixed(1)}m [Phase 2]`,
       groundPlacements: groundLayout,
       level1Placements: level1Layout,
-      groundCells,
-      level1Cells,
+      groundCells: extractGridCells(groundGridBeforeGaps),
+      level1Cells: extractGridCells(level1GridBeforeGaps),
       buildingW: alignedBW,
       buildingD: alignedBD,
       groupId,
       variantIdx,
 
+      detailedLayout,
       stopPhase: 2,
     };
   }
 
-  // Phase 3 execution control: skipped if runPhase2And3 is false
-  const skipPhase3 = !actualRunPhase2And3;
+  // Phase 3 execution control: skipped if detailedLayout is false
+  const skipPhase3 = !detailedLayout;
 
   if (skipPhase3) {
     // 不通过 → 直接用 Phase 2 结果参与排名，跳过 Step 6B（无面积约束生长）与 Phase 3
     // Split super-rooms before finalizing
     splitAllSuperRooms(groundGridBeforeGaps, groundSuperRoomMap);
     splitAllSuperRooms(level1GridBeforeGaps, level1SuperRoomMap);
-    const groundCells = extractGridCells(groundGridBeforeGaps);
-    const level1Cells = extractGridCells(level1GridBeforeGaps);
-    const groundLayout = attachGridCellsToPlacements(finalizeLayout(groundGridBeforeGaps).ground, groundCells);
-    const level1Layout = attachGridCellsToPlacements(finalizeLayout(level1GridBeforeGaps).level1, level1Cells);
+    const groundLayout = finalizeLayout(groundGridBeforeGaps).ground;
+    const level1Layout = finalizeLayout(level1GridBeforeGaps).level1;
     return {
       id: `${prefix}-${groupId}-${variantIdx}`,
       label: `约束生长法`,
@@ -3084,51 +2953,41 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
       groupId,
       variantIdx,
       _debug: debugData,
-      groundCells,
-      level1Cells,
 
+      detailedLayout,
       _relaxedDoorAccess: relaxedB,
     };
   }
   // ── Phase 3: 无面积限制 L/U 扩展 → 空隙填充 → 面积偏差调整 ──
-  const phase3Timer = startPhaseTimer('phase3');
-  if (actualRunPhase2And3) {
+  if (window.debugCurrentModuleEnabled) {
     const groundCtx3 = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: groundSuperMeta };
     timedGen('phase3_expandRooms_ground', () => expandRooms(groundGrid, mergedGroundRooms, rng, groundCtx3, false, true));
 
     const level1Ctx3 = { buildingW: alignedBW, buildingD: alignedBD, superRoomMeta: level1SuperMeta };
     timedGen('phase3_expandRooms_level1', () => expandRooms(level1Grid, mergedLevel1Rooms, rng, level1Ctx3, false, true));
 
-    runTimedPhaseStep('phase3_fillGaps', () => {
-      timedGen('phase3_fillGaps_ground', () => fillGaps(groundGrid, mergedGroundRooms));
-      timedGen('phase3_fillGaps_level1', () => fillGaps(level1Grid, mergedLevel1Rooms));
-    });
+    timedGen('phase3_fillGaps_ground', () => fillGaps(groundGrid, mergedGroundRooms));
+    timedGen('phase3_fillGaps_level1', () => fillGaps(level1Grid, mergedLevel1Rooms));
 
-    runTimedPhaseStep('phase3_areaSwap_preSplit', () => {
-      timedGen('phase3_areaSwap_ground', () => runAreaSwap(groundGrid, mergedGroundRooms));
-      timedGen('phase3_areaSwap_level1', () => runAreaSwap(level1Grid, mergedLevel1Rooms));
-    });
+    timedGen('phase3_areaSwap_ground', () => runAreaSwap(groundGrid, mergedGroundRooms));
+    timedGen('phase3_areaSwap_level1', () => runAreaSwap(level1Grid, mergedLevel1Rooms));
   }
 
   // ── Super-room splitting: convert super-rooms back to constituent rooms ──
   // This must happen before finalization to ensure all room IDs in output are original
   console.error(`[CoGrow] Before split - ground roomData keys: ${Object.keys(groundGrid.roomData).join(',')}`);
   console.error(`[CoGrow] Before split - level1 roomData keys: ${Object.keys(level1Grid.roomData).join(',')}`);
-  runTimedPhaseStep('phase3_splitAllSuperRooms', () => {
-    splitAllSuperRooms(groundGrid, groundSuperRoomMap);
-    splitAllSuperRooms(level1Grid, level1SuperRoomMap);
-  });
+  splitAllSuperRooms(groundGrid, groundSuperRoomMap);
+  splitAllSuperRooms(level1Grid, level1SuperRoomMap);
   debugData.ground.gridAfterGaps = groundGrid;
   debugData.level1.gridAfterGaps = level1Grid;
   console.error(`[CoGrow] After split - ground roomData keys: ${Object.keys(groundGrid.roomData).join(',')}`);
   console.error(`[CoGrow] After split - level1 roomData keys: ${Object.keys(level1Grid.roomData).join(',')}`);
 
   // ── Phase 3 post-split AreaSwap: re-run corner reduction on original rooms ──
-  if (actualRunPhase2And3) {
-    runTimedPhaseStep('phase3_areaSwap_postSplit', () => {
-      timedGen('phase3_areaSwap_postSplit_ground', () => runAreaSwap(groundGrid, groundRooms));
-      timedGen('phase3_areaSwap_postSplit_level1', () => runAreaSwap(level1Grid, level1Rooms));
-    });
+  if (window.debugCurrentModuleEnabled) {
+    timedGen('phase3_areaSwap_postSplit_ground', () => runAreaSwap(groundGrid, groundRooms));
+    timedGen('phase3_areaSwap_postSplit_level1', () => runAreaSwap(level1Grid, level1Rooms));
   }
 
   // 3. Finalize layouts from both grids
@@ -3136,14 +2995,9 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     ground: timedGen('finalizeLayout_ground', () => finalizeLayout(groundGrid).ground),
     level1: timedGen('finalizeLayout_level1', () => finalizeLayout(level1Grid).level1),
   };
-  const groundCells = extractGridCells(groundGrid);
-  const level1Cells = extractGridCells(level1Grid);
-  finalLayout.ground = attachGridCellsToPlacements(finalLayout.ground, groundCells);
-  finalLayout.level1 = attachGridCellsToPlacements(finalLayout.level1, level1Cells);
 
   // 计算 Phase 3 完成后的宽松可达性（供全量评分使用）
   const relaxedFinal = timedGen('final_relaxedDoorAccess', () => computeRelaxedDoorAccess(groundGrid, level1Grid));
-  endPhaseTimer(phase3Timer);
 
   return {
     id: `${prefix}-${groupId}-${variantIdx}`,
@@ -3151,13 +3005,14 @@ export function generateConstrainedLayout(seed, bW, bD, roomAreas = {}, runParam
     desc: `建筑 ${(alignedBW / 1000).toFixed(1)}m×${(alignedBD / 1000).toFixed(1)}m`,
     groundPlacements: finalLayout.ground,
     level1Placements: finalLayout.level1,
-    groundCells,
-    level1Cells,
+    groundCells: extractGridCells(groundGrid),
+    level1Cells: extractGridCells(level1Grid),
     buildingW: alignedBW,
     buildingD: alignedBD,
     groupId,
     variantIdx,
     _debug: debugData,
+    detailedLayout,
     _relaxedDoorAccess: relaxedFinal,
   };
 }

@@ -27,10 +27,10 @@ if (typeof window === 'undefined') {
     debugModeEnabled: process.env.DEBUG_MODE === 'true',
     debugLayoutPhase2: (process.env.DEBUG_LAYOUT || '').includes('phase2'),
     debugLayoutPhase3: (process.env.DEBUG_LAYOUT || '').includes('phase3'),
-    disableAreaCorrectCandidateLimit: process.env.DISABLE_AREA_CORRECT_CANDIDATE_LIMIT === 'true',
     timeCostThreshold: parseFloat(process.env.TIME_THRESHOLD || '5'),
     timeCostLog: [],
     layoutDebugLog: [],
+    debugCurrentModuleEnabled: true,
   };
 }
 
@@ -153,10 +153,10 @@ async function generateLayout(seed, buildingW, buildingD, floor, phase = 3) {
   console.log(`[INFO] Phase limit: ${phase}`);
 
   const startTime = performance.now();
-  // Enable Phase 2/3 execution if stopPhase > 1
+  // If stopPhase < 3, we need to enable detailedLayout to run Phases 2 and beyond
   const runParams = {
     stopPhase: phase,
-    runPhase2And3: phase > 1  // Enable Phase 2+ only if stopPhase > 1
+    detailedLayout: phase > 1  // Enable Phase 2+ only if stopPhase > 1
   };
   const result = generateConstrainedLayout(
     seed,

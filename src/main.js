@@ -7,6 +7,7 @@ const isTokenValid = initTokenVerification()
 window.debugModeEnabled = false;
 window.timeCostThreshold = 2.0; // seconds
 window.timeCostLog = [];
+window.debugCurrentModuleEnabled = true; // 调试用：禁用 phase2/3 生长
 
 import { runUserParams } from './agents/user-params.js'
 import { runTopology } from './agents/topology.js'

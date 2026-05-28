@@ -12,4 +12,4 @@ todo*.md
 done*.md
 CLAUDE.md
 .vscode/
-src/layout/debug/
+src/layout/debug

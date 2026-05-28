@@ -124,40 +124,21 @@ export function initLayoutController() {
       return;
     }
 
-    const queue = existing.slice(0, 9)
-    const total = queue.length
-    let completed = 0
-
     detailedLayout = true;
     btn.disabled = true
-    btn.textContent = `优化中 0/${total}…`
-    showAg41Notify(`开始逐项优化 ${total} 个方案，请稍候…`, true)
+    btn.textContent = '优化中…'
     try {
-      await runPhase3Optimization(queue, {
-        onItemDone: async ({ originalVariant, optimizedVariant, index, total }) => {
-          const mergedVariant = {
-            ...originalVariant,
-            ...optimizedVariant,
-            id: originalVariant.id,
-            label: originalVariant.label,
-            variantIdx: originalVariant.variantIdx,
-            groundPlacements: optimizedVariant.groundPlacements,
-            level1Placements: optimizedVariant.level1Placements,
-          }
-          replaceVariant(originalVariant.id, mergedVariant)
-          if (getExpandedVariants().some(v => v.id === originalVariant.id)) {
-            refreshDetailRow(originalVariant.id, mergedVariant)
-          }
-
-          completed = index + 1
-          showAg41Notify(`完成优化方案 ${completed}/${total}`, true)
-          btn.textContent = `优化中 ${completed}/${total}…`
-        },
-      })
-      showAg41Notify(`已完成 ${total} 个方案的逐项优化`, true)
+      const optimized = await runPhase3Optimization(existing)
+      // 直接替换原方案，不重新排序（优化应该替换，而不是重新参与竞争）
+      const replaced = existing.map(orig => {
+        const opt = optimized.find(o => o.variantIdx === orig.variantIdx);
+        return opt ? { ...orig, ...opt, groundPlacements: opt.groundPlacements, level1Placements: opt.level1Placements } : orig;
+      });
+      renderLayoutPanel(replaced)
+      showAg41Notify(`对 ${existing.length} 个方案完成优化`, true)
     } catch (e) {
       console.error('runPhase3Optimization failed:', e)
-      showAg41Notify(`优化在第 ${completed + 1}/${total} 个方案时失败`, false)
+      showAg41Notify('优化失败', false)
     } finally {
       btn.disabled = false
       btn.textContent = '优化方案'

@@ -230,7 +230,7 @@ function insertEliminatedDetailRow(idx) {
   const breakdownHtml = buildBreakdownHtml(v)
   const title = `方案 ${v.id}：${v.label}  —  得分 ${v.score}`
 
-  const detailedDisabled = !v._debug?.ground?.gridBeforeGaps && !v._debug?.level1?.gridBeforeGaps
+  const detailedDisabled = v.detailedLayout === false
   const renderFloorRow = (floor) => {
     const debugData = v._debug?.[floor] ?? {}
     const movementHints = window.debugModeEnabled ? (v._debug?.[floor]?.movementHints ?? null) : null
@@ -426,7 +426,7 @@ function _revitButtonHtml() {
 // showing a candidate (failed optimization) without replacing the stored variant.
 function _buildDetailInnerHtml(v, message = null, debugVariant = null) {
   const dv = debugVariant || v
-  const detailedDisabled = !dv._debug?.ground?.gridBeforeGaps && !dv._debug?.level1?.gridBeforeGaps
+  const detailedDisabled = dv.detailedLayout === false
   const renderFloorRow = (floor) => {
     const debugData = dv._debug?.[floor] ?? {}
     const seedsMeta = dv._debug?.[floor]?.seedsMeta ?? null

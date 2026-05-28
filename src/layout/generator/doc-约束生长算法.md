@@ -144,11 +144,7 @@ superRoomMeta = {
 
 各 `stopPhase` 返回值均携带 `groundCells` / `level1Cells`（`extractGridCells` 提取的格子映射），供调试器进行逐格精确渲染。缺少该字段时调试器会退化为包围盒渲染，L/U 形房间会出现视觉重叠。
 
-**`detailedLayout`**（默认 false）：控制是否从已有方案快照出发，仅执行阶段 3 优化。为 `true` 且传入 `initialGrid` 时进入**深化模式**：
-- 若 `initialGrid._debug.{ground,level1}.gridBeforeGaps` 都存在，则视为**已完成阶段 2 的快照**，直接从该快照进入阶段 3，不再重跑阶段 2。
-- 若缺少 `gridBeforeGaps` 但仍有 `gridAfterRect`，则走 **legacy fallback**，从阶段 1 快照继续补齐后续生长；该兼容路径仅用于旧数据，效果与标准 Phase 3-only 优化可能不同。
-- 前端“优化方案”按钮不会修改上述单方案优化入口；它会按用户点击瞬间榜单中的前 9 个方案固定顺序，逐个调用该入口完成深化优化。
-- 每个方案优化完成后，UI 会立即替换对应方案、刷新已展开详图，并在状态栏提示 `完成优化方案 n/9`，以降低长耗时优化时的卡顿感知。
+**`detailedLayout`**（默认 false）：控制是否从已有方案快照出发，仅执行阶段 3 优化。为 `true` 且传入 `initialGrid` 时进入**深化模式**，跳过阶段 1/2，直接从快照继续生长。
 
 **默认流程（完整生成）** 依然包含所有三个阶段。注意：此时操作的房间列表已包含 super-rooms（步骤 3 的输出），原 MUST 对房间已被临时替代：
 
@@ -156,20 +152,8 @@ superRoomMeta = {
 | --- | --- | --- |
 | **阶段 1：全局矩形扩展** | `findBestRectangleExpansion` | **全局同步**：所有房间（含 super-room）优先进行矩形生长。直到**没有任何房间**能继续以矩形方式扩展时，该阶段结束并记录”阶段 1”快照。此时 super-room 已保证内部紧邻，不会被割裂。 |
 | **阶段 2：L/U 形填补扩展** | `findBestFillExpansion` & `findSmartLineExpansion` | **形态降级**：允许房间转为非矩形生长以填补剩余面积。**形态约束**：除走廊外，房间轮廓顶点数不得超过 **8 个**（最高支持 U 形），房间利用率（房间实际占据面积 / 房间包围盒面积）不得低于 **60%**（防止出现超大的拐角），在后期的评价指标中也会对低于 **70%** 的房间进行惩罚。**顶点约束实现**：每次扩展前（无论矩形扩展还是 L/U 扩展）先在 testGrid（模拟添加全部候选 cells 的虚拟网格）上重新计算顶点数，超过 8 则跳过此次扩展；若因面积达限只能写入候选 cells 的子集，需对该截断子集再次验证，确保截断后形状同样满足 ≤ 8 的约束。走廊（`corridor_l1`）不受此约束限制。 |
-| **阶段 3：边界优化与空隙填充** | `fillGaps` & `Boundary-First Filling` | **阶段2的遗留：无面积限制的 L/U 扩展**：在填充微小缝隙之前，首先进行一轮特殊的 L/U 形扩展。此轮扩展**忽略房间的目标面积**，允许房间在符合形态约束（顶点数、利用率）的前提下，自由”侵占”邻近的空地，直到无法继续扩展为止。这一步能让房间形成更自然、更舒展的边界。<br>**缝隙收尾**：将建筑轮廓内剩余的所有空隙（Empty Cells）完全分配给相邻房间（包括 super-room），并借此机会重新评估并平滑房间交界线。此阶段结束后，立即进行 super-room 分割还原（第 3 步），将 super-room 还原为原 MUST 对房间。<br>**深化模式入口**: 在深化模式下，算法优先从一个现有的、已完成阶段 2 的方案快照（`gridBeforeGaps`）开始，仅执行此阶段的优化；只有旧结果缺少 `gridBeforeGaps` 时，才回退到 `gridAfterRect` 继续补齐后续阶段。 |
+| **阶段 3：边界优化与空隙填充** | `fillGaps` & `Boundary-First Filling` | **阶段2的遗留：无面积限制的 L/U 扩展**：在填充微小缝隙之前，首先进行一轮特殊的 L/U 形扩展。此轮扩展**忽略房间的目标面积**，允许房间在符合形态约束（顶点数、利用率）的前提下，自由”侵占”邻近的空地，直到无法继续扩展为止。这一步能让房间形成更自然、更舒展的边界。<br>**缝隙收尾**：将建筑轮廓内剩余的所有空隙（Empty Cells）完全分配给相邻房间（包括 super-room），并借此机会重新评估并平滑房间交界线。此阶段结束后，立即进行 super-room 分割还原（第 3 步），将 super-room 还原为原 MUST 对房间。<br>**深化模式入口**: 在深化模式下，算法会从一个现有的、已完成阶段2的方案快照开始，仅执行此阶段的优化。 |
 | **阶段 3c：拐角消减交换** | `runAreaSwap` | **主要目标：减少拐角（最小化顶点数）**，面积偏差作为软约束。所有房间均可参与交换。<br>**两种互补策略并行，每轮取净减少最大者执行：**<br><br>**策略一：凹角格点驱动（小凹口，1–4格）**<br>操作单元是单个 count=3 凹角格点，适合 1–4 格的小凹口：<br>① 扫描房间 A 的 bbox，找 2×2 邻域中 count=3 的格点 P，缺口格子 `(mx,my)` 即目标填入格<br>② P 处两条边交汇，分别沿 4 个方向从 `(mx,my)` 延伸收集填入格子（连续非 A 格，限 ≤ SWAP_MAX_CELLS=4）<br>③ 每种路径独立评估：填入 k 格 + 回退 k 格，计算净顶点变化，仅当净减少 ≥ 1 时纳入候选<br><br>**策略二：整边平移（Edge Shift，任意长度凹边）**<br>操作单元是两凹角之间或单凹角延伸到 A 边界的连续非 A 格段，适合 5 格以上的中大型凹边：<br>① **找凹边段**：对每个 count=3 凹角，在其缺失格所在行（水平）和列（垂直）分别向两端延伸，收集以 A 格（或 bbox 边界）为界的全部连续非 A 格，形成一条段。统一处理两种情形：<br>　- **双凹角（凹口）**：段终止于另一个凹角的位置，自然闭合<br>　- **单凹角（L形边）**：段终止于 A 的实际边界格，为开放段<br>② **整段填入**：将整条段的全部 L 格（可来自多个邻居房间）一次性转入 A<br>③ **等量回退**：A 让出 L 个边界格给相邻房间，维持面积中性<br>④ 在 tempGrid 上模拟，净顶点减少 ≥ 1 时纳入候选<br><br>**两策略共同约束：**<br>- **面积中性**：`\|填入\| == \|回退\|`，所有受影响房间面积偏差不超 15%×2<br>- **连通性**：所有受影响房间均验证 BFS 连通<br>- **去重**：同一行/列的段仅生成一次（Set 去重）|
-
-**阶段耗时测量：**
-- `window.debugModeEnabled` 开启时，`timedGen` 会把 Phase 1/2/3 关键步骤写入 `window.timeCostLog`，并额外用 `console.time` / `console.timeEnd` 输出整阶段耗时。
-- Phase 1 统计两层矩形扩展与 Checkpoint A 快照/评价；Phase 2 统计两层 L/U 扩展与 Checkpoint B 快照/评价；Phase 3 统计无面积限制扩展、填隙、交换、super-room 分割后交换、最终布局与最终可达性检查。
-- 深化模式（`initialGrid`）同样输出 Phase 2 和 Phase 3 的整阶段耗时。
-- 在性能排查期间，可临时关闭 `runAreaCorrect()` 的候选集截断，并分别记录 `fillGaps()`、首次 `runAreaSwap()`、`splitAllSuperRooms()`、分割后的二次 `runAreaSwap()` 耗时，用于区分 Phase 3 各步骤的成本占比；浏览器环境可设 `window.disableAreaCorrectCandidateLimit = true`，`debug-runner.js` 可设环境变量 `DISABLE_AREA_CORRECT_CANDIDATE_LIMIT=true`。
-- AreaSwap 内部在 debug 模式下额外记录 `findBestShapeOperation`、`findShapeOperations`、`cloneAndApply`、`countRoomVertices`、`isRoomConnected` 等累计耗时和调用次数；若需继续深挖，可进一步拆分 `findBestShapeOperation` 内的候选评估、邻居顶点统计、连通性校验与面积偏差校验。
-
-**正式视图几何来源：**
-- Phase 3 后房间可能是 L/U/复杂正交形状，`finalizeLayout()` 输出的 `x/y/w/d` 仅表示房间 bbox，继续用于评分、面积和导出兼容。
-- 生成结果同时携带 `groundCells` / `level1Cells`，并在正式 placement 上附加 `cells` / `gridSize`；正式视图应基于真实 cell 边界提取正交多边形轮廓进行渲染，避免非矩形房间 bbox 覆盖其他房间。
-- 缺少 cell 数据的旧结果才回退到 bbox + overlap 修补渲染。
 
 房间选取优先级：
 
