@@ -312,7 +312,7 @@ function buildLayoutMap(topology, geo, inputs) {
   if (!topology) return null
 
   const { devices, nodes, pipes } = topology
-  const { SCALE_MAIN, room_ox, room_x2, room_y2, hdr_y } = geo
+  const { SCALE_MAIN, room_ox, room_x2, room_y2, hdr_y, pool_ox } = geo
   const { DN_branch, DN_main, e_wall, w_pump } = inputs
 
   // 建立邻接表（含设备内部节点连接，否则 BFS 无法穿越设备）
@@ -370,8 +370,6 @@ function buildLayoutMap(topology, geo, inputs) {
     const items = []
     // 从穿楼板处(底部)开始，向梳脊(上方)逆推 Y 坐标
     let curY = room_y2
-    const elbow_r = elbowCTF(DN_branch) / 1000 * SCALE_MAIN * 0.5
-    curY -= elbow_r * 2
 
     chainDevices.forEach(dev => {
       const hl = deviceHalfLen(dev, DN_branch, SCALE_MAIN)
@@ -399,9 +397,9 @@ function buildLayoutMap(topology, geo, inputs) {
       return true
     })
 
-  // 回流管 X：放在最左侧泵支路左边（留 e_wall 间距）
+  // 回流管 X：集水坑外墙（pool_ox），对应无阀门直接回集水坑的管路
   const firstPumpX = pumpXs.length > 0 ? pumpXs[0] : spineStartX
-  const returnPipeX = Math.max(room_ox + 8, firstPumpX - e_wall * SCALE_MAIN)
+  const returnPipeX = pool_ox ?? Math.max(room_ox + 8, firstPumpX - e_wall * SCALE_MAIN)
 
   // 从主管（hdr_y）向下排布设备至坑口（正 Y 方向）
   let retY = hdr_y
@@ -428,18 +426,18 @@ function buildLayoutMap(topology, geo, inputs) {
   // 主管阀门按真实尺寸排布（从最后一个泵 tee 右侧起）
   const lastPumpX = pumpXs.length ? Math.max(...pumpXs) : spineStartX
   const mainStartX = lastPumpX + (w_pump / 2) * SCALE_MAIN + minStr_px
+  const outletEndX = room_x2
   let mainCurX = mainStartX
   const mainChain = mainDevices.map(dev => {
     const hl = deviceHalfLen(dev, DN_main, SCALE_MAIN)
     mainCurX += hl
-    const item = { device: dev, planX: Math.min(mainCurX, spineEndX - hl), planY: hdr_y, halfLen: hl }
+    const item = { device: dev, planX: Math.min(mainCurX, outletEndX - hl), planY: hdr_y, halfLen: hl }
     mainCurX += hl + minStr_px
     return item
   })
 
   // 主管实际起止：从 returnPipeX（或第一泵 tee）到出水口（东墙）
   const headerStartX = Math.min(returnPipeX, firstPumpX)
-  const outletEndX = room_x2
 
   return {
     pumpsInOrder: pumps,
@@ -621,8 +619,6 @@ function buildPlanView(inputs, geo, layoutMap) {
   }
 
   // ── 梳齿（分支管路）─────────────────────────────────────────────────
-  const L_elb_px = elbowCTF(DN_branch) / 1000 * SCALE_MAIN
-
   const renderPumpCount = Math.max(topoPumps?.length || 0, N_total || 0)
   for (let i = 0; i < renderPumpCount; i++) {
     const topoP = topoPumps?.[i]
@@ -654,13 +650,8 @@ function buildPlanView(inputs, geo, layoutMap) {
     // 支管（如果 layoutMap 有数据，用动态布局）
     const branch = layoutMap?.branches?.[i]
     if (branch?.items?.length > 0) {
-      // 从楼板孔洞开始画
+      // 从楼板孔洞开始画（平面图无弯头符号，弯头属于剖面图）
       let lastY = room_y2
-
-      // 画第一个弯头（90°转向）
-      const elbow_r = L_elb_px * 0.5
-      s += _elbow(pumpX, lastY, elbow_r, 'bottom', 'right', '#2980b9', 1.5)
-      lastY -= elbow_r * 2 // 更新画笔位置到了弯头上边缘
 
       for (const { device, planX, planY, halfLen } of branch.items) {
         if (device.isPump) continue  // 泵已在上方绘制
