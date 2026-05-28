@@ -312,7 +312,7 @@ function buildLayoutMap(topology, geo, inputs) {
   if (!topology) return null
 
   const { devices, nodes, pipes } = topology
-  const { SCALE_MAIN, room_ox, room_x2, room_y2, hdr_y, pool_ox } = geo
+  const { SCALE_MAIN, room_ox, room_x2, room_y2, hdr_y } = geo
   const { DN_branch, DN_main, e_wall, w_pump } = inputs
 
   // 建立邻接表（含设备内部节点连接，否则 BFS 无法穿越设备）
@@ -397,9 +397,10 @@ function buildLayoutMap(topology, geo, inputs) {
       return true
     })
 
-  // 回流管 X：集水坑外墙（pool_ox），对应无阀门直接回集水坑的管路
+  // 回流管 X：平面图中集水坑的左外壁（sumpLayout.x），始终在房间内
+  // pool_ox 可能远超房间边界（大型集水坑），不可直接使用
   const firstPumpX = pumpXs.length > 0 ? pumpXs[0] : spineStartX
-  const returnPipeX = pool_ox ?? Math.max(room_ox + 8, firstPumpX - e_wall * SCALE_MAIN)
+  const returnPipeX = sumpLayout.x
 
   // 从主管（hdr_y）向下排布设备至坑口（正 Y 方向）
   let retY = hdr_y
@@ -427,13 +428,18 @@ function buildLayoutMap(topology, geo, inputs) {
   const lastPumpX = pumpXs.length ? Math.max(...pumpXs) : spineStartX
   const mainStartX = lastPumpX + (w_pump / 2) * SCALE_MAIN + minStr_px
   const outletEndX = room_x2
+  // 预先计算空间，判断是否需要压缩间距
+  const totalRequired = mainDevices.reduce((s, dev) => s + 2 * deviceHalfLen(dev, DN_main, SCALE_MAIN) + minStr_px, 0)
+  const available = Math.max(outletEndX - mainStartX - 4, 1)
+  const spaceFactor = available < totalRequired ? available / totalRequired : 1.0
   let mainCurX = mainStartX
   const mainChain = mainDevices.map(dev => {
     const hl = deviceHalfLen(dev, DN_main, SCALE_MAIN)
-    mainCurX += hl
-    const item = { device: dev, planX: Math.min(mainCurX, outletEndX - hl), planY: hdr_y, halfLen: hl }
-    mainCurX += hl + minStr_px
-    return item
+    mainCurX += hl * spaceFactor
+    const planX = Math.min(mainCurX, outletEndX - hl - 4)
+    // 更新 cursor 从实际放置位置出发，避免后续设备与之重叠
+    mainCurX = planX + hl + minStr_px * spaceFactor
+    return { device: dev, planX, planY: hdr_y, halfLen: hl }
   })
 
   // 主管实际起止：从 returnPipeX（或第一泵 tee）到出水口（东墙）
@@ -683,7 +689,8 @@ function buildPlanView(inputs, geo, layoutMap) {
   // ── 回流管（从主管向下回到集水坑）──────────────────────────────────
   const returnItems = layoutMap?.returnChain || []
   const returnPipeX = layoutMap?.returnPipeX ?? (room_ox + e_wall * SCALE_MAIN * 0.5)
-  if (returnItems.length > 0 || (layoutMap && returnPipeX >= room_ox)) {
+  const returnInRoom = returnPipeX > room_ox + 2 && returnPipeX < room_x2 - 2
+  if (returnInRoom && (returnItems.length > 0 || layoutMap)) {
     // 在主管上标出回流接口（三通）
     s += _tee(returnPipeX, hdr_y, 4.5, '#7f8c8d')
 
