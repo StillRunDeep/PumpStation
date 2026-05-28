@@ -267,7 +267,8 @@ function handleSchemeChange(id) {
       e_wall: e_wall_hsc,
       h_room: isNaN(h_room_hsc) ? null : h_room_hsc,
       spaceRules: { pipeToWall_mm: pipeToWall_hsc, pipeToPipe_mm: pipeToPipe_hsc, minStraight_mm: minStraight_hsc },
-      topology: currentTopology,  // 拓扑数据用于计算管道数量和阀门
+      topology: currentTopology,
+      outletWall: getOutletWall(),
     })
     ag21.DN_label = ag2Result.DN_outlet
     document.getElementById('card-ag21').innerHTML = renderMaintenanceRoom(ag21)
@@ -340,6 +341,7 @@ function recalcAG21() {
     h_room: isNaN(h_room_in) ? null : h_room_in,
     spaceRules: { pipeToWall_mm, pipeToPipe_mm, minStraight_mm },
     topology: currentTopology,
+    outletWall: getOutletWall(),
   })
   moduleCache.ag21 = result
   document.getElementById('card-ag21').innerHTML = renderMaintenanceRoom(result)
@@ -578,7 +580,8 @@ async function runCalculation() {
     e_wall: e_wall_rc,
     h_room: isNaN(h_room_rc) ? null : h_room_rc,
     spaceRules: { pipeToWall_mm: pipeToWall_rc, pipeToPipe_mm: pipeToPipe_rc, minStraight_mm: minStraight_rc },
-    topology: currentTopology,  // 拓扑数据用于计算管道数量和阀门
+    topology: currentTopology,
+    outletWall: getOutletWall(),
   })
   ag21.DN_label = (ag13 && ag13.DN_pumpOut) || ag2Result.DN_outlet
   document.getElementById('card-ag21').innerHTML = renderMaintenanceRoom(ag21)
