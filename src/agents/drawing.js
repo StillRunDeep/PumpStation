@@ -926,6 +926,54 @@ function setupInteractions(el, planData) {
 // ── 主入口 ────────────────────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * 逐步预览：仅有 AG1-x 数据时渲染剖面图 + 平面图灰色占位
+ * ag11 = runPoolDepth 结果，extra = { N, topology, Z_sump, Q_single, H_design, P_motor, catalogPump, DN_branch, DN_main }
+ */
+export function renderSectionPreview(ag11, extra = {}) {
+  const el = document.getElementById('svg-ag31')
+  if (!el || !ag11?.valid) return
+
+  const {
+    Z_sump = null, Q_single, H_design, P_motor, catalogPump,
+    DN_branch = 150, DN_main = 300, topology = null, N = 2,
+  } = extra
+
+  const safeS = Math.min(ag11.S || 1, 100)
+
+  const placeholderAg21 = {
+    L: 6.0, W: 5.0, d_spacing: 1.0, e_wall: 0.8,
+    w_pump: 0.6, d_pump: 0.8, N_total: Math.max(N, 2), h_room: null,
+    hasCatalogDims: false, DN_branch, DN_main, DN_label: DN_main,
+    c_wall_m: 0.8, L_elbow_m: 0.3,
+    valvesAfterJunction: [],
+  }
+  const ag31Params = {
+    h_pool: ag11.D,
+    h_active: (ag11.Z_max ?? ag11.Z_alarm_high) - ag11.Z_stop,
+    Z_stop: ag11.Z_stop, Z_start1: ag11.Z_start1, Z_start2: ag11.Z_start2,
+    Z_alarm_high: ag11.Z_alarm_high, Z_alarm_low: ag11.Z_alarm_low, Z_max: ag11.Z_max,
+  }
+
+  const inputs = parseInputs(N, placeholderAg21, ag31Params, safeS, topology, {
+    Z_sump, Q_single, H_design, P_motor, catalogPump,
+  })
+  const geo = computeGeometry(inputs)
+  const layoutMap = topology ? buildLayoutMap(topology, geo, inputs) : null
+  const sectionData = buildSectionView(inputs, geo, layoutMap)
+  const infoSvg = buildInfoColumn(geo)
+  const minimapSvg = buildMinimap(inputs, geo)
+
+  const { PW, PH, PLAN_X } = geo
+  const mid_y = PH / 2
+  let planHolder = _r(PLAN_X, 0, PW, PH, '#f5f6f7', 'none')
+  planHolder += _t(PLAN_X + PW / 2, mid_y - 10, '平面图', 13, '#bdc3c7', 'middle', 'bold')
+  planHolder += _t(PLAN_X + PW / 2, mid_y + 12, '等待泵房维护间计算完成…', 10, '#bdc3c7', 'middle')
+
+  el.setAttribute('viewBox', `0 0 ${geo.CANVAS_W} ${PH}`)
+  el.innerHTML = infoSvg + planHolder + sectionData.s + minimapSvg
+}
+
 export function runDrawing(N, ag21, params, S, topology, extraInfo = {}) {
   const inputs = parseInputs(N, ag21, params, S, topology, extraInfo)
   const geo = computeGeometry(inputs)

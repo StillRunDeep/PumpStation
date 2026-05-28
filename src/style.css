@@ -285,6 +285,7 @@ details[open] > .card-header::before {
 }
 
 .card-topology .card-header { background: #7d3c98; }
+.card-topology-editor .card-header { background: #5d6d7e; }
 .card-rainfall-analysis .card-header { background: var(--color-ag00); }
 .card-pool-depth .card-header { background: var(--color-ag11); }
 .card-pump-spec .card-header { background: var(--color-ag12); }
@@ -1279,6 +1280,11 @@ body.focus-mode.has-open-card .agent-card:not([open]) {
 /* 右栏预览（AG3-1）始终可见，不参与向导隐藏 */
 body.focus-mode.has-open-card .page-right .agent-card:not([open]) {
   display: flex !important;
+}
+
+/* AG0-0 或 AG4 激活时隐藏右栏预览 */
+body.hide-preview .page-right {
+  display: none !important;
 }
 
 body.focus-mode .page-header {

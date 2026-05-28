@@ -65,12 +65,6 @@
       </div>
     </div>
 
-    <!-- 设备拓扑配置（始终可见） -->
-    <details id="topology-details">
-      <summary>设备拓扑配置</summary>
-      <div id="topology-editor-wrap"></div>
-    </details>
-
     <!-- 高级参数（标签页式） -->
     <details id="advanced-params-details">
       <summary>高级参数</summary>
@@ -295,6 +289,16 @@
           <span>AG0-2</span><span class="agent-label">连接验证</span>
         </summary>
         <div class="card-body" id="card-topology"><p class="msg-pending">等待暴雨计算完成后显示拓扑验证结果。</p></div>
+      </details>
+
+      <!-- 设备拓扑编辑器（AG0-2 下方） -->
+      <details class="agent-card card-topology-editor" open>
+        <summary class="card-header" style="cursor:pointer">
+          <span>拓扑</span><span class="agent-label">设备连接拓扑配置</span>
+        </summary>
+        <div class="card-body" style="padding:0">
+          <div id="topology-editor-wrap"></div>
+        </div>
       </details>
 
       <!-- AG1-1 -->

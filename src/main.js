@@ -16,7 +16,7 @@ import { runMaintenanceRoom } from './agents/maintenance-room.js'
 import { SPACE_RULES_DEFAULT } from './data/fitting-dims.js'
 import { runPumpSpec } from './agents/pump-spec.js'
 import { runPipeSizing, PIPE_SCHEMES } from './agents/pipe-sizing.js'
-import { runDrawing } from './agents/drawing.js'
+import { runDrawing, renderSectionPreview } from './agents/drawing.js'
 import { initLayoutController, generateInitialLayouts } from './ui/layout-controller.js'
 
 import { renderRainfall, renderTopology, renderPoolDepth, renderPipeSizing, renderMaintenanceRoom, renderPumpSpec, renderRainfallCard, renderSchemeOptions } from './ui/results-panel.js'
@@ -138,6 +138,23 @@ function runFromRainfall() {
   recalcAG21()
 }
 
+function _sectionPreviewExtra() {
+  const ag12 = moduleCache.ag12
+  const ag13 = moduleCache.ag13
+  const N = parseInt(document.getElementById('pool-N').value, 10) || 2
+  return {
+    N,
+    topology: getCurrentTopology(),
+    Z_sump: parseFloat(document.getElementById('inp-Z-sump').value) || null,
+    Q_single: ag12?.Q_single ?? null,
+    H_design: ag12?.H_total ?? null,
+    P_motor: ag12?.P_motor ?? null,
+    catalogPump: ag12?.displayMatches?.[0] ?? null,
+    DN_branch: ag13?.DN_pumpOut ?? 150,
+    DN_main: ag13?.DN_mainOutlet ?? 300,
+  }
+}
+
 function recalcAG11() {
   const Q_pump   = parseFloat(document.getElementById('pool-Q-pump').value)
   const V_design = parseFloat(document.getElementById('pool-V-design').value)
@@ -161,6 +178,7 @@ function recalcAG11() {
   if (result.valid) {
     setVal('pump-Z-stop', result.Z_stop)
     setVal('pump-Q-pump', Q_pump)
+    renderSectionPreview(result, _sectionPreviewExtra())
   }
   return result
 }
@@ -191,6 +209,7 @@ function recalcAG12() {
     setVal('pipe-Q-pump',  Q_pump)
     setVal('pipe-Z-stop',  Z_stop)
     setVal('pipe-pump-outlet-dn', result.DN_pump_outlet ?? '')
+    renderSectionPreview(moduleCache.ag11, _sectionPreviewExtra())
   }
   return result
 }
@@ -227,6 +246,7 @@ function recalcAG13() {
   })
   moduleCache.ag13 = result
   document.getElementById('card-ag13').innerHTML = renderPipeSizing(result)
+  renderSectionPreview(moduleCache.ag11, _sectionPreviewExtra())
   return result
 }
 
@@ -736,10 +756,16 @@ function initFocusMode() {
 
     const activeCard = visibleCards.find(c => c.open);
     const currentIndex = activeCard ? visibleCards.indexOf(activeCard) : -1;
-    
+
     // 维护 body 状态类，用于 CSS 控制卡片可见性
     const anyOpen = visibleCards.some(c => c.open);
     document.body.classList.toggle('has-open-card', anyOpen);
+
+    // 右栏预览：AG0-0 或 AG4 激活时隐藏，结果面板未显示时也隐藏
+    const hidePreview = isResultsHidden
+      || activeCard?.id === 'card-input-wrap'
+      || activeCard?.id === 'card-ag41-wrap';
+    document.body.classList.toggle('hide-preview', !!hidePreview);
 
     prevBtn.disabled = currentIndex <= 0;
     
