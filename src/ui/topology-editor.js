@@ -19,7 +19,6 @@ let _connectFrom  = null
 let _dragging     = null    // { nodeId, offsetX, offsetY }
 let _ghostLine    = null    // SVG line element for connect preview
 let _onConfirm    = () => {}
-let _outletWall   = 'E'     // 出水口朝向：'N'|'S'|'E'|'W'
 
 // 画布 viewBox 尺寸
 const VW = 800, VH = 400
@@ -67,13 +66,6 @@ export function initTopologyEditor(containerId, onConfirmCallback) {
       <button class="topo-btn danger" data-action="delete-selected">删除选中</button>
       <button class="topo-btn" id="btn-connect-mode" data-action="toggle-connect">连线模式</button>
       <button class="topo-btn" data-action="reset">↺ 重置</button>
-      <span style="margin-left:12px;font-size:11px;color:#666;vertical-align:middle">出水口方向：</span>
-      <span id="outlet-dir-btns" style="display:inline-flex;gap:3px;vertical-align:middle">
-        <button class="topo-btn outlet-dir-btn ${_outletWall === 'N' ? 'active' : ''}" data-outlet-dir="N" title="北墙出水">↑ 北</button>
-        <button class="topo-btn outlet-dir-btn ${_outletWall === 'S' ? 'active' : ''}" data-outlet-dir="S" title="南墙出水">↓ 南</button>
-        <button class="topo-btn outlet-dir-btn ${_outletWall === 'E' ? 'active' : ''}" data-outlet-dir="E" title="东墙出水（默认）">→ 东</button>
-        <button class="topo-btn outlet-dir-btn ${_outletWall === 'W' ? 'active' : ''}" data-outlet-dir="W" title="西墙出水">← 西</button>
-      </span>
     </div>
     <svg id="svg-ag01" viewBox="0 0 ${VW} ${VH}" xmlns="http://www.w3.org/2000/svg"></svg>
     <p style="font-size:11px;color:#999;margin-top:6px">点击「开始计算」即可应用当前拓扑</p>
@@ -113,33 +105,9 @@ export function getCurrentTopology() {
   return _topology ? cloneTopology(_topology) : null
 }
 
-export function getOutletWall() {
-  return _outletWall
-}
-
-export function setOutletWall(wall) {
-  _outletWall = wall
-  _updateOutletDirButtons()
-}
-
-function _updateOutletDirButtons() {
-  document.querySelectorAll('.outlet-dir-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.outletDir === _outletWall)
-  })
-}
-
 // ── Toolbar ───────────────────────────────────────────────────────────
 function _bindToolbar() {
   document.getElementById('topo-toolbar').addEventListener('click', e => {
-    // 出水方向按钮
-    const dirBtn = e.target.closest('[data-outlet-dir]')
-    if (dirBtn) {
-      _outletWall = dirBtn.dataset.outletDir
-      _updateOutletDirButtons()
-      _onConfirm()
-      return
-    }
-
     const btn = e.target.closest('[data-action]')
     if (!btn) return
     const action = btn.dataset.action

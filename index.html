@@ -65,6 +65,12 @@
       </div>
     </div>
 
+    <!-- 设备拓扑配置（始终可见） -->
+    <details id="topology-details">
+      <summary>设备拓扑配置</summary>
+      <div id="topology-editor-wrap"></div>
+    </details>
+
     <!-- 高级参数（标签页式） -->
     <details id="advanced-params-details">
       <summary>高级参数</summary>
@@ -232,341 +238,324 @@
 
   <!-- ══ 结果面板 ══ -->
   <section id="results-panel">
-    <div class="page-two-col">
+    <div class="results-grid">
 
-      <!-- ── 左列：计算卡片 ── -->
-      <div class="page-left">
-
-        <!-- AG0-1: 暴雨计算 -->
-        <details class="agent-card card-rainfall-analysis">
-          <summary class="card-header">
-            <span>AG0-1</span><span class="agent-label">暴雨计算</span>
-            <div class="card-header-actions">
-              <button class="btn-recalc" id="btn-rainfall-recalc">重新计算</button>
-              <button class="btn-downstream" id="btn-rainfall-downstream">更新后续</button>
-            </div>
-          </summary>
-          <div class="card-inputs">
-            <details>
-              <summary class="card-inputs-title">已知条件</summary>
-              <table class="inputs-table">
-                <tr>
-                  <td class="itd-label">降雨分区 Zone</td>
-                  <td class="itd-input" colspan="3">
-                    <select id="rainfall-zone">
-                      <option value="tungkl">香港天文台总部</option>
-                      <option value="tai-mo-shan">大帽山</option>
-                      <option value="west-lantau">西部大屿山</option>
-                      <option value="north">北区</option>
-                    </select>
-                  </td>
-                </tr>
-                <tr>
-                  <td class="itd-label">t_d（min）</td>
-                  <td class="itd-input"><input type="number" id="rainfall-td" step="1" min="10" max="240"></td>
-                  <td class="itd-label">A_catch（km²）</td>
-                  <td class="itd-input"><input type="number" id="rainfall-area" step="0.001"></td>
-                </tr>
-                <tr>
-                  <td class="itd-label">径流系数 C</td>
-                  <td class="itd-input"><input type="number" id="rainfall-runoff-c" step="0.01" min="0.05" max="1.0"></td>
-                  <td class="itd-label">Δi（%）</td>
-                  <td class="itd-input"><input type="number" id="rainfall-climate-adj" step="1" min="0" max="30" placeholder="0"></td>
-                </tr>
-                <tr>
-                  <td class="itd-label">H（m/100m）</td>
-                  <td class="itd-input"><input type="number" id="rainfall-slope" step="0.1" placeholder="1.0"></td>
-                  <td class="itd-label">L（m）</td>
-                  <td class="itd-input"><input type="number" id="rainfall-flow-path" step="10" placeholder="500"></td>
-                </tr>
-              </table>
-            </details>
+      <!-- AG0-1: 暴雨计算 -->
+      <details class="agent-card card-rainfall-analysis">
+        <summary class="card-header">
+          <span>AG0-1</span><span class="agent-label">暴雨计算</span>
+          <div class="card-header-actions">
+            <button class="btn-recalc" id="btn-rainfall-recalc">重新计算</button>
+            <button class="btn-downstream" id="btn-rainfall-downstream">更新后续</button>
           </div>
-          <div class="card-body" id="card-rainfall"><p class="msg-pending">尚未计算，请点击「重新计算」或顶部「开始计算全流程」。</p></div>
-        </details>
+        </summary>
+        <div class="card-inputs">
+          <details>
+            <summary class="card-inputs-title">已知条件</summary>
+            <table class="inputs-table">
+              <tr>
+                <td class="itd-label">降雨分区 Zone</td>
+                <td class="itd-input" colspan="3">
+                  <select id="rainfall-zone">
+                    <option value="tungkl">香港天文台总部</option>
+                    <option value="tai-mo-shan">大帽山</option>
+                    <option value="west-lantau">西部大屿山</option>
+                    <option value="north">北区</option>
+                  </select>
+                </td>
+              </tr>
+              <tr>
+                <td class="itd-label">t_d（min）</td>
+                <td class="itd-input"><input type="number" id="rainfall-td" step="1" min="10" max="240"></td>
+                <td class="itd-label">A_catch（km²）</td>
+                <td class="itd-input"><input type="number" id="rainfall-area" step="0.001"></td>
+              </tr>
+              <tr>
+                <td class="itd-label">径流系数 C</td>
+                <td class="itd-input"><input type="number" id="rainfall-runoff-c" step="0.01" min="0.05" max="1.0"></td>
+                <td class="itd-label">Δi（%）</td>
+                <td class="itd-input"><input type="number" id="rainfall-climate-adj" step="1" min="0" max="30" placeholder="0"></td>
+              </tr>
+              <tr>
+                <td class="itd-label">H（m/100m）</td>
+                <td class="itd-input"><input type="number" id="rainfall-slope" step="0.1" placeholder="1.0"></td>
+                <td class="itd-label">L（m）</td>
+                <td class="itd-input"><input type="number" id="rainfall-flow-path" step="10" placeholder="500"></td>
+              </tr>
+            </table>
+          </details>
+        </div>
+        <div class="card-body" id="card-rainfall"><p class="msg-pending">尚未计算，请点击「重新计算」或顶部「开始计算全流程」。</p></div>
+      </details>
 
-        <!-- AG0-2: 连接验证 -->
-        <details class="agent-card card-topology">
-          <summary class="card-header">
-            <span>AG0-2</span><span class="agent-label">连接验证</span>
-          </summary>
-          <div class="card-body" id="card-topology"><p class="msg-pending">等待暴雨计算完成后显示拓扑验证结果。</p></div>
-        </details>
+      <!-- AG0-2: 解析结果 -->
+      <details class="agent-card card-topology">
+        <summary class="card-header">
+          <span>AG0-2</span><span class="agent-label">连接验证</span>
+        </summary>
+        <div class="card-body" id="card-topology"><p class="msg-pending">等待暴雨计算完成后显示拓扑验证结果。</p></div>
+      </details>
 
-        <!-- 设备拓扑编辑器（AG0-2 下方） -->
-        <details class="agent-card card-topology-editor" open>
-          <summary class="card-header" style="cursor:pointer">
-            <span>拓扑</span><span class="agent-label">设备连接拓扑配置</span>
-          </summary>
-          <div class="card-body" style="padding:0">
-            <div id="topology-editor-wrap"></div>
+      <!-- AG1-1 -->
+      <details class="agent-card card-pool-depth">
+        <summary class="card-header">
+          <span>AG1-1</span><span class="agent-label">污水池计算</span>
+          <div class="card-header-actions">
+            <button class="btn-recalc" id="btn-pool-recalc">重新计算</button>
+            <button class="btn-downstream" id="btn-pool-downstream">更新后续</button>
           </div>
-        </details>
+        </summary>
+        <div class="card-inputs">
+          <details>
+            <summary class="card-inputs-title">已知条件</summary>
+            <table class="inputs-table">
+              <tr>
+                <td class="itd-label">Q_pump（m³/s）</td>
+                <td class="itd-input"><input type="number" id="pool-Q-pump" step="0.001"></td>
+                <td class="itd-label">V_design（m³）</td>
+                <td class="itd-input"><input type="number" id="pool-V-design" step="1"></td>
+              </tr>
+              <tr>
+                <td class="itd-label">D（m）</td>
+                <td class="itd-input"><input type="number" id="pool-D" step="0.1" placeholder="与A_base二选一"></td>
+                <td class="itd-label">A_base（m²）</td>
+                <td class="itd-input"><input type="number" id="pool-A-base" step="10" placeholder="与D二选一"></td>
+              </tr>
+              <tr>
+                <td class="itd-label">N（台）</td>
+                <td class="itd-input"><input type="number" id="pool-N" min="1" max="6" step="1"></td>
+                <td class="itd-label">Z（次/小时）</td>
+                <td class="itd-input"><input type="number" id="pool-Z" min="4" max="12" step="1"></td>
+              </tr>
+              <tr>
+                <td class="itd-label">Z_bottom（mPD）</td>
+                <td class="itd-input"><input type="number" id="pool-Z-bottom" step="0.1"></td>
+                <td class="itd-label">F_b（m）</td>
+                <td class="itd-input"><input type="number" id="pool-Fb" step="0.1"></td>
+              </tr>
+              <tr>
+                <td class="itd-label">F_s（m）</td>
+                <td class="itd-input"><input type="number" id="pool-Fs" step="0.1"></td>
+                <td class="itd-label">Z_sump（mPD）</td>
+                <td class="itd-input"><input type="number" id="pool-Z-sump" step="0.1"></td>
+              </tr>
+            </table>
+          </details>
+        </div>
+        <div class="card-body" id="card-ag11"><p class="msg-pending">尚未计算，请点击「重新计算」或顶部「开始计算全流程」。</p></div>
+      </details>
 
-        <!-- AG1-1 -->
-        <details class="agent-card card-pool-depth" open>
-          <summary class="card-header">
-            <span>AG1-1</span><span class="agent-label">污水池计算</span>
-            <div class="card-header-actions">
-              <button class="btn-recalc" id="btn-pool-recalc">重新计算</button>
-              <button class="btn-downstream" id="btn-pool-downstream">更新后续</button>
-            </div>
-          </summary>
-          <div class="card-inputs">
-            <details open>
-              <summary class="card-inputs-title">已知条件</summary>
-              <table class="inputs-table">
-                <tr>
-                  <td class="itd-label">Q_pump（m³/s）</td>
-                  <td class="itd-input"><input type="number" id="pool-Q-pump" step="0.001"></td>
-                  <td class="itd-label">V_design（m³）</td>
-                  <td class="itd-input"><input type="number" id="pool-V-design" step="1"></td>
-                </tr>
-                <tr>
-                  <td class="itd-label">D（m）</td>
-                  <td class="itd-input"><input type="number" id="pool-D" step="0.1" placeholder="与A_base二选一"></td>
-                  <td class="itd-label">A_base（m²）</td>
-                  <td class="itd-input"><input type="number" id="pool-A-base" step="10" placeholder="与D二选一"></td>
-                </tr>
-                <tr>
-                  <td class="itd-label">N（台）</td>
-                  <td class="itd-input"><input type="number" id="pool-N" min="1" max="6" step="1"></td>
-                  <td class="itd-label">Z（次/小时）</td>
-                  <td class="itd-input"><input type="number" id="pool-Z" min="4" max="12" step="1"></td>
-                </tr>
-                <tr>
-                  <td class="itd-label">Z_bottom（mPD）</td>
-                  <td class="itd-input"><input type="number" id="pool-Z-bottom" step="0.1"></td>
-                  <td class="itd-label">F_b（m）</td>
-                  <td class="itd-input"><input type="number" id="pool-Fb" step="0.1"></td>
-                </tr>
-                <tr>
-                  <td class="itd-label">F_s（m）</td>
-                  <td class="itd-input"><input type="number" id="pool-Fs" step="0.1"></td>
-                  <td class="itd-label">Z_sump（mPD）</td>
-                  <td class="itd-input"><input type="number" id="pool-Z-sump" step="0.1"></td>
-                </tr>
-              </table>
-            </details>
+      <!-- AG1-2 -->
+      <details class="agent-card card-pump-spec">
+        <summary class="card-header">
+          <span>AG1-2</span><span class="agent-label">水泵选型</span>
+          <div class="card-header-actions">
+            <button class="btn-recalc" id="btn-pump-recalc">重新计算</button>
+            <button class="btn-downstream" id="btn-pump-downstream">更新后续</button>
           </div>
-          <div class="card-body" id="card-ag11"><p class="msg-pending">尚未计算，请点击「重新计算」或顶部「开始计算全流程」。</p></div>
-        </details>
+        </summary>
+        <div class="card-inputs">
+          <details>
+            <summary class="card-inputs-title">已知条件</summary>
+            <table class="inputs-table">
+              <tr>
+                <td class="itd-label">Z_stop（mPD）</td>
+                <td class="itd-input"><input type="number" id="pump-Z-stop" step="0.01"></td>
+                <td class="itd-label">Q_pump（m³/s）</td>
+                <td class="itd-input"><input type="number" id="pump-Q-pump" step="0.001"></td>
+              </tr>
+              <tr>
+                <td class="itd-label">Z_discharge（mPD）</td>
+                <td class="itd-input"><input type="number" id="pump-Z-discharge" step="0.1"></td>
+                <td class="itd-label">H_pipe_loss（m）</td>
+                <td class="itd-input"><input type="number" id="pump-H-pipe-loss" step="0.1" value="0" min="0" max="50"></td>
+              </tr>
+              <tr>
+                <td class="itd-label">η_hyd</td>
+                <td class="itd-input"><input type="number" id="pump-eta-hyd" min="0.5" max="1.0" step="0.01" value="0.75"></td>
+                <td class="itd-label">η_mot</td>
+                <td class="itd-input"><input type="number" id="pump-eta-mot" min="0.5" max="1.0" step="0.01" value="0.85"></td>
+              </tr>
+              <tr>
+                <td class="itd-label">NPSH_r（m）</td>
+                <td class="itd-input"><input type="number" id="pump-npsh-r" step="0.1"></td>
+                <td class="itd-label">电机覆盖（kW）</td>
+                <td class="itd-input"><input type="number" id="pump-motor" step="1" placeholder="留空则计算得出"></td>
+              </tr>
+            </table>
+          </details>
+        </div>
+        <div class="card-body" id="card-ag12"><p class="msg-pending">尚未计算，请点击「重新计算」或顶部「开始计算全流程」。</p></div>
+      </details>
 
-        <!-- AG1-2 -->
-        <details class="agent-card card-pump-spec" open>
-          <summary class="card-header">
-            <span>AG1-2</span><span class="agent-label">水泵选型</span>
-            <div class="card-header-actions">
-              <button class="btn-recalc" id="btn-pump-recalc">重新计算</button>
-              <button class="btn-downstream" id="btn-pump-downstream">更新后续</button>
-            </div>
-          </summary>
-          <div class="card-inputs">
-            <details open>
-              <summary class="card-inputs-title">已知条件</summary>
-              <table class="inputs-table">
-                <tr>
-                  <td class="itd-label">Z_stop（mPD）</td>
-                  <td class="itd-input"><input type="number" id="pump-Z-stop" step="0.01"></td>
-                  <td class="itd-label">Q_pump（m³/s）</td>
-                  <td class="itd-input"><input type="number" id="pump-Q-pump" step="0.001"></td>
-                </tr>
-                <tr>
-                  <td class="itd-label">Z_discharge（mPD）</td>
-                  <td class="itd-input"><input type="number" id="pump-Z-discharge" step="0.1"></td>
-                  <td class="itd-label">H_pipe_loss（m）</td>
-                  <td class="itd-input"><input type="number" id="pump-H-pipe-loss" step="0.1" value="0" min="0" max="50"></td>
-                </tr>
-                <tr>
-                  <td class="itd-label">η_hyd</td>
-                  <td class="itd-input"><input type="number" id="pump-eta-hyd" min="0.5" max="1.0" step="0.01" value="0.75"></td>
-                  <td class="itd-label">η_mot</td>
-                  <td class="itd-input"><input type="number" id="pump-eta-mot" min="0.5" max="1.0" step="0.01" value="0.85"></td>
-                </tr>
-                <tr>
-                  <td class="itd-label">NPSH_r（m）</td>
-                  <td class="itd-input"><input type="number" id="pump-npsh-r" step="0.1"></td>
-                  <td class="itd-label">电机覆盖（kW）</td>
-                  <td class="itd-input"><input type="number" id="pump-motor" step="1" placeholder="留空则计算得出"></td>
-                </tr>
-              </table>
-            </details>
+      <!-- AG1-3 -->
+      <details class="agent-card card-pipe-sizing">
+        <summary class="card-header">
+          <span>AG1-3</span><span class="agent-label">管道尺寸计算</span>
+          <div class="card-header-actions">
+            <button class="btn-recalc" id="btn-pipe-recalc">重新计算</button>
+            <button class="btn-downstream" id="btn-pipe-downstream">更新后续</button>
           </div>
-          <div class="card-body" id="card-ag12"><p class="msg-pending">尚未计算，请点击「重新计算」或顶部「开始计算全流程」。</p></div>
-        </details>
-
-        <!-- AG1-3 -->
-        <details class="agent-card card-pipe-sizing" open>
-          <summary class="card-header">
-            <span>AG1-3</span><span class="agent-label">管道尺寸计算</span>
-            <div class="card-header-actions">
-              <button class="btn-recalc" id="btn-pipe-recalc">重新计算</button>
-              <button class="btn-downstream" id="btn-pipe-downstream">更新后续</button>
-            </div>
-          </summary>
-          <div class="card-inputs">
-            <details open>
-              <summary class="card-inputs-title">已知条件</summary>
-              <table class="inputs-table">
-                <tr>
-                  <td class="itd-label">H_total（m）</td>
-                  <td class="itd-input"><input type="number" id="pipe-H-total" step="0.1"></td>
-                  <td class="itd-label">Q_pump（m³/s）</td>
-                  <td class="itd-input"><input type="number" id="pipe-Q-pump" step="0.001"></td>
-                </tr>
-                <tr>
-                  <td class="itd-label">Q（m³/h）</td>
-                  <td class="itd-input"><input type="number" id="pipe-Q-total" step="1"></td>
-                  <td class="itd-label">N（台）</td>
-                  <td class="itd-input"><input type="number" id="pipe-N" min="1" max="6" step="1"></td>
-                </tr>
-                <tr>
-                  <td class="itd-label">Z_stop（mPD）</td>
-                  <td class="itd-input"><input type="number" id="pipe-Z-stop" step="0.01"></td>
-                  <td class="itd-label">L（m）</td>
-                  <td class="itd-input"><input type="number" id="pipe-len" step="1"></td>
-                </tr>
-                <tr>
-                  <td class="itd-label">n</td>
-                  <td class="itd-input"><input type="number" id="pipe-n" min="0.010" max="0.020" step="0.001"></td>
-                  <td class="itd-label">k_local</td>
-                  <td class="itd-input"><input type="number" id="pipe-k-local" step="0.01" value="0.15"></td>
-                </tr>
-                <tr>
-                  <td class="itd-label">NPSH_r（m）</td>
-                  <td class="itd-input"><input type="number" id="pipe-npsh-r" step="0.1" value="3.0"></td>
-                  <td></td><td></td>
-                </tr>
-              </table>
-            </details>
-            <!-- 管径偏好选择器 -->
-            <div class="scheme-panel" id="scheme-panel" style="padding:8px 12px;margin-top:8px">
-              <input type="range" id="scheme-slider"
-                min="1" max="3" step="1" value="2"
-                class="scheme-slider"
-                oninput="handleSchemeChange(parseInt(this.value))">
-              <div class="scheme-options" id="scheme-options"></div>
-            </div>
-            <input type="hidden" id="pipe-pump-outlet-dn">
+        </summary>
+        <div class="card-inputs">
+          <details>
+            <summary class="card-inputs-title">已知条件</summary>
+            <table class="inputs-table">
+              <tr>
+                <td class="itd-label">H_total（m）</td>
+                <td class="itd-input"><input type="number" id="pipe-H-total" step="0.1"></td>
+                <td class="itd-label">Q_pump（m³/s）</td>
+                <td class="itd-input"><input type="number" id="pipe-Q-pump" step="0.001"></td>
+              </tr>
+              <tr>
+                <td class="itd-label">Q（m³/h）</td>
+                <td class="itd-input"><input type="number" id="pipe-Q-total" step="1"></td>
+                <td class="itd-label">N（台）</td>
+                <td class="itd-input"><input type="number" id="pipe-N" min="1" max="6" step="1"></td>
+              </tr>
+              <tr>
+                <td class="itd-label">Z_stop（mPD）</td>
+                <td class="itd-input"><input type="number" id="pipe-Z-stop" step="0.01"></td>
+                <td class="itd-label">L（m）</td>
+                <td class="itd-input"><input type="number" id="pipe-len" step="1"></td>
+              </tr>
+              <tr>
+                <td class="itd-label">n</td>
+                <td class="itd-input"><input type="number" id="pipe-n" min="0.010" max="0.020" step="0.001"></td>
+                <td class="itd-label">k_local</td>
+                <td class="itd-input"><input type="number" id="pipe-k-local" step="0.01" value="0.15"></td>
+              </tr>
+              <tr>
+                <td class="itd-label">NPSH_r（m）</td>
+                <td class="itd-input"><input type="number" id="pipe-npsh-r" step="0.1" value="3.0"></td>
+                <td></td><td></td>
+              </tr>
+            </table>
+          </details>
+          <!-- 管径偏好选择器 -->
+          <div class="scheme-panel" id="scheme-panel" style="padding:8px 12px;margin-top:8px">
+            <input type="range" id="scheme-slider"
+              min="1" max="3" step="1" value="2"
+              class="scheme-slider"
+              oninput="handleSchemeChange(parseInt(this.value))">
+            <div class="scheme-options" id="scheme-options"></div>
           </div>
-          <div class="card-body" id="card-ag13"><p class="msg-pending">尚未计算，请点击「重新计算」或顶部「开始计算全流程」。</p></div>
-        </details>
+          <input type="hidden" id="pipe-pump-outlet-dn">
+        </div>
+        <div class="card-body" id="card-ag13"><p class="msg-pending">尚未计算，请点击「重新计算」或顶部「开始计算全流程」。</p></div>
+      </details>
 
-        <!-- AG2-1 -->
-        <details class="agent-card card-maintenance-room" open>
-          <summary class="card-header">
-            <span>AG2-1</span><span class="agent-label">泵房维护间尺寸计算</span>
-            <div class="card-header-actions">
-              <button class="btn-recalc" id="btn-room-recalc">重新计算</button>
-              <button class="btn-downstream" id="btn-room-downstream">更新后续</button>
-            </div>
-          </summary>
-          <div class="card-inputs">
-            <details open>
-              <summary class="card-inputs-title">已知条件</summary>
-              <table class="inputs-table">
-                <tr>
-                  <td class="itd-label">N（工作泵台数）</td>
-                  <td class="itd-input"><input type="number" id="room-N" min="1" max="6" step="1"></td>
-                  <td class="itd-label">维护间净高 h_room（m）</td>
-                  <td class="itd-input"><input type="number" id="room-h-room" step="0.1" value="3.5"></td>
-                </tr>
-                <tr>
-                  <td class="itd-label">N_spare（备用泵）</td>
-                  <td class="itd-input"><input type="number" id="room-N-spare" min="0" max="3" step="1"></td>
-                  <td class="itd-label">泵间净距 d_spacing（m）</td>
-                  <td class="itd-input"><input type="number" id="room-d-spacing" step="0.1" value="1.0"></td>
-                </tr>
-                <tr>
-                  <td class="itd-label">端部距墙净距 e_wall（m）</td>
-                  <td class="itd-input"><input type="number" id="room-e-wall" step="0.1" value="0.8"></td>
-                  <td class="itd-label">管外壁到墙面净距（mm）</td>
-                  <td class="itd-input"><input type="number" id="room-pipe-to-wall" step="10" value="800"></td>
-                </tr>
-                <tr>
-                  <td class="itd-label">相邻管外壁净距（mm）</td>
-                  <td class="itd-input"><input type="number" id="room-pipe-to-pipe" step="10" value="800"></td>
-                  <td class="itd-label">阀件间最小直管段（mm）</td>
-                  <td class="itd-input"><input type="number" id="room-min-straight" step="10" value="300"></td>
-                </tr>
-                <tr>
-                  <td class="itd-label">支管 DN_branch（mm）</td>
-                  <td class="itd-input"><input type="number" id="room-DN-branch" step="10" style="width:64px;font-size:12px;padding:2px 4px;border:1px solid #ccc;border-radius:3px;color:#1a3a5c;font-weight:600" value="150"/></td>
-                  <td class="itd-label">主管 DN_main（mm）</td>
-                  <td class="itd-input"><input type="number" id="room-DN-main" step="10" style="width:64px;font-size:12px;padding:2px 4px;border:1px solid #ccc;border-radius:3px;color:#1a3a5c;font-weight:600" value="300"/></td>
-                </tr>
-              </table>
-            </details>
+      <!-- AG2-1 -->
+      <details class="agent-card card-maintenance-room">
+        <summary class="card-header">
+          <span>AG2-1</span><span class="agent-label">泵房维护间尺寸计算</span>
+          <div class="card-header-actions">
+            <button class="btn-recalc" id="btn-room-recalc">重新计算</button>
+            <button class="btn-downstream" id="btn-room-downstream">更新后续</button>
           </div>
-          <div class="card-body" id="card-ag21"><p class="msg-pending">尚未计算，请点击「重新计算」或顶部「开始计算全流程」。</p></div>
-        </details>
+        </summary>
+        <div class="card-inputs">
+          <details>
+            <summary class="card-inputs-title">已知条件</summary>
+            <table class="inputs-table">
+              <tr>
+                <td class="itd-label">N（工作泵台数）</td>
+                <td class="itd-input"><input type="number" id="room-N" min="1" max="6" step="1"></td>
+                <td class="itd-label">维护间净高 h_room（m）</td>
+                <td class="itd-input"><input type="number" id="room-h-room" step="0.1" value="3.5"></td>
+              </tr>
+              <tr>
+                <td class="itd-label">N_spare（备用泵）</td>
+                <td class="itd-input"><input type="number" id="room-N-spare" min="0" max="3" step="1"></td>
+                <td class="itd-label">泵间净距 d_spacing（m）</td>
+                <td class="itd-input"><input type="number" id="room-d-spacing" step="0.1" value="1.0"></td>
+              </tr>
+              <tr>
+                <td class="itd-label">端部距墙净距 e_wall（m）</td>
+                <td class="itd-input"><input type="number" id="room-e-wall" step="0.1" value="0.8"></td>
+                <td class="itd-label">管外壁到墙面净距（mm）</td>
+                <td class="itd-input"><input type="number" id="room-pipe-to-wall" step="10" value="800"></td>
+              </tr>
+              <tr>
+                <td class="itd-label">相邻管外壁净距（mm）</td>
+                <td class="itd-input"><input type="number" id="room-pipe-to-pipe" step="10" value="800"></td>
+                <td class="itd-label">阀件间最小直管段（mm）</td>
+                <td class="itd-input"><input type="number" id="room-min-straight" step="10" value="300"></td>
+              </tr>
+              <tr>
+                <td class="itd-label">支管 DN_branch（mm）</td>
+                <td class="itd-input"><input type="number" id="room-DN-branch" step="10" style="width:64px;font-size:12px;padding:2px 4px;border:1px solid #ccc;border-radius:3px;color:#1a3a5c;font-weight:600" value="150"/></td>
+                <td class="itd-label">主管 DN_main（mm）</td>
+                <td class="itd-input"><input type="number" id="room-DN-main" step="10" style="width:64px;font-size:12px;padding:2px 4px;border:1px solid #ccc;border-radius:3px;color:#1a3a5c;font-weight:600" value="300"/></td>
+              </tr>
+            </table>
+          </details>
+        </div>
+        <div class="card-body" id="card-ag21"><p class="msg-pending">尚未计算，请点击「重新计算」或顶部「开始计算全流程」。</p></div>
+      </details>
 
-        <!-- AG4: building layout generation and evaluate -->
-        <details class="agent-card card-ag41 card-ag41-wrap" id="card-ag41-wrap">
-          <summary class="card-header">
-            <span>AG4</span>
-            <span class="agent-label">建筑平面布局生成与评价</span>
-            <div class="card-header-buttons">
-              <button id="btn-ag41-params" title="建筑平面参数设置">建筑平面参数</button>
-              <button id="btn-ag41-scorer-params" title="评分参数设置">评分参数</button>
-              <button id="btn-ag41-more" hidden>生成方案</button>
-              <button id="btn-ag41-optimize" hidden disabled>优化方案</button>
-              <button id="btn-ag41-reset" hidden>重置方案</button>
-            </div>
-          </summary>
-          <div class="notify-bar-wrap">
-            <span id="ag41-notify" class="header-notify"></span>
+      <!-- AG3-1: pump-room drawing -->
+      <details class="agent-card card-ag31 card-ag31-wrap">
+        <summary class="card-header">
+          <span>AG3-1</span><span class="agent-label">设备流线二维示意</span>
+          <div style="margin-left:auto;display:flex;gap:5px;align-items:center">
+            <button class="svg-zoom-btn" id="btn-ag31-zin"  title="放大">＋</button>
+            <button class="svg-zoom-btn" id="btn-ag31-rst"  title="复位">⊙</button>
+            <button class="svg-zoom-btn" id="btn-ag31-zout" title="缩小">－</button>
           </div>
-          <div class="card-body">
-            <div id="layout-comparison"></div>
+        </summary>
+        <div class="card-body" style="padding:0;overflow:hidden">
+          <svg id="svg-ag31" viewBox="0 0 1160 560" preserveAspectRatio="xMidYMid meet"></svg>
+          <div id="pump-tooltip" class="svg-tooltip" style="display:none;position:absolute;"></div>
+          <div id="valve-tooltip" class="svg-tooltip" style="display:none;position:absolute;"></div>
+        </div>
+      </details>
+
+      <!-- AG4: building layout generation and evaluate -->
+      <details class="agent-card card-ag41 card-ag41-wrap" id="card-ag41-wrap">
+        <summary class="card-header">
+          <span>AG4</span>
+          <span class="agent-label">建筑平面布局生成与评价</span>
+          <div class="card-header-buttons">
+            <button id="btn-ag41-params" title="建筑平面参数设置">建筑平面参数</button>
+            <button id="btn-ag41-scorer-params" title="评分参数设置">评分参数</button>
+            <button id="btn-ag41-more" hidden>生成方案</button>
+            <button id="btn-ag41-optimize" hidden disabled>优化方案</button>
+            <button id="btn-ag41-reset" hidden>重置方案</button>
           </div>
-        </details>
+        </summary>
+        <div class="notify-bar-wrap">
+          <span id="ag41-notify" class="header-notify"></span>
+        </div>
+        <div class="card-body">
+          <!-- 方案排名（含行内展开详图） -->
+          <div id="layout-comparison"></div>
+        </div>
+      </details>
 
-      </div><!-- end .page-left -->
+      <!-- ── 评分参数模态框 ── -->
+      <dialog id="modal-scorer-params" class="modal">
+        <div class="modal-header">
+          <h3>评分参数设置</h3>
+          <div id="modal-scorer-actions" class="modal-actions"></div>
+        </div>
+        <div class="modal-body" id="modal-scorer-wrap">
+          <!-- Content will be injected by JS -->
+        </div>
+      </dialog>
 
-      <!-- ── 右列：预览面板（sticky）── -->
-      <div class="page-right">
-        <details class="agent-card card-ag31 card-ag31-wrap" open>
-          <summary class="card-header" style="cursor:pointer">
-            <span>AG3-1</span><span class="agent-label">设备流线二维示意</span>
-            <div style="margin-left:auto;display:flex;gap:5px;align-items:center">
-              <button class="svg-zoom-btn" id="btn-ag31-zin"  title="放大">＋</button>
-              <button class="svg-zoom-btn" id="btn-ag31-rst"  title="复位">⊙</button>
-              <button class="svg-zoom-btn" id="btn-ag31-zout" title="缩小">－</button>
-            </div>
-          </summary>
-          <div class="card-body card-ag31-body" style="padding:0;overflow:hidden">
-            <svg id="svg-ag31" viewBox="0 0 1160 560" preserveAspectRatio="xMidYMid meet"></svg>
-            <div id="pump-tooltip" class="svg-tooltip" style="display:none;position:absolute;"></div>
-            <div id="valve-tooltip" class="svg-tooltip" style="display:none;position:absolute;"></div>
-          </div>
-        </details>
-      </div><!-- end .page-right -->
+      <!-- ── 建筑参数模态框 (moved here) ── -->
+      <dialog id="modal-build-params" class="modal">
+        <div class="modal-header">
+          <h3>建筑平面参数设置</h3>
+          <div id="modal-params-actions" class="modal-actions"></div>
+        </div>
+        <div class="modal-body" id="modal-params-wrap">
+          <!-- Content will be injected by JS -->
+        </div>
+      </dialog>
 
-    </div><!-- end .page-two-col -->
-
-    <!-- ── 评分参数模态框 ── -->
-    <dialog id="modal-scorer-params" class="modal">
-      <div class="modal-header">
-        <h3>评分参数设置</h3>
-        <div id="modal-scorer-actions" class="modal-actions"></div>
-      </div>
-      <div class="modal-body" id="modal-scorer-wrap">
-        <!-- Content will be injected by JS -->
-      </div>
-    </dialog>
-
-    <!-- ── 建筑参数模态框 ── -->
-    <dialog id="modal-build-params" class="modal">
-      <div class="modal-header">
-        <h3>建筑平面参数设置</h3>
-        <div id="modal-params-actions" class="modal-actions"></div>
-      </div>
-      <div class="modal-body" id="modal-params-wrap">
-        <!-- Content will be injected by JS -->
-      </div>
-    </dialog>
-
+    </div>
   </section>
 
 <script type="module" src="/src/main.js"></script>

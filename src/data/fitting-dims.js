@@ -45,9 +45,7 @@ export function reducerL(d1, d2) {
 
 // ── 电磁流量计本体长度 ≈ max(300, 4×DN)，单位：mm ──
 export function flowmeterBodyL(dn) {
-  // 电磁流量计表身面到面尺寸（mm），近似 1D，参考 Krohne/E+H 法兰型目录
-  // 上游 5D、下游 2D 直管段在房间尺寸计算中单独计入，不在此累加
-  return Math.max(250, dn)
+  return Math.max(300, 4 * dn)
 }
 
 // ── 查表（带插值）────────────────────────────────────────────────
