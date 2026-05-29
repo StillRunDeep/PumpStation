@@ -43,9 +43,10 @@ export function reducerL(d1, d2) {
   return Math.max(100, 1.5 * Math.abs(d1 - d2))
 }
 
-// ── 电磁流量计本体长度 ≈ max(300, 4×DN)，单位：mm ──
+// ── 电磁流量计本体长度（表身面到面），单位：mm ──
+// 参考克洛纳/E+H实测：DN300≈400mm，DN1000≈1000mm，约1D
 export function flowmeterBodyL(dn) {
-  return Math.max(300, 4 * dn)
+  return Math.max(250, dn)
 }
 
 // ── 查表（带插值）────────────────────────────────────────────────

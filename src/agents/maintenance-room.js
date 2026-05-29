@@ -202,14 +202,27 @@ function calcRoomLength(N_total, w_pump, d_spacing, e_wall, DN_branch, DN_main, 
   const pipeToWall_m = s.pipeToWall_mm / 1000
   const pipeToPipe_m = s.pipeToPipe_mm / 1000
   const DN_branch_m  = DN_branch / 1000
+  const SUMP_PART_M  = 0.2  // 集水坑隔墙厚度（与 drawing.js SUMP_PARTITION_M 同步）
 
   const junction_length = calcJunctionLength(DN_branch, DN_main, valvesAfterJunction, topology)
+
+  // L_pipe：管道链占位
   const L_pipe = pipeToWall_m + DN_branch_m + (pipeToPipe_m + DN_branch_m) * (numPipes - 1)
                   + Math.max(junction_length, pipeToWall_m)
-  const L_pumpBased = N_total * w_pump + (N_total - 1) * d_spacing + 2 * e_wall
-  const L_raw = Math.max(L_pipe, L_pumpBased)
 
-  return { L: ceilTo01(L_raw), L_pipe, L_pumpBased, junction_length }
+  // L_pumpBased_extended：泵排占位，左侧用 e_wall_eff（§2.5：管中心到侧墙 ≥ DN/2 + pipeToWall）
+  const e_pipe_half  = DN_branch_m / 2 + pipeToWall_m
+  const e_wall_eff   = Math.max(e_wall, e_pipe_half)
+  const L_pumpBased  = N_total * w_pump + (N_total - 1) * d_spacing + 2 * e_wall
+  const L_pumpBased_extended = e_wall_eff + N_total * w_pump + (N_total - 1) * d_spacing
+                                + Math.max(junction_length, pipeToWall_m)
+
+  // L_sump_margin：§2.5 投影包含约束——集水坑必须在维护间 X 投影内
+  const sump_width_m  = N_total * w_pump + Math.max(0, N_total - 1) * SUMP_PART_M
+  const L_sump_margin = sump_width_m + 2 * e_pipe_half
+
+  const L_raw = Math.max(L_pipe, L_pumpBased_extended, L_sump_margin)
+  return { L: ceilTo01(L_raw), L_pipe, L_pumpBased, L_pumpBased_extended, L_sump_margin, junction_length }
 }
 
 /**

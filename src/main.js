@@ -152,6 +152,7 @@ function _sectionPreviewExtra() {
     catalogPump: ag12?.displayMatches?.[0] ?? null,
     DN_branch: ag13?.DN_pumpOut ?? 150,
     DN_main: ag13?.DN_mainOutlet ?? 300,
+    Z_discharge: parseFloat(document.getElementById('inp-z-discharge').value) || null,
   }
 }
 
@@ -321,6 +322,7 @@ function handleSchemeChange(id) {
       P_motor: ag2Result?.P_motor,
       catalogPump: moduleCache.ag12?.displayMatches?.[0] ?? null,
       Z_sump: ag00Result.Z_sump,
+      Z_discharge: ag00Result.Z_discharge,
     })
   }
   // 同步更新方案卡 UI
@@ -466,7 +468,7 @@ async function runCalculation() {
   // ── AG0-0: 参数解析与计算 ────────────────────────────────────
   const ag00Params = {
     // 直接输入模式参数
-    Q_total:    parseFloat(document.getElementById('inp-Q-total').value),
+    Q_total:    parseFloat(document.getElementById('inp-Q-total').value) / 1000,
     N:          parseInt(document.getElementById('inp-N').value, 10),
     N_spare:    parseInt(document.getElementById('inp-N-spare').value, 10) || 0,
     Z:          parseInt(document.getElementById('inp-Z').value, 10) || 8,
@@ -637,6 +639,7 @@ async function runCalculation() {
     P_motor: ag12?.P_motor,
     catalogPump: moduleCache.ag12?.displayMatches?.[0] ?? null,
     Z_sump: ag00.Z_sump,
+    Z_discharge: ag00.Z_discharge,
   })
 
   // Update repair_zone hint from AG2-1 before reading AG4-1 params

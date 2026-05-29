@@ -260,21 +260,36 @@ export function calculateLabelPosition(cells) {
 // ── 管件 SVG helpers（全部返回 SVG 字符串，不含 DOM 操作）───────────────────────
 
 /**
- * 90° 长半径弯头（弧形）
- * @param {number} x - 圆心 x
- * @param {number} y - 圆心 y
- * @param {number} r - 弯头半径
+ * 90° 长半径弯头
+ * @param {number} x      - 圆心 x
+ * @param {number} y      - 圆心 y
+ * @param {number} r      - 弯头中心线半径
  * @param {string} fromDir - 入口方向：'right'|'left'|'top'|'bottom'
- * @param {string} toDir - 出口方向
- * @param {string} stroke - 线色
- * @param {number} sw - 线宽
+ * @param {string} toDir   - 出口方向
+ * @param {string} stroke  - 颜色（填充模式为 fill 色，线模式为 stroke 色）
+ * @param {number} sw      - 线宽（仅 dn_px=0 时使用）
+ * @param {number} dn_px   - 管径像素值；>0 时绘制填充 L 形管件体，默认 0（仅画弧线）
  */
-export function _elbow(x, y, r, fromDir, toDir, stroke = '#5d6d7e', sw = 2) {
-  const startAngle = { right: 0, top: 90, left: 180, bottom: 270 }[fromDir] ?? 0
-  const endAngle   = { right: 0, top: 90, left: 180, bottom: 270 }[toDir]   ?? 90
-  const dx = r * Math.cos(startAngle * Math.PI / 180)
-  const dy = -r * Math.sin(startAngle * Math.PI / 180)
-  return `<path d="M${(x + dx).toFixed(1)},${(y + dy).toFixed(1)} A${r},${r} 0 0 0 ${(x + r * Math.cos(endAngle * Math.PI / 180)).toFixed(1)},${(y - r * Math.sin(endAngle * Math.PI / 180)).toFixed(1)}" fill="none" stroke="${stroke}" stroke-width="${sw}"/>`
+export function _elbow(x, y, r, fromDir, toDir, stroke = '#5d6d7e', sw = 2, dn_px = 0) {
+  const toRad = a => a * Math.PI / 180
+  const sA = { right: 0, top: 90, left: 180, bottom: 270 }[fromDir] ?? 0
+  const eA = { right: 0, top: 90, left: 180, bottom: 270 }[toDir]   ?? 90
+
+  if (dn_px > 0) {
+    // 单线图模式：穿越视图平面（in/out）时画截面小圆；平面内转角走弧线
+    const isPerp = (d) => d === 'in' || d === 'out'
+    if (isPerp(fromDir) || isPerp(toDir)) {
+      // 穿楼板/穿墙：只在中心处画实心截面圆（单线图符号）
+      const r2 = Math.max(3, dn_px * 0.18)
+      return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r2.toFixed(1)}" fill="${stroke}" opacity="0.9"/>`
+    }
+    // 平面内转角：与 dn_px=0 相同，使用弧线
+  }
+
+  // 细弧线（平面内转角 / 示意图 / 剖面图）
+  const dx = r * Math.cos(toRad(sA))
+  const dy = -r * Math.sin(toRad(sA))
+  return `<path d="M${(x + dx).toFixed(1)},${(y + dy).toFixed(1)} A${r},${r} 0 0 0 ${(x + r * Math.cos(toRad(eA))).toFixed(1)},${(y - r * Math.sin(toRad(eA))).toFixed(1)}" fill="none" stroke="${stroke}" stroke-width="${sw}"/>`
 }
 
 /**
@@ -356,14 +371,33 @@ export function _flowmeter(cx, cy, halfLen, dn_px, horiz = true, color = '#1a527
 }
 
 /**
- * T 型节点
- * @param {number} cx - 中心 x
- * @param {number} cy - 中心 y
- * @param {number} r - 节点半径
- * @param {string} color - 颜色
+ * 三通管件几何尺寸（不含 SVG，供调用方计算管道截断点）
+ * @param {number} dnMain_px   - 主管 DN 换算像素
+ * @param {number} dnBranch_px - 支管 DN 换算像素
+ * @returns {{ mhl, mhh, bw, bl }}
+ *   mhl = 主管方向半长, mhh = 主管方向半高,
+ *   bw = 支管半宽, bl = 支管短节长（从主管中心线向下）
  */
-export function _tee(cx, cy, r, color = '#2980b9') {
-  return `<circle cx="${(+cx).toFixed(1)}" cy="${(+cy).toFixed(1)}" r="${r}" fill="${color}" opacity="0.8"/>`
+export function _teeGeom(dnMain_px, dnBranch_px) {
+  return {
+    mhl: Math.max(dnMain_px * 0.7, 5),
+    mhh: Math.max(dnMain_px * 0.35, 3),
+    bw:  Math.max(dnBranch_px * 0.35, 2),
+    bl:  Math.max(dnBranch_px * 0.4, 4),
+  }
+}
+
+/**
+ * T 形三通管件（支管向下），返回 SVG 字符串
+ * @param {number} cx        - 三通中心 x（主管轴线上）
+ * @param {number} cy        - 三通中心 y（主管轴线）
+ * @param {number} dnMain_px - 主管 DN 换算像素（管径宽度）
+ * @param {number} dnBranch_px - 支管 DN 换算像素
+ * @param {string} color
+ */
+export function _tee(cx, cy, dnMain_px, dnBranch_px, color = '#2980b9') {
+  // 单线图三通：交叉点处画一个实心圆点
+  return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="3" fill="${color}" opacity="0.9"/>`
 }
 
 /**

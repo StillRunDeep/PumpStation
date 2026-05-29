@@ -24,8 +24,8 @@
       <!-- 基础参数 -->
       <div class="form-grid">
       <div class="form-group">
-        <label>水泵最高总排水量 Q_total（m³/s）</label>
-        <input type="number" id="inp-Q-total" min="0.1" step="0.1" value="3.0">
+        <label>水泵最高总排水量 Q_total（L/s）</label>
+        <input type="number" id="inp-Q-total" min="1" step="100" value="3000">
         <span class="hint">总排水量（多泵合计），直除N得单泵流量</span>
       </div>
       <div class="form-group">
@@ -37,11 +37,6 @@
         <label>池深 D（m）</label>
         <input type="number" id="inp-D" step="0.1" value="16.0" placeholder="留空则由面积反推">
         <span class="hint">Z_top = Z_bottom + D；留空时，D 由 V_design ÷ A_base 计算</span>
-      </div>
-      <div class="form-group">
-        <label>池底面积 A_base（m²）</label>
-        <input type="number" id="inp-A-base" step="10" placeholder="留空则由深度反推">
-        <span class="hint">调蓄池底部面积；留空时，A 由 V_design ÷ D 计算</span>
       </div>
       <div class="form-group">
         <label>池底标高 Z_bottom（mPD）</label>
@@ -123,6 +118,11 @@
             <label>出水管总长 L（m）</label>
             <input type="number" id="inp-pipe-len" min="1" step="1" value="50">
             <span class="hint">用于估算管路摩擦损失（案例50m）</span>
+          </div>
+          <div class="form-group">
+            <label>池底面积 A_base（m²）</label>
+            <input type="number" id="inp-A-base" step="10" placeholder="留空则由深度反推">
+            <span class="hint">调蓄池底部面积；留空时，A 由 V_design ÷ D 计算</span>
           </div>
         </div>
       </div>
@@ -283,22 +283,15 @@
         <div class="card-body" id="card-rainfall"><p class="msg-pending">尚未计算，请点击「重新计算」或顶部「开始计算全流程」。</p></div>
       </details>
 
-      <!-- AG0-2: 解析结果 -->
+      <!-- AG0-2: 连接验证 + 拓扑编辑 -->
       <details class="agent-card card-topology">
         <summary class="card-header">
           <span>AG0-2</span><span class="agent-label">连接验证</span>
         </summary>
-        <div class="card-body" id="card-topology"><p class="msg-pending">等待暴雨计算完成后显示拓扑验证结果。</p></div>
-      </details>
-
-      <!-- 设备拓扑编辑器（AG0-2 下方） -->
-      <details class="agent-card card-topology-editor" open>
-        <summary class="card-header" style="cursor:pointer">
-          <span>拓扑</span><span class="agent-label">设备连接拓扑配置</span>
-        </summary>
-        <div class="card-body" style="padding:0">
+        <div class="card-topo-editor-body">
           <div id="topology-editor-wrap"></div>
         </div>
+        <div class="card-body" id="card-topology"><p class="msg-pending">等待暴雨计算完成后显示拓扑验证结果。</p></div>
       </details>
 
       <!-- AG1-1 -->

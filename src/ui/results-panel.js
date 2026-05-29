@@ -76,7 +76,7 @@ export function renderRainfallCard({ duty10Year, capacity50, floodCheck200 }) {
   `
 
   return `
-    <details style="margin-bottom:14px"><summary style="cursor:pointer;color:#555;font-size:12px;margin-bottom:6px">计算过程（点击展开）</summary>
+    <details open style="margin-bottom:14px"><summary style="cursor:pointer;color:#555;font-size:12px;margin-bottom:6px">计算过程</summary>
       <table class="step-table" style="font-size:12px;margin-top:0">
         <thead>
           <tr><th style="width:40%">参数</th><th style="text-align:center">T=10年（值班）</th><th style="text-align:center">T=50年（容量校核）</th><th style="text-align:center">T=200年（洪水检验）</th></tr>
@@ -135,7 +135,7 @@ export function renderRainfall(r) {
       <span style="font-weight:700;color:var(--color-${status})">${icon} ${label}</span>
     </div>
     <ul class="msg-list">${msgs}</ul>
-    ${r.valid ? `<details style="margin-bottom:14px"><summary style="cursor:pointer;color:#555;font-size:12px;margin-bottom:6px">计算过程（点击展开）</summary>${stepsTable(calcRows)}</details>` : ''}
+    ${r.valid ? `<details open style="margin-bottom:14px"><summary style="cursor:pointer;color:#555;font-size:12px;margin-bottom:6px">计算过程</summary>${stepsTable(calcRows)}</details>` : ''}
   `
 }
 
@@ -213,7 +213,7 @@ function knownTable(rows) {
 // ── 计算过程（折叠）──────────────────────────────────────────────
 
 function calcDetails(label, rows) {
-  return `<details style="margin-bottom:14px"><summary style="cursor:pointer;color:#555;font-size:12px;margin-bottom:6px">${label}（点击展开）</summary>${stepsTable(rows)}</details>`
+  return `<details open style="margin-bottom:14px"><summary style="cursor:pointer;color:#555;font-size:12px;margin-bottom:6px">${label}</summary>${stepsTable(rows)}</details>`
 }
 
 // ── 状态栏 ───────────────────────────────────────────────────────
@@ -328,7 +328,7 @@ export function renderMaintenanceRoom(r) {
 
   return `
     <div style="margin-bottom:4px;font-size:12px">${dimSource}</div>
-    <details style="margin-bottom:6px"><summary style="cursor:pointer;color:#555;font-size:12px;margin-bottom:4px">计算过程</summary>
+    <details open style="margin-bottom:6px"><summary style="cursor:pointer;color:#555;font-size:12px;margin-bottom:4px">计算过程</summary>
       ${stepsTable(calcRows)}
       ${sumpHtml}
     </details>
